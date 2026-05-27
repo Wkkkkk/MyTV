@@ -67,6 +67,16 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
     Ok(rows > 0)
 }
 
+pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool> {
+    let rows = sqlx::query("UPDATE sources SET is_active = ? WHERE id = ?")
+        .bind(active)
+        .bind(id)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    Ok(rows > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +155,24 @@ mod tests {
 
         let sources = list_for_channel(&pool, ch.id).await.unwrap();
         assert!(sources.is_empty(), "ON DELETE CASCADE should remove sources");
+    }
+
+    #[tokio::test]
+    async fn test_set_active_toggles_source() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+
+        let src = create(&pool, hls(ch.id, "https://primary.example.com/stream.m3u8", 1)).await.unwrap();
+        assert!(src.is_active);
+
+        let updated = set_active(&pool, src.id, false).await.unwrap();
+        assert!(updated);
+
+        let sources = list_active_for_channel(&pool, ch.id).await.unwrap();
+        assert!(sources.is_empty());
+
+        set_active(&pool, src.id, true).await.unwrap();
+        let sources = list_active_for_channel(&pool, ch.id).await.unwrap();
+        assert_eq!(sources.len(), 1);
     }
 }
