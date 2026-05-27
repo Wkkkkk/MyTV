@@ -370,6 +370,12 @@ pub async fn source_create(
     Path(channel_id): Path<i64>,
     Form(form): Form<SourceForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if !["hls", "youtube_live", "iptv"].contains(&form.kind.as_str()) {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    if form.url.trim().is_empty() {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
     let priority: i64 = form.priority.trim().parse().unwrap_or(1);
     source::create(
         &state.pool,
@@ -395,13 +401,13 @@ pub async fn source_delete(
     .bind(source_id)
     .fetch_optional(&state.pool)
     .await
-    .map_err(internal_error)?;
+    .map_err(internal_error)?
+    .ok_or(StatusCode::NOT_FOUND)?;
 
-    let channel_id = src.map(|s| s.channel_id).unwrap_or(0);
     source::delete(&state.pool, source_id)
         .await
         .map_err(internal_error)?;
-    Ok(Redirect::to(&format!("/admin/channels/{channel_id}")))
+    Ok(Redirect::to(&format!("/admin/channels/{}", src.channel_id)))
 }
 
 pub async fn source_toggle(
@@ -429,6 +435,9 @@ pub async fn playlist_item_create(
     Form(form): Form<PlaylistItemForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let duration_secs: i64 = form.duration_secs.trim().parse().unwrap_or(0);
+    if duration_secs <= 0 {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
 
     let existing = playlist_item::list_for_channel(&state.pool, channel_id)
         .await
@@ -460,13 +469,13 @@ pub async fn playlist_item_delete(
     .bind(item_id)
     .fetch_optional(&state.pool)
     .await
-    .map_err(internal_error)?;
+    .map_err(internal_error)?
+    .ok_or(StatusCode::NOT_FOUND)?;
 
-    let channel_id = item.map(|i| i.channel_id).unwrap_or(0);
     playlist_item::delete(&state.pool, item_id)
         .await
         .map_err(internal_error)?;
-    Ok(Redirect::to(&format!("/admin/channels/{channel_id}")))
+    Ok(Redirect::to(&format!("/admin/channels/{}", item.channel_id)))
 }
 
 #[cfg(test)]
