@@ -36,6 +36,17 @@ async fn main() -> Result<()> {
 
     let admin_router: Router<AppState> = Router::new()
         .route("/", get(routes::admin::admin_index))
+        .route(
+            "/channels",
+            get(routes::admin::channel_list).post(routes::admin::channel_create),
+        )
+        .route("/channels/new", get(routes::admin::channel_new_form))
+        .route(
+            "/channels/:id",
+            post(routes::admin::channel_update),
+        )
+        .route("/channels/:id/edit", get(routes::admin::channel_edit_form))
+        .route("/channels/:id/delete", post(routes::admin::channel_delete))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             routes::admin::basic_auth,

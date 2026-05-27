@@ -1,0 +1,46 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<div class="page-header">
+  <h2>Channels</h2>
+  <a class="btn btn-primary" href="/admin/channels/new">+ New Channel</a>
+</div>
+
+{% if channels.is_empty() %}
+<p class="empty-state">No channels yet. <a href="/admin/channels/new">Add the first one.</a></p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Category</th>
+      <th>Type</th>
+      <th>Sort</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for ch in channels %}
+    <tr>
+      <td><a href="/admin/channels/{{ ch.id }}">{{ ch.name }}</a></td>
+      <td>{{ ch.category }}</td>
+      <td>
+        {% if ch.type_str.as_str() == "live" %}
+        <span class="badge badge-live">live</span>
+        {% else %}
+        <span class="badge badge-vod">vod loop</span>
+        {% endif %}
+      </td>
+      <td>{{ ch.sort_order }}</td>
+      <td style="white-space:nowrap">
+        <a class="btn btn-sm" href="/admin/channels/{{ ch.id }}/edit">Edit</a>
+        <form action="/admin/channels/{{ ch.id }}/delete" method="post" style="display:inline-block;margin-left:4px">
+          <button class="btn btn-sm btn-danger" type="submit"
+                  onclick="return confirm('Delete this channel? All its sources and playlist items will also be removed.')">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

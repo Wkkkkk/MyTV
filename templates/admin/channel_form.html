@@ -1,0 +1,43 @@
+{% extends "admin/base.html" %}
+{% block content %}
+{% if is_edit %}
+<h2>Edit Channel</h2>
+<form action="/admin/channels/{{ channel_id }}" method="post">
+{% else %}
+<h2>New Channel</h2>
+<form action="/admin/channels" method="post">
+{% endif %}
+  <div class="form-row">
+    <label for="name">Name</label>
+    <input id="name" type="text" name="name" required value="{{ name }}">
+  </div>
+  <div class="form-row">
+    <label for="category">Category</label>
+    <input id="category" type="text" name="category" required value="{{ category }}"
+           placeholder="e.g. news, sports, movies">
+  </div>
+  <div class="form-row">
+    <label for="channel_type">Type</label>
+    <select id="channel_type" name="channel_type">
+      <option value="live"{% if channel_type.as_str() == "live" %} selected{% endif %}>Live stream</option>
+      <option value="vod_loop"{% if channel_type.as_str() == "vod_loop" %} selected{% endif %}>VOD loop</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="sort_order">Sort Order</label>
+    <input id="sort_order" type="number" name="sort_order" value="{{ sort_order }}" style="width:120px">
+  </div>
+  <div class="form-row">
+    <label for="logo_url">Logo URL <span style="color:#555">(optional)</span></label>
+    <input id="logo_url" type="text" name="logo_url" value="{{ logo_url }}" placeholder="https://...">
+  </div>
+  <div class="form-row">
+    <label for="loop_anchor">Loop Anchor <span style="color:#555">(UTC — required for VOD loop; leave blank to use current time)</span></label>
+    <input id="loop_anchor" type="datetime-local" name="loop_anchor" value="{{ loop_anchor }}" style="width:240px">
+  </div>
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">{% if is_edit %}Save Changes{% else %}Create Channel{% endif %}</button>
+    <a class="btn" href="/admin/channels">Cancel</a>
+  </div>
+</form>
+{% endblock %}
