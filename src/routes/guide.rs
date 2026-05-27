@@ -165,7 +165,7 @@ async fn build_guide_data(
     let channels: Vec<Channel> = if category == "all" {
         all_channels
     } else {
-        channel::list_by_category(pool, category).await?
+        all_channels.into_iter().filter(|c| c.category == category).collect()
     };
 
     let mut rows = Vec::new();
@@ -216,11 +216,14 @@ pub async fn guide_page(
     Query(params): Query<GuideQuery>,
 ) -> Result<Html<String>, StatusCode> {
     let category = params.category.unwrap_or_else(|| "all".to_string());
-    let offset_hours = params.offset.unwrap_or(-2);
+    let offset_hours = params.offset.unwrap_or(-2).clamp(-48, 48);
 
     let data = build_guide_data(&state.pool, &category, offset_hours)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            tracing::error!("guide data error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let html = GuidePageTemplate {
         categories: data.categories,
@@ -247,11 +250,14 @@ pub async fn guide_partial(
     Query(params): Query<GuideQuery>,
 ) -> Result<Html<String>, StatusCode> {
     let category = params.category.unwrap_or_else(|| "all".to_string());
-    let offset_hours = params.offset.unwrap_or(-2);
+    let offset_hours = params.offset.unwrap_or(-2).clamp(-48, 48);
 
     let data = build_guide_data(&state.pool, &category, offset_hours)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            tracing::error!("guide data error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let html = EpgContentTemplate {
         categories: data.categories,
