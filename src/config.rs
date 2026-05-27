@@ -10,8 +10,15 @@ impl Config {
         Ok(Config {
             database_url: std::env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:mytv.db".to_string()),
-            admin_password: std::env::var("ADMIN_PASSWORD")
-                .unwrap_or_else(|_| "admin".to_string()),
+            admin_password: {
+                match std::env::var("ADMIN_PASSWORD") {
+                    Ok(p) => p,
+                    Err(_) => {
+                        eprintln!("WARNING: ADMIN_PASSWORD not set — using insecure default 'admin'");
+                        "admin".to_string()
+                    }
+                }
+            },
             youtube_api_key: std::env::var("YOUTUBE_API_KEY").ok(),
             port: std::env::var("PORT")
                 .unwrap_or_else(|_| "3000".to_string())

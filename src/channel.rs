@@ -58,6 +58,7 @@ pub async fn create(pool: &SqlitePool, input: NewChannel) -> Result<Channel> {
         .ok_or_else(|| anyhow::anyhow!("channel not found after insert"))
 }
 
+#[derive(Debug)]
 pub struct UpdateChannel {
     pub name: String,
     pub category: String,

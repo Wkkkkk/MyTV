@@ -16,7 +16,13 @@ pub fn check_basic_auth(header_value: &str, expected_password: &str) -> bool {
         .and_then(|b64| general_purpose::STANDARD.decode(b64).ok())
         .and_then(|bytes| String::from_utf8(bytes).ok())
         .map(|credentials| {
-            credentials.splitn(2, ':').nth(1).unwrap_or("") == expected_password
+            let actual = credentials.splitn(2, ':').nth(1).unwrap_or("");
+            actual.len() == expected_password.len()
+                && actual
+                    .bytes()
+                    .zip(expected_password.bytes())
+                    .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+                    == 0
         })
         .unwrap_or(false)
 }
@@ -79,5 +85,12 @@ mod tests {
     fn test_check_basic_auth_no_colon_in_credentials() {
         // base64("passwordonly") = "cGFzc3dvcmRvbmx5"
         assert!(!check_basic_auth("Basic cGFzc3dvcmRvbmx5", "passwordonly"));
+    }
+
+    #[test]
+    fn test_check_basic_auth_password_containing_colon() {
+        // base64("user:pass:word") — password is "pass:word"
+        // echo -n "user:pass:word" | base64 => "dXNlcjpwYXNzOndvcmQ="
+        assert!(check_basic_auth("Basic dXNlcjpwYXNzOndvcmQ=", "pass:word"));
     }
 }
