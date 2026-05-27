@@ -46,6 +46,10 @@ pub fn vod_schedule(
         return vec![];
     }
 
+    if items.iter().any(|i| i.duration_secs <= 0) {
+        return vec![];
+    }
+
     let (mut idx, mut offset) =
         match playlist_item::current_position(items, window_start.timestamp(), anchor_secs) {
             Some(pos) => pos,
@@ -175,6 +179,15 @@ mod tests {
         assert_eq!(entries[0].title, "A");
         assert_eq!(entries[0].start_offset_secs, 0);
         assert_eq!(entries[0].end_time, end); // clipped, not 3600s
+    }
+
+    #[test]
+    fn test_vod_schedule_zero_duration_item_returns_empty() {
+        let items = vec![item(1, "A", 0)];
+        let start = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let end = start + Duration::hours(1);
+        let entries = vod_schedule(1, &items, 0, start, end);
+        assert!(entries.is_empty());
     }
 
     #[test]
