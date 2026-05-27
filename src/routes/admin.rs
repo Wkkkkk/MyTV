@@ -163,6 +163,12 @@ pub async fn channel_create(
     State(state): State<AppState>,
     Form(form): Form<ChannelForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if !["live", "vod_loop"].contains(&form.channel_type.as_str()) {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    if form.name.trim().is_empty() || form.category.trim().is_empty() {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
     let sort_order: i64 = form.sort_order.trim().parse().unwrap_or(0);
     let logo_url = if form.logo_url.trim().is_empty() {
         None
@@ -221,6 +227,12 @@ pub async fn channel_update(
     Path(id): Path<i64>,
     Form(form): Form<ChannelForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if !["live", "vod_loop"].contains(&form.channel_type.as_str()) {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    if form.name.trim().is_empty() || form.category.trim().is_empty() {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
     let existing = channel::get(&state.pool, id)
         .await
         .map_err(internal_error)?
@@ -260,9 +272,12 @@ pub async fn channel_delete(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    channel::delete(&state.pool, id)
+    let found = channel::delete(&state.pool, id)
         .await
         .map_err(internal_error)?;
+    if !found {
+        return Err(StatusCode::NOT_FOUND);
+    }
     Ok(Redirect::to("/admin/channels"))
 }
 
