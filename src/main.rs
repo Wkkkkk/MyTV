@@ -1,6 +1,7 @@
 mod channel;
 mod config;
 mod db;
+mod epg;
 mod playlist_item;
 mod resolver;
 mod routes;
