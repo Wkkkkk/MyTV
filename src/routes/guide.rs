@@ -24,7 +24,10 @@ pub async fn guide_page(
 ) -> Result<Html<String>, StatusCode> {
     let html = GuidePageTemplate {}
         .render()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            tracing::error!("template render error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     Ok(Html(html))
 }
 
