@@ -167,7 +167,7 @@ mod tests {
     async fn test_state() -> AppState {
         let pool = db::connect("sqlite::memory:").await.unwrap();
         let config = std::sync::Arc::new(config::Config::from_env().unwrap());
-        AppState { pool, config }
+        AppState { pool, config, http_client: reqwest::Client::new() }
     }
 
     async fn make_live_channel(state: &AppState) -> channel::Channel {

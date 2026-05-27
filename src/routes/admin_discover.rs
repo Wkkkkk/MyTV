@@ -275,13 +275,86 @@ pub async fn discover_manual_resolve(
 
 // ── pure functions (stubs — implemented in Task 2) ────────────────────────
 
-pub fn parse_m3u(_input: &str) -> Vec<M3uChannel> { vec![] }
+pub fn parse_m3u(input: &str) -> Vec<M3uChannel> {
+    fn extract_attr(line: &str, attr: &str) -> String {
+        let key = format!("{}=\"", attr);
+        line.find(&key)
+            .map(|start| {
+                let after = &line[start + key.len()..];
+                after.find('"').map(|end| after[..end].to_string()).unwrap_or_default()
+            })
+            .unwrap_or_default()
+    }
 
-pub fn filter_m3u<'a>(_channels: &'a [M3uChannel], _country: &str, _group: &str) -> Vec<&'a M3uChannel> { vec![] }
+    let mut channels = Vec::new();
+    let mut lines = input.lines().peekable();
+    while let Some(line) = lines.next() {
+        if !line.starts_with("#EXTINF:") {
+            continue;
+        }
+        let name = line.rsplit(',').next().unwrap_or("").trim().to_string();
+        let group = extract_attr(line, "group-title");
+        let country = extract_attr(line, "country");
+        let url = loop {
+            match lines.peek() {
+                Some(next) if next.trim().is_empty() => { lines.next(); }
+                Some(next) if next.starts_with('#') => break String::new(),
+                Some(next) => { let u = next.trim().to_string(); lines.next(); break u; }
+                None => break String::new(),
+            }
+        };
+        if !url.is_empty() {
+            channels.push(M3uChannel { name, group, country, url });
+        }
+    }
+    channels
+}
 
-pub fn detect_source_kind(_url: &str) -> &'static str { "iptv" }
+pub fn filter_m3u<'a>(
+    channels: &'a [M3uChannel],
+    country: &str,
+    group: &str,
+) -> Vec<&'a M3uChannel> {
+    let country_lower = country.trim().to_lowercase();
+    let group_lower = group.trim().to_lowercase();
+    channels
+        .iter()
+        .filter(|ch| {
+            let country_ok = country_lower.is_empty()
+                || ch.country.to_lowercase().contains(&country_lower);
+            let group_ok = group_lower.is_empty()
+                || ch.group.to_lowercase().contains(&group_lower);
+            country_ok && group_ok
+        })
+        .take(50)
+        .collect()
+}
 
-pub fn parse_iso8601_duration(_s: &str) -> i64 { 0 }
+pub fn detect_source_kind(url: &str) -> &'static str {
+    if url.contains("youtube.com") || url.contains("youtu.be") {
+        "youtube_live"
+    } else if url.contains(".m3u8") {
+        "hls"
+    } else {
+        "iptv"
+    }
+}
+
+pub fn parse_iso8601_duration(s: &str) -> i64 {
+    let s = s.strip_prefix("PT").unwrap_or(s);
+    let mut total = 0i64;
+    let mut current = String::new();
+    for ch in s.chars() {
+        match ch {
+            '0'..='9' => current.push(ch),
+            'H' => { total += current.parse::<i64>().unwrap_or(0) * 3600; current.clear(); }
+            'M' => { total += current.parse::<i64>().unwrap_or(0) * 60; current.clear(); }
+            'S' => { total += current.parse::<i64>().unwrap_or(0); current.clear(); }
+            _ => current.clear(),
+        }
+    }
+    total
+}
 
 // ── core add logic (stub — implemented in Task 3) ─────────────────────────
 
@@ -318,4 +391,103 @@ async fn fetch_m3u(_client: &reqwest::Client) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{channel, db, playlist_item, source};
+    use axum::http::StatusCode;
+    use chrono::Utc;
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        db::connect("sqlite::memory:").await.unwrap()
+    }
+
+    // ── pure function tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_m3u_single_channel() {
+        let input = "#EXTM3U\n#EXTINF:-1 group-title=\"News\" country=\"US\",CNN\nhttps://example.com/cnn.m3u8\n";
+        let result = parse_m3u(input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "CNN");
+        assert_eq!(result[0].group, "News");
+        assert_eq!(result[0].country, "US");
+        assert_eq!(result[0].url, "https://example.com/cnn.m3u8");
+    }
+
+    #[test]
+    fn test_parse_m3u_missing_optional_attrs() {
+        let input = "#EXTINF:-1,MyChannel\nhttps://example.com/stream.m3u8\n";
+        let result = parse_m3u(input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "MyChannel");
+        assert_eq!(result[0].group, "");
+        assert_eq!(result[0].country, "");
+    }
+
+    #[test]
+    fn test_parse_m3u_skips_entry_without_url() {
+        // First EXTINF immediately followed by another EXTINF (no URL line)
+        let input = "#EXTINF:-1,CNN\n#EXTINF:-1,ESPN\nhttps://espn.com/stream.m3u8\n";
+        let result = parse_m3u(input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "ESPN");
+    }
+
+    #[test]
+    fn test_parse_m3u_multiple_channels() {
+        let input = concat!(
+            "#EXTM3U\n",
+            "#EXTINF:-1 group-title=\"News\" country=\"US\",CNN\nhttps://cnn.com/stream.m3u8\n",
+            "#EXTINF:-1 group-title=\"Sports\" country=\"US\",ESPN\nhttps://espn.com/stream.m3u8\n",
+        );
+        let result = parse_m3u(input);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_filter_m3u_by_country_case_insensitive() {
+        let channels = vec![
+            M3uChannel { name: "CNN".into(), group: "News".into(), country: "US".into(), url: "https://a.com".into() },
+            M3uChannel { name: "BBC".into(), group: "News".into(), country: "UK".into(), url: "https://b.com".into() },
+        ];
+        let result = filter_m3u(&channels, "us", "");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "CNN");
+    }
+
+    #[test]
+    fn test_filter_m3u_by_group_case_insensitive() {
+        let channels = vec![
+            M3uChannel { name: "CNN".into(), group: "News".into(), country: "US".into(), url: "https://a.com".into() },
+            M3uChannel { name: "ESPN".into(), group: "Sports".into(), country: "US".into(), url: "https://b.com".into() },
+        ];
+        let result = filter_m3u(&channels, "", "sports");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "ESPN");
+    }
+
+    #[test]
+    fn test_filter_m3u_no_filter_capped_at_50() {
+        let channels: Vec<M3uChannel> = (0..60).map(|i| M3uChannel {
+            name: format!("Ch{}", i), group: "Test".into(),
+            country: "US".into(), url: format!("https://example.com/{}", i),
+        }).collect();
+        let result = filter_m3u(&channels, "", "");
+        assert_eq!(result.len(), 50);
+    }
+
+    #[test]
+    fn test_detect_source_kind() {
+        assert_eq!(detect_source_kind("https://www.youtube.com/watch?v=abc"), "youtube_live");
+        assert_eq!(detect_source_kind("https://youtu.be/abc"), "youtube_live");
+        assert_eq!(detect_source_kind("https://example.com/stream.m3u8"), "hls");
+        assert_eq!(detect_source_kind("https://iptv.example.com/channel/1"), "iptv");
+    }
+
+    #[test]
+    fn test_parse_iso8601_duration() {
+        assert_eq!(parse_iso8601_duration("PT4M13S"), 253);
+        assert_eq!(parse_iso8601_duration("PT1H30M"), 5400);
+        assert_eq!(parse_iso8601_duration("PT2H"), 7200);
+        assert_eq!(parse_iso8601_duration("PT0S"), 0);
+        assert_eq!(parse_iso8601_duration("PT45S"), 45);
+    }
 }
