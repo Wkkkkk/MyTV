@@ -67,8 +67,9 @@ async fn tune_live(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     for src in &sources {
-        if let Ok(url) = resolver::resolve_url(&src.url).await {
-            return Ok(Json(TuneResponse { url, start_offset_secs: 0 }));
+        match resolver::resolve_url(&src.url).await {
+            Ok(url) => return Ok(Json(TuneResponse { url, start_offset_secs: 0 })),
+            Err(e) => tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source"),
         }
     }
     Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -81,7 +82,7 @@ async fn tune_vod_at(
 ) -> Result<Json<TuneResponse>, StatusCode> {
     let anchor_secs = ch
         .loop_anchor
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
         .timestamp();
 
     let items = playlist_item::list_for_channel(&state.pool, ch.id)
@@ -99,7 +100,10 @@ async fn tune_vod_at(
     let item = &items[idx];
     match resolver::resolve_url(&item.url).await {
         Ok(url) => Ok(Json(TuneResponse { url, start_offset_secs: offset })),
-        Err(_) => Err(StatusCode::SERVICE_UNAVAILABLE),
+        Err(e) => {
+            tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
     }
 }
 
@@ -113,8 +117,9 @@ async fn next_live(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     for src in sources.iter().filter(|s| Some(s.url.as_str()) != failed_url) {
-        if let Ok(url) = resolver::resolve_url(&src.url).await {
-            return Ok(Json(TuneResponse { url, start_offset_secs: 0 }));
+        match resolver::resolve_url(&src.url).await {
+            Ok(url) => return Ok(Json(TuneResponse { url, start_offset_secs: 0 })),
+            Err(e) => tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source"),
         }
     }
     Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -127,7 +132,7 @@ async fn next_vod_at(
 ) -> Result<Json<TuneResponse>, StatusCode> {
     let anchor_secs = ch
         .loop_anchor
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
         .timestamp();
 
     let items = playlist_item::list_for_channel(&state.pool, ch.id)
@@ -146,7 +151,10 @@ async fn next_vod_at(
 
     match resolver::resolve_url(&item.url).await {
         Ok(url) => Ok(Json(TuneResponse { url, start_offset_secs: 0 })),
-        Err(_) => Err(StatusCode::SERVICE_UNAVAILABLE),
+        Err(e) => {
+            tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
     }
 }
 
@@ -451,5 +459,49 @@ mod tests {
         let result = next_vod_at(&state, &ch, 500).await.unwrap();
         assert_eq!(result.url, "https://example.com/a.m3u8");
         assert_eq!(result.start_offset_secs, 0);
+    }
+
+    #[tokio::test]
+    async fn test_tune_vod_returns_500_when_no_loop_anchor() {
+        let state = test_state().await;
+        let ch = make_vod_channel(&state, 0).await;
+        sqlx::query("UPDATE channels SET loop_anchor = NULL WHERE id = ?")
+            .bind(ch.id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        // Re-fetch the channel
+        let ch = crate::channel::get(&state.pool, ch.id).await.unwrap().unwrap();
+
+        let err = tune_vod_at(&state, &ch, 1000).await.unwrap_err();
+        assert_eq!(err, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_next_live_returns_503_when_only_source_is_failed() {
+        let state = test_state().await;
+        let ch = make_live_channel(&state).await;
+
+        source::create(
+            &state.pool,
+            source::NewSource {
+                channel_id: ch.id,
+                kind: "hls".into(),
+                url: "https://primary.example.com/stream.m3u8".into(),
+                priority: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        // The only source is the failed one — should return 503
+        let err = next_live(
+            &state,
+            &ch,
+            Some("https://primary.example.com/stream.m3u8"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, StatusCode::SERVICE_UNAVAILABLE);
     }
 }

@@ -76,6 +76,9 @@ pub fn current_position(
         return None;
     }
     let total = total_duration_secs(items);
+    if total <= 0 {
+        return None;
+    }
     let elapsed = (now_secs - anchor_secs).rem_euclid(total);
     let mut acc = 0i64;
     for (i, item) in items.iter().enumerate() {
