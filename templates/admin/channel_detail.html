@@ -1,0 +1,131 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h2>{{ channel_name }}</h2>
+    <span style="font-size:0.8rem;color:#666">
+      {% if channel_type.as_str() == "live" %}
+      <span class="badge badge-live">live</span>
+      {% else %}
+      <span class="badge badge-vod">vod loop</span>
+      {% endif %}
+      &nbsp;id: {{ channel_id }}
+    </span>
+  </div>
+  <div style="display:flex;gap:8px">
+    <a class="btn btn-sm" href="/admin/channels/{{ channel_id }}/edit">Edit Channel</a>
+    <a class="btn btn-sm" href="/admin/channels">← All Channels</a>
+  </div>
+</div>
+
+<!-- Sources -->
+<div class="section">
+  <h3>Sources</h3>
+  {% if sources.is_empty() %}
+  <p class="empty-state">No sources. Add one below.</p>
+  {% else %}
+  <table style="margin-bottom:16px">
+    <thead>
+      <tr><th>Kind</th><th>URL</th><th>Priority</th><th>Active</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for src in sources %}
+      <tr>
+        <td>{{ src.kind }}</td>
+        <td style="word-break:break-all;max-width:400px;font-size:0.78rem">{{ src.url }}</td>
+        <td>{{ src.priority }}</td>
+        <td>
+          {% if src.is_active %}
+          <span class="badge badge-on">on</span>
+          {% else %}
+          <span class="badge badge-off">off</span>
+          {% endif %}
+        </td>
+        <td style="white-space:nowrap">
+          <form action="/admin/sources/{{ src.id }}/toggle" method="post" style="display:inline-block">
+            <button class="btn btn-sm" type="submit">
+              {% if src.is_active %}Disable{% else %}Enable{% endif %}
+            </button>
+          </form>
+          <form action="/admin/sources/{{ src.id }}/delete" method="post" style="display:inline-block;margin-left:4px">
+            <button class="btn btn-sm btn-danger" type="submit"
+                    onclick="return confirm('Remove this source?')">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <form action="/admin/channels/{{ channel_id }}/sources" method="post"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <div class="form-row" style="margin:0;min-width:110px">
+      <label>Kind</label>
+      <select name="kind">
+        <option value="hls">hls</option>
+        <option value="youtube_live">youtube_live</option>
+        <option value="iptv">iptv</option>
+      </select>
+    </div>
+    <div class="form-row" style="margin:0;flex:1;min-width:240px">
+      <label>URL</label>
+      <input type="text" name="url" required placeholder="https://...">
+    </div>
+    <div class="form-row" style="margin:0;width:90px">
+      <label>Priority</label>
+      <input type="number" name="priority" value="1" min="1">
+    </div>
+    <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Add Source</button>
+  </form>
+</div>
+
+<!-- Playlist items (vod_loop only) -->
+{% if channel_type.as_str() == "vod_loop" %}
+<div class="section">
+  <h3>Playlist</h3>
+  {% if playlist_items.is_empty() %}
+  <p class="empty-state">No playlist items. Add one below.</p>
+  {% else %}
+  <table style="margin-bottom:16px">
+    <thead>
+      <tr><th>#</th><th>Title</th><th>URL</th><th>Duration</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for item in playlist_items %}
+      <tr>
+        <td style="color:#555">{{ item.sort_order }}</td>
+        <td>{{ item.title }}</td>
+        <td style="word-break:break-all;max-width:360px;font-size:0.78rem">{{ item.url }}</td>
+        <td style="white-space:nowrap">{{ item.duration_secs }}s</td>
+        <td>
+          <form action="/admin/playlist/{{ item.id }}/delete" method="post">
+            <button class="btn btn-sm btn-danger" type="submit"
+                    onclick="return confirm('Remove this item?')">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <form action="/admin/channels/{{ channel_id }}/playlist" method="post"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <div class="form-row" style="margin:0;min-width:160px">
+      <label>Title</label>
+      <input type="text" name="title" required placeholder="Episode title">
+    </div>
+    <div class="form-row" style="margin:0;flex:1;min-width:240px">
+      <label>URL</label>
+      <input type="text" name="url" required placeholder="https://...">
+    </div>
+    <div class="form-row" style="margin:0;width:110px">
+      <label>Duration (secs)</label>
+      <input type="number" name="duration_secs" required min="1" placeholder="3600">
+    </div>
+    <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Add Item</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

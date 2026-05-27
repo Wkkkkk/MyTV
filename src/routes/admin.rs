@@ -9,7 +9,7 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 
-use crate::{channel, AppState};
+use crate::{channel, playlist_item, source, AppState};
 
 // ── auth ───────────────────────────────────────────────────────────────────
 
@@ -64,6 +64,22 @@ pub struct AdminChannelRow {
     pub sort_order: i64,
 }
 
+pub struct AdminSourceRow {
+    pub id: i64,
+    pub kind: String,
+    pub url: String,
+    pub priority: i64,
+    pub is_active: bool,
+}
+
+pub struct AdminPlaylistItemRow {
+    pub id: i64,
+    pub title: String,
+    pub url: String,
+    pub duration_secs: i64,
+    pub sort_order: i64,
+}
+
 // ── template types ─────────────────────────────────────────────────────────
 
 #[derive(Template)]
@@ -85,6 +101,16 @@ struct ChannelFormTemplate {
     loop_anchor: String,
 }
 
+#[derive(Template)]
+#[template(path = "admin/channel_detail.html")]
+struct ChannelDetailTemplate {
+    channel_id: i64,
+    channel_name: String,
+    channel_type: String,
+    sources: Vec<AdminSourceRow>,
+    playlist_items: Vec<AdminPlaylistItemRow>,
+}
+
 // ── form input types ───────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -95,6 +121,20 @@ pub struct ChannelForm {
     pub sort_order: String,
     pub logo_url: String,
     pub loop_anchor: String,
+}
+
+#[derive(Deserialize)]
+pub struct SourceForm {
+    pub kind: String,
+    pub url: String,
+    pub priority: String,
+}
+
+#[derive(Deserialize)]
+pub struct PlaylistItemForm {
+    pub title: String,
+    pub url: String,
+    pub duration_secs: String,
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -279,6 +319,154 @@ pub async fn channel_delete(
         return Err(StatusCode::NOT_FOUND);
     }
     Ok(Redirect::to("/admin/channels"))
+}
+
+pub async fn channel_detail(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Html<String>, StatusCode> {
+    let ch = channel::get(&state.pool, id)
+        .await
+        .map_err(internal_error)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let srcs = source::list_for_channel(&state.pool, id)
+        .await
+        .map_err(internal_error)?;
+
+    let items = playlist_item::list_for_channel(&state.pool, id)
+        .await
+        .map_err(internal_error)?;
+
+    render(ChannelDetailTemplate {
+        channel_id: ch.id,
+        channel_name: ch.name,
+        channel_type: ch.r#type,
+        sources: srcs
+            .into_iter()
+            .map(|s| AdminSourceRow {
+                id: s.id,
+                kind: s.kind,
+                url: s.url,
+                priority: s.priority,
+                is_active: s.is_active,
+            })
+            .collect(),
+        playlist_items: items
+            .into_iter()
+            .map(|i| AdminPlaylistItemRow {
+                id: i.id,
+                title: i.title,
+                url: i.url,
+                duration_secs: i.duration_secs,
+                sort_order: i.sort_order,
+            })
+            .collect(),
+    })
+}
+
+pub async fn source_create(
+    State(state): State<AppState>,
+    Path(channel_id): Path<i64>,
+    Form(form): Form<SourceForm>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let priority: i64 = form.priority.trim().parse().unwrap_or(1);
+    source::create(
+        &state.pool,
+        source::NewSource {
+            channel_id,
+            kind: form.kind.clone(),
+            url: form.url.trim().to_string(),
+            priority,
+        },
+    )
+    .await
+    .map_err(internal_error)?;
+    Ok(Redirect::to(&format!("/admin/channels/{channel_id}")))
+}
+
+pub async fn source_delete(
+    State(state): State<AppState>,
+    Path(source_id): Path<i64>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let src = sqlx::query_as::<_, source::Source>(
+        "SELECT * FROM sources WHERE id = ?",
+    )
+    .bind(source_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let channel_id = src.map(|s| s.channel_id).unwrap_or(0);
+    source::delete(&state.pool, source_id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Redirect::to(&format!("/admin/channels/{channel_id}")))
+}
+
+pub async fn source_toggle(
+    State(state): State<AppState>,
+    Path(source_id): Path<i64>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let src = sqlx::query_as::<_, source::Source>(
+        "SELECT * FROM sources WHERE id = ?",
+    )
+    .bind(source_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    source::set_active(&state.pool, source_id, !src.is_active)
+        .await
+        .map_err(internal_error)?;
+    Ok(Redirect::to(&format!("/admin/channels/{}", src.channel_id)))
+}
+
+pub async fn playlist_item_create(
+    State(state): State<AppState>,
+    Path(channel_id): Path<i64>,
+    Form(form): Form<PlaylistItemForm>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let duration_secs: i64 = form.duration_secs.trim().parse().unwrap_or(0);
+
+    let existing = playlist_item::list_for_channel(&state.pool, channel_id)
+        .await
+        .map_err(internal_error)?;
+    let sort_order = existing.len() as i64;
+
+    playlist_item::create(
+        &state.pool,
+        playlist_item::NewPlaylistItem {
+            channel_id,
+            title: form.title.trim().to_string(),
+            url: form.url.trim().to_string(),
+            duration_secs,
+            sort_order,
+        },
+    )
+    .await
+    .map_err(internal_error)?;
+    Ok(Redirect::to(&format!("/admin/channels/{channel_id}")))
+}
+
+pub async fn playlist_item_delete(
+    State(state): State<AppState>,
+    Path(item_id): Path<i64>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let item = sqlx::query_as::<_, playlist_item::PlaylistItem>(
+        "SELECT * FROM playlist_items WHERE id = ?",
+    )
+    .bind(item_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let channel_id = item.map(|i| i.channel_id).unwrap_or(0);
+    playlist_item::delete(&state.pool, item_id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Redirect::to(&format!("/admin/channels/{channel_id}")))
 }
 
 #[cfg(test)]

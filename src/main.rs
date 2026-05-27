@@ -43,10 +43,15 @@ async fn main() -> Result<()> {
         .route("/channels/new", get(routes::admin::channel_new_form))
         .route(
             "/channels/:id",
-            post(routes::admin::channel_update),
+            get(routes::admin::channel_detail).post(routes::admin::channel_update),
         )
         .route("/channels/:id/edit", get(routes::admin::channel_edit_form))
         .route("/channels/:id/delete", post(routes::admin::channel_delete))
+        .route("/channels/:id/sources", post(routes::admin::source_create))
+        .route("/sources/:id/delete", post(routes::admin::source_delete))
+        .route("/sources/:id/toggle", post(routes::admin::source_toggle))
+        .route("/channels/:id/playlist", post(routes::admin::playlist_item_create))
+        .route("/playlist/:id/delete", post(routes::admin::playlist_item_delete))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             routes::admin::basic_auth,
