@@ -1,1 +1,59 @@
-<p>epg_content placeholder</p>
+<div class="epg-nav">
+  <div class="tabs">
+    <a class="tab{% if active_category.as_str() == "all" %} active{% endif %}"
+       hx-get="/guide/partial?category=all&amp;offset={{ offset_hours }}"
+       hx-target="#epg-content"
+       hx-swap="innerHTML">All</a>
+    {% for cat in categories %}
+    <a class="tab{% if active_category.as_str() == cat.as_str() %} active{% endif %}"
+       hx-get="/guide/partial?category={{ cat }}&amp;offset={{ offset_hours }}"
+       hx-target="#epg-content"
+       hx-swap="innerHTML">{{ cat }}</a>
+    {% endfor %}
+  </div>
+  <div class="time-nav">
+    <a class="nav-btn"
+       hx-get="/guide/partial?category={{ active_category }}&amp;offset={{ offset_prev }}"
+       hx-target="#epg-content"
+       hx-swap="innerHTML">&#8592; Earlier</a>
+    <span class="time-range">{{ window_label }}</span>
+    <a class="nav-btn"
+       hx-get="/guide/partial?category={{ active_category }}&amp;offset={{ offset_next }}"
+       hx-target="#epg-content"
+       hx-swap="innerHTML">Later &#8594;</a>
+  </div>
+</div>
+
+<div class="epg-wrapper">
+  <div class="epg-grid">
+    <div class="epg-row time-header">
+      <div class="channel-col"></div>
+      <div class="programs-col">
+        {% for label in labels %}
+        <span class="time-label" style="left: {{ label.left_pct }}%">{{ label.label }}</span>
+        {% endfor %}
+        {% if now_pct.is_some() %}
+        <div class="now-line" style="left: {{ now_pct.unwrap() }}%"></div>
+        {% endif %}
+      </div>
+    </div>
+    {% for row in rows %}
+    <div class="epg-row">
+      <div class="channel-col">{{ row.name }}</div>
+      <div class="programs-col">
+        {% if now_pct.is_some() %}
+        <div class="now-line" style="left: {{ now_pct.unwrap() }}%"></div>
+        {% endif %}
+        {% for prog in row.programs %}
+        <div class="program{% if prog.is_live %} live{% endif %}"
+             style="left: {{ prog.left_pct }}%; width: {{ prog.width_pct }}%"
+             onclick="tune({{ prog.channel_id }})">
+          {% if prog.is_live %}<span class="live-badge">LIVE</span>{% endif %}
+          <span class="program-title">{{ prog.title }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>

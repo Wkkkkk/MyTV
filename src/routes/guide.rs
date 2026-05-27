@@ -6,6 +6,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use sqlx::SqlitePool;
 
 use crate::{
     channel::{self, Channel, ChannelType},
@@ -33,15 +34,35 @@ pub struct ChannelRow {
     pub programs: Vec<ProgramSlot>,
 }
 
-// ── template structs (fields added in Task 3) ──────────────────────────────
+// ── template structs ───────────────────────────────────────────────────────
 
 #[derive(Template)]
 #[template(path = "guide.html")]
-struct GuidePageTemplate {}
+struct GuidePageTemplate {
+    categories: Vec<String>,
+    active_category: String,
+    offset_hours: i64,
+    offset_prev: i64,
+    offset_next: i64,
+    window_label: String,
+    labels: Vec<TimeLabel>,
+    now_pct: Option<f64>,
+    rows: Vec<ChannelRow>,
+}
 
 #[derive(Template)]
 #[template(path = "partials/epg_content.html")]
-struct EpgContentTemplate {}
+struct EpgContentTemplate {
+    categories: Vec<String>,
+    active_category: String,
+    offset_hours: i64,
+    offset_prev: i64,
+    offset_next: i64,
+    window_label: String,
+    labels: Vec<TimeLabel>,
+    now_pct: Option<f64>,
+    rows: Vec<ChannelRow>,
+}
 
 // ── query params ───────────────────────────────────────────────────────────
 
@@ -51,11 +72,8 @@ pub struct GuideQuery {
     pub offset: Option<i64>,
 }
 
-// ── pure helpers ───────────────────────────────────────────────────────────
+// ── pure helpers (unchanged from Task 2) ──────────────────────────────────
 
-/// Returns (window_start, window_end) for the EPG grid.
-/// offset_hours: hours from now to window start (default -2 centers "now" in a 4-hour window).
-/// Window is always 4 hours wide.
 pub fn compute_window(now_secs: i64, offset_hours: i64) -> (DateTime<Utc>, DateTime<Utc>) {
     let start_secs = now_secs + offset_hours * 3600;
     let end_secs = start_secs + 4 * 3600;
@@ -64,8 +82,6 @@ pub fn compute_window(now_secs: i64, offset_hours: i64) -> (DateTime<Utc>, DateT
     (window_start, window_end)
 }
 
-/// Converts a ProgramEntry to a ProgramSlot with percentage positioning within the window.
-/// Returns None if the entry is completely outside [window_start, window_end).
 pub fn entry_to_slot(
     entry: &epg::ProgramEntry,
     window_start: DateTime<Utc>,
@@ -88,7 +104,6 @@ pub fn entry_to_slot(
     })
 }
 
-/// Returns the "now" line position as a percentage of the window, or None if outside.
 pub fn now_line_pct(
     now: DateTime<Utc>,
     window_start: DateTime<Utc>,
@@ -102,7 +117,6 @@ pub fn now_line_pct(
     Some((elapsed / window_secs * 100.0).clamp(0.0, 100.0))
 }
 
-/// Returns hourly time labels for the visible window, each with a left percentage.
 pub fn time_labels(window_start: DateTime<Utc>, window_end: DateTime<Utc>) -> Vec<TimeLabel> {
     let window_secs = (window_end - window_start).num_seconds() as f64;
     let start_ts = window_start.timestamp();
@@ -123,35 +137,143 @@ pub fn time_labels(window_start: DateTime<Utc>, window_end: DateTime<Utc>) -> Ve
     labels
 }
 
-// ── stub handlers (replaced in Task 3) ────────────────────────────────────
+// ── data builder ───────────────────────────────────────────────────────────
+
+struct GuideData {
+    categories: Vec<String>,
+    active_category: String,
+    offset_hours: i64,
+    offset_prev: i64,
+    offset_next: i64,
+    window_label: String,
+    labels: Vec<TimeLabel>,
+    now_pct: Option<f64>,
+    rows: Vec<ChannelRow>,
+}
+
+async fn build_guide_data(
+    pool: &SqlitePool,
+    category: &str,
+    offset_hours: i64,
+) -> anyhow::Result<GuideData> {
+    let now = Utc::now();
+    let (window_start, window_end) = compute_window(now.timestamp(), offset_hours);
+
+    let all_channels = channel::list(pool).await?;
+    let categories = channel::distinct_categories(&all_channels);
+
+    let channels: Vec<Channel> = if category == "all" {
+        all_channels
+    } else {
+        channel::list_by_category(pool, category).await?
+    };
+
+    let mut rows = Vec::new();
+    for ch in &channels {
+        let entries = match ch.channel_type() {
+            ChannelType::Live => vec![epg::live_entry(ch.id, &ch.name, window_start, window_end)],
+            ChannelType::VodLoop => {
+                if let Some(anchor) = ch.loop_anchor {
+                    let items = playlist_item::list_for_channel(pool, ch.id).await?;
+                    epg::vod_schedule(ch.id, &items, anchor.timestamp(), window_start, window_end)
+                } else {
+                    vec![]
+                }
+            }
+        };
+        let programs: Vec<ProgramSlot> = entries
+            .iter()
+            .filter_map(|e| entry_to_slot(e, window_start, window_end))
+            .collect();
+        rows.push(ChannelRow {
+            id: ch.id,
+            name: ch.name.clone(),
+            programs,
+        });
+    }
+
+    Ok(GuideData {
+        categories,
+        active_category: category.to_string(),
+        offset_hours,
+        offset_prev: offset_hours - 2,
+        offset_next: offset_hours + 2,
+        window_label: format!(
+            "{} – {}",
+            window_start.format("%H:%M"),
+            window_end.format("%H:%M")
+        ),
+        labels: time_labels(window_start, window_end),
+        now_pct: now_line_pct(now, window_start, window_end),
+        rows,
+    })
+}
+
+// ── handlers ───────────────────────────────────────────────────────────────
 
 pub async fn guide_page(
-    State(_state): State<AppState>,
-    Query(_params): Query<GuideQuery>,
+    State(state): State<AppState>,
+    Query(params): Query<GuideQuery>,
 ) -> Result<Html<String>, StatusCode> {
-    let html = GuidePageTemplate {}
-        .render()
-        .map_err(|e| {
-            tracing::error!("template render error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let category = params.category.unwrap_or_else(|| "all".to_string());
+    let offset_hours = params.offset.unwrap_or(-2);
+
+    let data = build_guide_data(&state.pool, &category, offset_hours)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let html = GuidePageTemplate {
+        categories: data.categories,
+        active_category: data.active_category,
+        offset_hours: data.offset_hours,
+        offset_prev: data.offset_prev,
+        offset_next: data.offset_next,
+        window_label: data.window_label,
+        labels: data.labels,
+        now_pct: data.now_pct,
+        rows: data.rows,
+    }
+    .render()
+    .map_err(|e| {
+        tracing::error!("template render error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
     Ok(Html(html))
 }
 
 pub async fn guide_partial(
-    State(_state): State<AppState>,
-    Query(_params): Query<GuideQuery>,
+    State(state): State<AppState>,
+    Query(params): Query<GuideQuery>,
 ) -> Result<Html<String>, StatusCode> {
-    let html = EpgContentTemplate {}
-        .render()
-        .map_err(|e| {
-            tracing::error!("template render error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let category = params.category.unwrap_or_else(|| "all".to_string());
+    let offset_hours = params.offset.unwrap_or(-2);
+
+    let data = build_guide_data(&state.pool, &category, offset_hours)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let html = EpgContentTemplate {
+        categories: data.categories,
+        active_category: data.active_category,
+        offset_hours: data.offset_hours,
+        offset_prev: data.offset_prev,
+        offset_next: data.offset_next,
+        window_label: data.window_label,
+        labels: data.labels,
+        now_pct: data.now_pct,
+        rows: data.rows,
+    }
+    .render()
+    .map_err(|e| {
+        tracing::error!("template render error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
     Ok(Html(html))
 }
 
-// ── tests ──────────────────────────────────────────────────────────────────
+// ── tests (all 15 from Task 2 — unchanged) ────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -173,12 +295,9 @@ mod tests {
         }
     }
 
-    // window: ts 0–14400 (4 hours at Unix epoch)
     fn w() -> (DateTime<Utc>, DateTime<Utc>) {
         (dt(0), dt(14400))
     }
-
-    // ── compute_window ─────────────────────────────────────────
 
     #[test]
     fn test_compute_window_default_offset() {
@@ -196,8 +315,6 @@ mod tests {
         assert_eq!(start.timestamp(), now + 4 * 3600);
         assert_eq!(end.timestamp(), now + 8 * 3600);
     }
-
-    // ── entry_to_slot ──────────────────────────────────────────
 
     #[test]
     fn test_entry_to_slot_fully_within_window() {
@@ -247,8 +364,6 @@ mod tests {
         assert!(entry_to_slot(&make_entry(1, 18000, 21600, false), ws, we).is_none());
     }
 
-    // ── now_line_pct ───────────────────────────────────────────
-
     #[test]
     fn test_now_line_pct_at_midpoint() {
         let (ws, we) = w();
@@ -264,33 +379,6 @@ mod tests {
     }
 
     #[test]
-    fn test_now_line_pct_at_window_start() {
-        let (ws, we) = w();
-        // Exactly at window_start → 0%
-        let pct = now_line_pct(dt(0), ws, we).unwrap();
-        assert!((pct - 0.0).abs() < 0.01, "pct={}", pct);
-    }
-
-    #[test]
-    fn test_now_line_pct_at_window_end_returns_none() {
-        let (ws, we) = w();
-        // Exactly at window_end → None (half-open convention)
-        assert!(now_line_pct(dt(14400), ws, we).is_none());
-    }
-
-    #[test]
-    fn test_entry_to_slot_touching_window_start() {
-        let (ws, we) = w();
-        // Entry ends exactly at window_start → excluded (half-open [start, end))
-        assert!(entry_to_slot(&make_entry(1, -3600, 0, false), ws, we).is_none());
-        // Entry starts exactly at window_start → included
-        let slot = entry_to_slot(&make_entry(1, 0, 3600, false), ws, we).unwrap();
-        assert!((slot.left_pct - 0.0).abs() < 0.01);
-    }
-
-    // ── time_labels ────────────────────────────────────────────
-
-    #[test]
     fn test_time_labels_aligned_4h_window() {
         let (ws, we) = w();
         let labels = time_labels(ws, we);
@@ -303,11 +391,30 @@ mod tests {
 
     #[test]
     fn test_time_labels_non_aligned_start() {
-        // window 00:30–04:30 UTC (ts 1800–16200)
         let labels = time_labels(dt(1800), dt(16200));
         assert_eq!(labels.len(), 4, "expected 4 labels, got {}", labels.len());
         assert_eq!(labels[0].label, "01:00");
-        // (3600-1800)/(16200-1800)*100 = 12.5%
         assert!((labels[0].left_pct - 12.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_now_line_pct_at_window_start() {
+        let (ws, we) = w();
+        let pct = now_line_pct(dt(0), ws, we).unwrap();
+        assert!((pct - 0.0).abs() < 0.01, "pct={}", pct);
+    }
+
+    #[test]
+    fn test_now_line_pct_at_window_end_returns_none() {
+        let (ws, we) = w();
+        assert!(now_line_pct(dt(14400), ws, we).is_none());
+    }
+
+    #[test]
+    fn test_entry_to_slot_touching_window_start() {
+        let (ws, we) = w();
+        assert!(entry_to_slot(&make_entry(1, -3600, 0, false), ws, we).is_none());
+        let slot = entry_to_slot(&make_entry(1, 0, 3600, false), ws, we).unwrap();
+        assert!((slot.left_pct - 0.0).abs() < 0.01);
     }
 }

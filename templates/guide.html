@@ -1,4 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
-<p>guide placeholder</p>
+<div id="player-panel">
+  <video id="video" controls></video>
+</div>
+
+<div id="epg-content">
+  {% include "partials/epg_content.html" %}
+</div>
 {% endblock %}
