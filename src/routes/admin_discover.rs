@@ -292,13 +292,16 @@ pub fn parse_m3u(input: &str) -> Vec<M3uChannel> {
         if !line.starts_with("#EXTINF:") {
             continue;
         }
-        let name = line.rsplit(',').next().unwrap_or("").trim().to_string();
+        let name = line.rfind(',')
+            .map(|pos| line[pos + 1..].trim().to_string())
+            .unwrap_or_default();
         let group = extract_attr(line, "group-title");
         let country = extract_attr(line, "country");
         let url = loop {
             match lines.peek() {
                 Some(next) if next.trim().is_empty() => { lines.next(); }
-                Some(next) if next.starts_with('#') => break String::new(),
+                Some(next) if next.starts_with("#EXTINF:") => break String::new(),
+                Some(next) if next.starts_with('#') => { lines.next(); } // skip other directives
                 Some(next) => { let u = next.trim().to_string(); lines.next(); break u; }
                 None => break String::new(),
             }
@@ -489,5 +492,30 @@ mod tests {
         assert_eq!(parse_iso8601_duration("PT2H"), 7200);
         assert_eq!(parse_iso8601_duration("PT0S"), 0);
         assert_eq!(parse_iso8601_duration("PT45S"), 45);
+    }
+
+    #[test]
+    fn test_parse_m3u_skips_extvlcopt_directive() {
+        let input = concat!(
+            "#EXTINF:-1 group-title=\"News\" country=\"US\",CNN\n",
+            "#EXTVLCOPT:network-caching=1000\n",
+            "https://cnn.com/stream.m3u8\n",
+        );
+        let result = parse_m3u(input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "CNN");
+        assert_eq!(result[0].url, "https://cnn.com/stream.m3u8");
+    }
+
+    #[test]
+    fn test_filter_m3u_both_filters_must_match() {
+        let channels = vec![
+            M3uChannel { name: "CNN".into(), group: "News".into(), country: "US".into(), url: "https://a.com".into() },
+            M3uChannel { name: "BBC".into(), group: "News".into(), country: "UK".into(), url: "https://b.com".into() },
+            M3uChannel { name: "ESPN".into(), group: "Sports".into(), country: "US".into(), url: "https://c.com".into() },
+        ];
+        let result = filter_m3u(&channels, "US", "news");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "CNN");
     }
 }
