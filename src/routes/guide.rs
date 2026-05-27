@@ -94,7 +94,7 @@ pub fn now_line_pct(
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
 ) -> Option<f64> {
-    if now < window_start || now > window_end {
+    if now < window_start || now >= window_end {
         return None;
     }
     let window_secs = (window_end - window_start).num_seconds() as f64;
@@ -261,6 +261,31 @@ mod tests {
         let (ws, we) = w();
         assert!(now_line_pct(dt(-1), ws, we).is_none());
         assert!(now_line_pct(dt(14401), ws, we).is_none());
+    }
+
+    #[test]
+    fn test_now_line_pct_at_window_start() {
+        let (ws, we) = w();
+        // Exactly at window_start → 0%
+        let pct = now_line_pct(dt(0), ws, we).unwrap();
+        assert!((pct - 0.0).abs() < 0.01, "pct={}", pct);
+    }
+
+    #[test]
+    fn test_now_line_pct_at_window_end_returns_none() {
+        let (ws, we) = w();
+        // Exactly at window_end → None (half-open convention)
+        assert!(now_line_pct(dt(14400), ws, we).is_none());
+    }
+
+    #[test]
+    fn test_entry_to_slot_touching_window_start() {
+        let (ws, we) = w();
+        // Entry ends exactly at window_start → excluded (half-open [start, end))
+        assert!(entry_to_slot(&make_entry(1, -3600, 0, false), ws, we).is_none());
+        // Entry starts exactly at window_start → included
+        let slot = entry_to_slot(&make_entry(1, 0, 3600, false), ws, we).unwrap();
+        assert!((slot.left_pct - 0.0).abs() < 0.01);
     }
 
     // ── time_labels ────────────────────────────────────────────
