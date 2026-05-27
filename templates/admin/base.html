@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MyTV Admin</title>
+  <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,sans-serif;min-height:100vh}
@@ -52,6 +53,10 @@
     .section{margin-top:32px;padding-top:24px;border-top:1px solid #1c1c1c}
     .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
     .empty-state{color:#555;font-size:0.85rem;padding:12px 0}
+    .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+    .tab{padding:4px 14px;border-radius:3px;cursor:pointer;border:1px solid #333;
+         background:#1a1a1a;color:#999;font-size:0.82rem}
+    .tab.active,.tab:hover{background:#e94560;color:#fff;border-color:#e94560}
   </style>
 </head>
 <body>
@@ -60,6 +65,7 @@
     <nav>
       <a href="/guide">← Guide</a>
       <a href="/admin/channels">Channels</a>
+      <a href="/admin/discover">Discover</a>
     </nav>
   </header>
   <main>
