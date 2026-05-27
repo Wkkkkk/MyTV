@@ -36,6 +36,8 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/health", get(routes::health::health_check))
+        .route("/channel/:id/tune", get(routes::player::tune))
+        .route("/channel/:id/next", get(routes::player::next))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", config.port);
