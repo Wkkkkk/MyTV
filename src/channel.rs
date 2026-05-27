@@ -58,6 +58,36 @@ pub async fn create(pool: &SqlitePool, input: NewChannel) -> Result<Channel> {
         .ok_or_else(|| anyhow::anyhow!("channel not found after insert"))
 }
 
+pub struct UpdateChannel {
+    pub name: String,
+    pub category: String,
+    pub logo_url: Option<String>,
+    pub channel_type: String,
+    pub sort_order: i64,
+    pub loop_anchor: Option<DateTime<Utc>>,
+}
+
+pub async fn update(pool: &SqlitePool, id: i64, input: UpdateChannel) -> Result<Option<Channel>> {
+    let rows = sqlx::query(
+        "UPDATE channels SET name = ?, category = ?, logo_url = ?, type = ?, sort_order = ?, loop_anchor = ? WHERE id = ?",
+    )
+    .bind(&input.name)
+    .bind(&input.category)
+    .bind(&input.logo_url)
+    .bind(&input.channel_type)
+    .bind(input.sort_order)
+    .bind(input.loop_anchor)
+    .bind(id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if rows == 0 {
+        return Ok(None);
+    }
+    get(pool, id).await
+}
+
 pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Channel>> {
     sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = ?")
         .bind(id)
@@ -182,5 +212,51 @@ mod tests {
         let all = list(&pool).await.unwrap();
         let cats = distinct_categories(&all);
         assert_eq!(cats, vec!["news", "sports"]);
+    }
+
+    #[tokio::test]
+    async fn test_update_channel_name_and_category() {
+        let pool = test_pool().await;
+        let ch = create(&pool, live("CNN", "news")).await.unwrap();
+
+        let updated = update(
+            &pool,
+            ch.id,
+            UpdateChannel {
+                name: "CNN International".to_string(),
+                category: "world".to_string(),
+                logo_url: None,
+                channel_type: "live".to_string(),
+                sort_order: 1,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(updated.name, "CNN International");
+        assert_eq!(updated.category, "world");
+        assert_eq!(updated.sort_order, 1);
+    }
+
+    #[tokio::test]
+    async fn test_update_nonexistent_channel_returns_none() {
+        let pool = test_pool().await;
+        let result = update(
+            &pool,
+            9999,
+            UpdateChannel {
+                name: "Ghost".to_string(),
+                category: "none".to_string(),
+                logo_url: None,
+                channel_type: "live".to_string(),
+                sort_order: 0,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(result.is_none());
     }
 }
