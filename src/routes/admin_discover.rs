@@ -196,7 +196,12 @@ pub async fn discover_m3u_search(
     State(state): State<AppState>,
     Form(form): Form<M3uSearchForm>,
 ) -> Html<String> {
-    let raw = match fetch_m3u(&state.http_client).await {
+    let country_code = if form.country.trim().is_empty() {
+        None
+    } else {
+        country_to_code(&form.country)
+    };
+    let raw = match fetch_m3u(&state.http_client, country_code.as_deref()).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("M3U fetch error: {e}");
@@ -204,7 +209,7 @@ pub async fn discover_m3u_search(
         }
     };
     let all = parse_m3u(&raw);
-    let matches = filter_m3u(&all, &form.country, &form.group);
+    let matches = filter_m3u(&all, "", &form.group);
     let rows: Vec<M3uResultRow> = matches.iter().enumerate().map(|(i, ch)| M3uResultRow {
         name: ch.name.clone(),
         group: ch.group.clone(),
@@ -509,9 +514,49 @@ async fn fetch_youtube_results(
     Ok(rows)
 }
 
-async fn fetch_m3u(client: &reqwest::Client) -> anyhow::Result<String> {
+fn country_to_code(input: &str) -> Option<String> {
+    let s = input.trim().to_lowercase();
+    // Accept bare ISO codes (2 letters) directly.
+    if s.len() == 2 && s.chars().all(|c| c.is_ascii_alphabetic()) {
+        return Some(s);
+    }
+    // Common name → ISO 3166-1 alpha-2 mappings.
+    let map: &[(&str, &str)] = &[
+        ("afghanistan", "af"), ("albania", "al"), ("algeria", "dz"),
+        ("argentina", "ar"), ("australia", "au"), ("austria", "at"),
+        ("bangladesh", "bd"), ("belgium", "be"), ("brazil", "br"),
+        ("bulgaria", "bg"), ("canada", "ca"), ("chile", "cl"),
+        ("china", "cn"), ("colombia", "co"), ("croatia", "hr"),
+        ("czech republic", "cz"), ("denmark", "dk"), ("egypt", "eg"),
+        ("finland", "fi"), ("france", "fr"), ("germany", "de"),
+        ("ghana", "gh"), ("greece", "gr"), ("hong kong", "hk"),
+        ("hungary", "hu"), ("india", "in"), ("indonesia", "id"),
+        ("iran", "ir"), ("iraq", "iq"), ("ireland", "ie"),
+        ("israel", "il"), ("italy", "it"), ("japan", "jp"),
+        ("jordan", "jo"), ("kenya", "ke"), ("kuwait", "kw"),
+        ("lebanon", "lb"), ("malaysia", "my"), ("mexico", "mx"),
+        ("morocco", "ma"), ("netherlands", "nl"), ("new zealand", "nz"),
+        ("nigeria", "ng"), ("norway", "no"), ("pakistan", "pk"),
+        ("philippines", "ph"), ("poland", "pl"), ("portugal", "pt"),
+        ("qatar", "qa"), ("romania", "ro"), ("russia", "ru"),
+        ("saudi arabia", "sa"), ("serbia", "rs"), ("singapore", "sg"),
+        ("south africa", "za"), ("south korea", "kr"), ("korea", "kr"),
+        ("spain", "es"), ("sweden", "se"), ("switzerland", "ch"),
+        ("taiwan", "tw"), ("thailand", "th"), ("tunisia", "tn"),
+        ("turkey", "tr"), ("ukraine", "ua"), ("united arab emirates", "ae"),
+        ("uae", "ae"), ("united kingdom", "gb"), ("uk", "gb"),
+        ("united states", "us"), ("usa", "us"), ("vietnam", "vn"),
+    ];
+    map.iter().find(|(name, _)| s.contains(name)).map(|(_, code)| code.to_string())
+}
+
+async fn fetch_m3u(client: &reqwest::Client, country_code: Option<&str>) -> anyhow::Result<String> {
+    let url = match country_code {
+        Some(code) => format!("https://iptv-org.github.io/iptv/countries/{}.m3u", code),
+        None => "https://iptv-org.github.io/iptv/index.m3u".to_string(),
+    };
     let text = client
-        .get("https://iptv-org.github.io/iptv/index.m3u")
+        .get(&url)
         .send()
         .await?
         .error_for_status()?
