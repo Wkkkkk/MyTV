@@ -9,7 +9,7 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 
-use crate::{channel, epg, playlist_item, source, AppState};
+use crate::{channel, epg, playlist_item, resolver, source, AppState};
 
 // ── auth ───────────────────────────────────────────────────────────────────
 
@@ -470,9 +470,17 @@ pub async fn playlist_item_create(
     Path(channel_id): Path<i64>,
     Form(form): Form<PlaylistItemForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let duration_secs: i64 = form.duration_secs.trim().parse().unwrap_or(0);
+    let url = form.url.trim().to_string();
+    let mut duration_secs: i64 = form.duration_secs.trim().parse().unwrap_or(0);
     if duration_secs <= 0 {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+        if resolver::needs_resolution(&url) {
+            duration_secs = resolver::fetch_duration_secs(&url).await.map_err(|e| {
+                tracing::warn!(url = %url, error = %e, "failed to auto-fetch duration");
+                StatusCode::UNPROCESSABLE_ENTITY
+            })?;
+        } else {
+            return Err(StatusCode::UNPROCESSABLE_ENTITY);
+        }
     }
 
     let existing = playlist_item::list_for_channel(&state.pool, channel_id)
@@ -485,7 +493,7 @@ pub async fn playlist_item_create(
         playlist_item::NewPlaylistItem {
             channel_id,
             title: form.title.trim().to_string(),
-            url: form.url.trim().to_string(),
+            url,
             duration_secs,
             sort_order,
         },
