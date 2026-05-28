@@ -93,6 +93,7 @@
       if (hls) {
         hls.on(Hls.Events.ERROR, function(event, data) {
           if (data.fatal && currentChannelId) {
+            if (typeof debugLog === 'function') debugLog('warn', 'HLS fatal: ' + data.type + ' / ' + data.details);
             console.warn('hls fatal error, trying next source:', data.type, data.details);
             var nextUrl = '/channel/' + currentChannelId + '/next';
             if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
@@ -102,7 +103,7 @@
                 return r.json();
               })
               .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
-              .catch(function(err) { console.error('failover error:', err); showPlayerError(); });
+              .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'failover: ' + err); console.error('failover error:', err); showPlayerError(); });
           }
         });
       }
@@ -133,7 +134,7 @@
                 return r.json();
               })
               .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
-              .catch(function(err) { console.error('native hls error:', err); showPlayerError(); });
+              .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'native HLS: ' + err); console.error('native hls error:', err); showPlayerError(); });
           };
           video.src = url;
           if (offset > 0) {
@@ -152,6 +153,7 @@
         if (video) video.style.display = 'none';
         var el = document.getElementById('player-error');
         if (el) el.style.display = 'block';
+        if (typeof debugLog === 'function') debugLog('error', 'Channel unavailable — all sources exhausted');
       }
 
       function hidePlayerError() {
@@ -171,7 +173,7 @@
             return r.json();
           })
           .then(function(d) { _loadSource(d.url, d.start_offset_secs); })
-          .catch(function(err) { console.error('tune error:', err); showPlayerError(); });
+          .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'tune: ' + err); console.error('tune error:', err); showPlayerError(); });
       }
 
       if (video) {
@@ -185,7 +187,7 @@
             .then(function(d) {
               if (d.url) _loadSource(d.url, d.start_offset_secs);
             })
-            .catch(function(err) { console.error('next error:', err); showPlayerError(); });
+            .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'next: ' + err); console.error('next error:', err); showPlayerError(); });
         });
       }
 
