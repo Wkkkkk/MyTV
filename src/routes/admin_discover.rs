@@ -124,9 +124,9 @@ pub struct AddForm {
     pub duration_secs: String,
     pub source_kind: String,
     pub channel_choice: String,
-    pub new_name: String,
-    pub new_category: String,
-    pub new_channel_type: String,
+    pub new_name: Option<String>,
+    pub new_category: Option<String>,
+    pub new_channel_type: Option<String>,
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -185,9 +185,9 @@ pub async fn discover_add(
         &form.source_kind,
         duration_secs,
         &form.channel_choice,
-        &form.new_name,
-        &form.new_category,
-        &form.new_channel_type,
+        form.new_name.as_deref().unwrap_or(""),
+        form.new_category.as_deref().unwrap_or(""),
+        form.new_channel_type.as_deref().unwrap_or("live"),
     ).await?;
     Ok(Redirect::to(&format!("/admin/channels/{}", channel_id)))
 }

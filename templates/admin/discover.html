@@ -76,13 +76,14 @@ function showDiscover(tab) {
 }
 function discoverToggle(value, formId) {
   var newDiv = document.getElementById('new-ch-' + formId);
-  var existDiv = document.getElementById('exist-ch-' + formId);
+  if (!newDiv) return;
+  var inputs = newDiv.querySelectorAll('input, select');
   if (value === 'new') {
-    if (newDiv) newDiv.style.display = '';
-    if (existDiv) existDiv.style.display = 'none';
+    newDiv.style.display = '';
+    inputs.forEach(function(el) { el.disabled = false; });
   } else {
-    if (newDiv) newDiv.style.display = 'none';
-    if (existDiv) existDiv.style.display = '';
+    newDiv.style.display = 'none';
+    inputs.forEach(function(el) { el.disabled = true; });
   }
 }
 </script>
