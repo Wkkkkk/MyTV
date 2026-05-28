@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
 
-cp scripts/pre-push.sh .git/hooks/pre-push
-chmod +x .git/hooks/pre-push
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+ln -sf "$REPO_ROOT/scripts/pre-push.sh" "$REPO_ROOT/.git/hooks/pre-push"
 echo "Installed .git/hooks/pre-push"
