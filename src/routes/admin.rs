@@ -9,7 +9,7 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 
-use crate::{channel, playlist_item, source, AppState};
+use crate::{channel, epg, playlist_item, source, AppState};
 
 // ── auth ───────────────────────────────────────────────────────────────────
 
@@ -80,6 +80,13 @@ pub struct AdminPlaylistItemRow {
     pub sort_order: i64,
 }
 
+struct AdminScheduleRow {
+    is_current: bool,
+    title: String,
+    start_time: String, // "HH:MM UTC"
+    duration_secs: i64,
+}
+
 // ── template types ─────────────────────────────────────────────────────────
 
 #[derive(Template)]
@@ -109,6 +116,7 @@ struct ChannelDetailTemplate {
     channel_type: String,
     sources: Vec<AdminSourceRow>,
     playlist_items: Vec<AdminPlaylistItemRow>,
+    vod_schedule: Vec<AdminScheduleRow>,
 }
 
 // ── form input types ───────────────────────────────────────────────────────
@@ -338,6 +346,33 @@ pub async fn channel_detail(
         .await
         .map_err(internal_error)?;
 
+    let vod_schedule: Vec<AdminScheduleRow> = if ch.r#type == "vod_loop" {
+        if let Some(anchor) = ch.loop_anchor {
+            let total_dur: i64 = items.iter().map(|i| i.duration_secs).sum();
+            if total_dur > 0 {
+                let now = Utc::now();
+                let window_end = now + chrono::Duration::seconds(2 * total_dur);
+                epg::vod_schedule(ch.id, &items, anchor.timestamp(), now, window_end)
+                    .into_iter()
+                    .take(8)
+                    .enumerate()
+                    .map(|(i, e)| AdminScheduleRow {
+                        is_current: i == 0,
+                        title: e.title,
+                        start_time: e.start_time.format("%H:%M UTC").to_string(),
+                        duration_secs: (e.end_time - e.start_time).num_seconds(),
+                    })
+                    .collect()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
     render(ChannelDetailTemplate {
         channel_id: ch.id,
         channel_name: ch.name,
@@ -362,6 +397,7 @@ pub async fn channel_detail(
                 sort_order: i.sort_order,
             })
             .collect(),
+        vod_schedule,
     })
 }
 
