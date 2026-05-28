@@ -82,6 +82,7 @@
       const video = document.getElementById('video');
       let hls = null;
       let currentChannelId = null;
+      let currentUrl = null;
 
       if (video && Hls.isSupported()) {
         hls = new Hls();
@@ -92,7 +93,9 @@
         hls.on(Hls.Events.ERROR, function(event, data) {
           if (data.fatal && currentChannelId) {
             console.warn('hls fatal error, trying next source:', data.type, data.details);
-            fetch('/channel/' + currentChannelId + '/next')
+            var nextUrl = '/channel/' + currentChannelId + '/next';
+            if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
+            fetch(nextUrl)
               .then(function(r) {
                 if (!r.ok) { showPlayerError(); return; }
                 return r.json();
@@ -104,6 +107,7 @@
       }
 
       function _loadSource(url, offset) {
+        currentUrl = url;
         if (hls) {
           hls.loadSource(url);
           hls.once(Hls.Events.MANIFEST_PARSED, function() {
@@ -111,6 +115,17 @@
             video.play().catch(function(){});
           });
         } else if (video && video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.onerror = function() {
+            var nextUrl = '/channel/' + currentChannelId + '/next';
+            if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
+            fetch(nextUrl)
+              .then(function(r) {
+                if (!r.ok) { showPlayerError(); return; }
+                return r.json();
+              })
+              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
+              .catch(function(err) { console.error('native hls error:', err); showPlayerError(); });
+          };
           video.src = url;
           if (offset > 0) {
             video.addEventListener('loadedmetadata', function onMeta() {
@@ -138,6 +153,7 @@
 
       function tune(channelId) {
         currentChannelId = channelId;
+        currentUrl = null;
         hidePlayerError();
         document.getElementById('player-panel').style.display = 'block';
         fetch('/channel/' + channelId + '/tune')
