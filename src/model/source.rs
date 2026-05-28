@@ -47,13 +47,11 @@ pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Source>> {
 }
 
 pub async fn list_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<Source>> {
-    sqlx::query_as::<_, Source>(
-        "SELECT * FROM sources WHERE channel_id = ? ORDER BY priority ASC",
-    )
-    .bind(channel_id)
-    .fetch_all(pool)
-    .await
-    .map_err(Into::into)
+    sqlx::query_as::<_, Source>("SELECT * FROM sources WHERE channel_id = ? ORDER BY priority ASC")
+        .bind(channel_id)
+        .fetch_all(pool)
+        .await
+        .map_err(Into::into)
 }
 
 pub async fn list_active_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<Source>> {
@@ -88,7 +86,7 @@ pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{model::channel, db};
+    use crate::{db, model::channel};
 
     async fn test_pool() -> SqlitePool {
         db::connect("sqlite::memory:").await.unwrap()
@@ -124,8 +122,18 @@ mod tests {
         let pool = test_pool().await;
         let ch = make_channel(&pool).await;
 
-        create(&pool, hls(ch.id, "https://primary.example.com/stream.m3u8", 1)).await.unwrap();
-        create(&pool, hls(ch.id, "https://backup.example.com/stream.m3u8", 2)).await.unwrap();
+        create(
+            &pool,
+            hls(ch.id, "https://primary.example.com/stream.m3u8", 1),
+        )
+        .await
+        .unwrap();
+        create(
+            &pool,
+            hls(ch.id, "https://backup.example.com/stream.m3u8", 2),
+        )
+        .await
+        .unwrap();
 
         let sources = list_for_channel(&pool, ch.id).await.unwrap();
         assert_eq!(sources.len(), 2);
@@ -138,8 +146,18 @@ mod tests {
         let pool = test_pool().await;
         let ch = make_channel(&pool).await;
 
-        let primary = create(&pool, hls(ch.id, "https://primary.example.com/stream.m3u8", 1)).await.unwrap();
-        create(&pool, hls(ch.id, "https://backup.example.com/stream.m3u8", 2)).await.unwrap();
+        let primary = create(
+            &pool,
+            hls(ch.id, "https://primary.example.com/stream.m3u8", 1),
+        )
+        .await
+        .unwrap();
+        create(
+            &pool,
+            hls(ch.id, "https://backup.example.com/stream.m3u8", 2),
+        )
+        .await
+        .unwrap();
 
         sqlx::query("UPDATE sources SET is_active = 0 WHERE id = ?")
             .bind(primary.id)
@@ -157,12 +175,20 @@ mod tests {
         let pool = test_pool().await;
         let ch = make_channel(&pool).await;
 
-        create(&pool, hls(ch.id, "https://primary.example.com/stream.m3u8", 1)).await.unwrap();
+        create(
+            &pool,
+            hls(ch.id, "https://primary.example.com/stream.m3u8", 1),
+        )
+        .await
+        .unwrap();
 
         channel::delete(&pool, ch.id).await.unwrap();
 
         let sources = list_for_channel(&pool, ch.id).await.unwrap();
-        assert!(sources.is_empty(), "ON DELETE CASCADE should remove sources");
+        assert!(
+            sources.is_empty(),
+            "ON DELETE CASCADE should remove sources"
+        );
     }
 
     #[tokio::test]
@@ -170,7 +196,12 @@ mod tests {
         let pool = test_pool().await;
         let ch = make_channel(&pool).await;
 
-        let src = create(&pool, hls(ch.id, "https://primary.example.com/stream.m3u8", 1)).await.unwrap();
+        let src = create(
+            &pool,
+            hls(ch.id, "https://primary.example.com/stream.m3u8", 1),
+        )
+        .await
+        .unwrap();
         assert!(src.is_active);
 
         let updated = set_active(&pool, src.id, false).await.unwrap();

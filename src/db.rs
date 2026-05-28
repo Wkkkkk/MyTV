@@ -8,9 +8,7 @@ pub async fn connect(database_url: &str) -> Result<SqlitePool> {
         .foreign_keys(true)
         .create_if_missing(true);
 
-    let pool = SqlitePoolOptions::new()
-        .connect_with(opts)
-        .await?;
+    let pool = SqlitePoolOptions::new().connect_with(opts).await?;
 
     sqlx::migrate!("./migrations").run(&pool).await?;
     Ok(pool)
@@ -25,15 +23,18 @@ mod tests {
         let pool = connect("sqlite::memory:").await.unwrap();
 
         for table in &["channels", "sources", "playlist_items"] {
-            let row: Option<(String,)> = sqlx::query_as(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            )
-            .bind(table)
-            .fetch_optional(&pool)
-            .await
-            .unwrap();
+            let row: Option<(String,)> =
+                sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
+                    .bind(table)
+                    .fetch_optional(&pool)
+                    .await
+                    .unwrap();
 
-            assert!(row.is_some(), "table '{}' should exist after migration", table);
+            assert!(
+                row.is_some(),
+                "table '{}' should exist after migration",
+                table
+            );
         }
     }
 }

@@ -5,8 +5,12 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::{model::{playlist_item, playlist_item::NewPlaylistItem}, media::{hls, resolver}, AppState};
 use crate::routes::internal_error;
+use crate::{
+    media::{hls, resolver},
+    model::{playlist_item, playlist_item::NewPlaylistItem},
+    AppState,
+};
 
 // ── form input types ───────────────────────────────────────────────────────
 
@@ -33,10 +37,12 @@ pub async fn playlist_item_create(
                 StatusCode::UNPROCESSABLE_ENTITY
             })?;
         } else {
-            duration_secs = hls::fetch_hls_duration(&state.http_client, &url).await.map_err(|e| {
-                tracing::warn!(url = %url, error = %e, "failed to fetch HLS duration");
-                StatusCode::UNPROCESSABLE_ENTITY
-            })?;
+            duration_secs = hls::fetch_hls_duration(&state.http_client, &url)
+                .await
+                .map_err(|e| {
+                    tracing::warn!(url = %url, error = %e, "failed to fetch HLS duration");
+                    StatusCode::UNPROCESSABLE_ENTITY
+                })?;
         }
     }
 
@@ -72,5 +78,8 @@ pub async fn playlist_item_delete(
     playlist_item::delete(&state.pool, item_id)
         .await
         .map_err(internal_error)?;
-    Ok(Redirect::to(&format!("/admin/channels/{}", item.channel_id)))
+    Ok(Redirect::to(&format!(
+        "/admin/channels/{}",
+        item.channel_id
+    )))
 }

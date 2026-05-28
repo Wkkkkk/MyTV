@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     media::{hls, resolver},
-    model::{channel::{self, ChannelType}, playlist_item, source},
+    model::{
+        channel::{self, ChannelType},
+        playlist_item, source,
+    },
     AppState,
 };
 
@@ -69,8 +72,15 @@ async fn tune_live(
 
     for src in &sources {
         match resolver::resolve_url(&src.url).await {
-            Ok(url) => return Ok(Json(TuneResponse { url, start_offset_secs: 0 })),
-            Err(e) => tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source"),
+            Ok(url) => {
+                return Ok(Json(TuneResponse {
+                    url,
+                    start_offset_secs: 0,
+                }))
+            }
+            Err(e) => {
+                tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source")
+            }
         }
     }
     Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -94,13 +104,15 @@ async fn tune_vod_at(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    let (idx, offset) =
-        playlist_item::current_position(&items, now_secs, anchor_secs)
-            .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let (idx, offset) = playlist_item::current_position(&items, now_secs, anchor_secs)
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     let item = &items[idx];
     match resolver::resolve_url(&item.url).await {
-        Ok(url) => Ok(Json(TuneResponse { url, start_offset_secs: offset })),
+        Ok(url) => Ok(Json(TuneResponse {
+            url,
+            start_offset_secs: offset,
+        })),
         Err(e) => {
             tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
             Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -117,10 +129,20 @@ async fn next_live(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    for src in sources.iter().filter(|s| Some(s.url.as_str()) != failed_url) {
+    for src in sources
+        .iter()
+        .filter(|s| Some(s.url.as_str()) != failed_url)
+    {
         match resolver::resolve_url(&src.url).await {
-            Ok(url) => return Ok(Json(TuneResponse { url, start_offset_secs: 0 })),
-            Err(e) => tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source"),
+            Ok(url) => {
+                return Ok(Json(TuneResponse {
+                    url,
+                    start_offset_secs: 0,
+                }))
+            }
+            Err(e) => {
+                tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source")
+            }
         }
     }
     Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -151,7 +173,10 @@ async fn next_vod_at(
     let item = &items[next_idx];
 
     match resolver::resolve_url(&item.url).await {
-        Ok(url) => Ok(Json(TuneResponse { url, start_offset_secs: 0 })),
+        Ok(url) => Ok(Json(TuneResponse {
+            url,
+            start_offset_secs: 0,
+        })),
         Err(e) => {
             tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
             Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -189,9 +214,7 @@ pub async fn stream_proxy(
         .unwrap_or("")
         .to_string();
 
-    let is_playlist = ct.contains("mpegurl")
-        || q.url.contains(".m3u8")
-        || q.url.contains(".m3u");
+    let is_playlist = ct.contains("mpegurl") || q.url.contains(".m3u8") || q.url.contains(".m3u");
 
     let body_bytes = match upstream.bytes().await {
         Ok(b) => b,
@@ -223,13 +246,17 @@ pub async fn stream_proxy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::DateTime;
     use crate::{config, db};
+    use chrono::DateTime;
 
     async fn test_state() -> AppState {
         let pool = db::connect("sqlite::memory:").await.unwrap();
         let config = std::sync::Arc::new(config::Config::from_env().unwrap());
-        AppState { pool, config, http_client: reqwest::Client::new() }
+        AppState {
+            pool,
+            config,
+            http_client: reqwest::Client::new(),
+        }
     }
 
     async fn make_live_channel(state: &AppState) -> channel::Channel {
@@ -431,13 +458,9 @@ mod tests {
         .await
         .unwrap();
 
-        let result = next_live(
-            &state,
-            &ch,
-            Some("https://primary.example.com/stream.m3u8"),
-        )
-        .await
-        .unwrap();
+        let result = next_live(&state, &ch, Some("https://primary.example.com/stream.m3u8"))
+            .await
+            .unwrap();
         assert_eq!(result.url, "https://backup.example.com/stream.m3u8");
     }
 
@@ -557,13 +580,9 @@ mod tests {
         .unwrap();
 
         // The only source is the failed one — should return 503
-        let err = next_live(
-            &state,
-            &ch,
-            Some("https://primary.example.com/stream.m3u8"),
-        )
-        .await
-        .unwrap_err();
+        let err = next_live(&state, &ch, Some("https://primary.example.com/stream.m3u8"))
+            .await
+            .unwrap_err();
         assert_eq!(err, StatusCode::SERVICE_UNAVAILABLE);
     }
 }

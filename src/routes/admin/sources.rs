@@ -5,9 +5,9 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::{model::source, AppState};
-use crate::routes::internal_error;
 use crate::media::resolver;
+use crate::routes::internal_error;
+use crate::{model::source, AppState};
 
 // ── form input types ───────────────────────────────────────────────────────
 
@@ -95,20 +95,22 @@ pub async fn source_test(
         }));
     }
 
-    Ok(Html(match state
-        .http_client
-        .head(&src.url)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
-            ok_html.to_string()
-        }
-        Ok(resp) => format!(
-            r#"<span style="color:#e94560;font-size:0.78rem">Failed: HTTP {}</span>"#,
-            resp.status().as_u16()
-        ),
-        Err(_) => fail_html.to_string(),
-    }))
+    Ok(Html(
+        match state
+            .http_client
+            .head(&src.url)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
+                ok_html.to_string()
+            }
+            Ok(resp) => format!(
+                r#"<span style="color:#e94560;font-size:0.78rem">Failed: HTTP {}</span>"#,
+                resp.status().as_u16()
+            ),
+            Err(_) => fail_html.to_string(),
+        },
+    ))
 }

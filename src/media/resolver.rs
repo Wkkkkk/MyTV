@@ -5,9 +5,7 @@ use tokio::process::Command;
 /// Returns true if the URL requires yt-dlp to obtain a playable stream.
 /// Direct HLS and plain IPTV stream URLs are used as-is.
 pub fn needs_resolution(url: &str) -> bool {
-    url.contains("youtube.com")
-        || url.contains("youtu.be")
-        || url.contains("twitch.tv")
+    url.contains("youtube.com") || url.contains("youtu.be") || url.contains("twitch.tv")
 }
 
 /// Returns a directly playable URL.
@@ -82,9 +80,13 @@ mod tests {
 
     #[test]
     fn test_youtube_needs_resolution() {
-        assert!(needs_resolution("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+        assert!(needs_resolution(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        ));
         assert!(needs_resolution("https://youtu.be/dQw4w9WgXcQ"));
-        assert!(needs_resolution("https://www.youtube.com/channel/UCXXXXXX/live"));
+        assert!(needs_resolution(
+            "https://www.youtube.com/channel/UCXXXXXX/live"
+        ));
         assert!(needs_resolution("https://www.twitch.tv/somestream"));
     }
 
@@ -117,7 +119,11 @@ mod tests {
         let result = resolve_url(url).await;
         assert!(result.is_ok(), "expected resolved URL, got: {:?}", result);
         let resolved = result.unwrap();
-        assert!(resolved.starts_with("https://"), "expected HTTPS URL, got: {}", resolved);
+        assert!(
+            resolved.starts_with("https://"),
+            "expected HTTPS URL, got: {}",
+            resolved
+        );
     }
 
     #[tokio::test]

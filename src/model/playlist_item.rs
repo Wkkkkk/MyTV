@@ -102,7 +102,7 @@ pub fn current_position(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{model::channel, db};
+    use crate::{db, model::channel};
 
     async fn test_pool() -> SqlitePool {
         db::connect("sqlite::memory:").await.unwrap()
@@ -152,8 +152,22 @@ mod tests {
     #[tokio::test]
     async fn test_current_position_within_first_item() {
         let items = vec![
-            PlaylistItem { id: 1, channel_id: 1, title: "A".into(), url: "u".into(), duration_secs: 3600, sort_order: 0 },
-            PlaylistItem { id: 2, channel_id: 1, title: "B".into(), url: "u".into(), duration_secs: 1800, sort_order: 1 },
+            PlaylistItem {
+                id: 1,
+                channel_id: 1,
+                title: "A".into(),
+                url: "u".into(),
+                duration_secs: 3600,
+                sort_order: 0,
+            },
+            PlaylistItem {
+                id: 2,
+                channel_id: 1,
+                title: "B".into(),
+                url: "u".into(),
+                duration_secs: 1800,
+                sort_order: 1,
+            },
         ];
         // 500 seconds into the loop — still in item A
         let (idx, offset) = current_position(&items, 1500, 1000).unwrap();
@@ -164,8 +178,22 @@ mod tests {
     #[tokio::test]
     async fn test_current_position_within_second_item() {
         let items = vec![
-            PlaylistItem { id: 1, channel_id: 1, title: "A".into(), url: "u".into(), duration_secs: 3600, sort_order: 0 },
-            PlaylistItem { id: 2, channel_id: 1, title: "B".into(), url: "u".into(), duration_secs: 1800, sort_order: 1 },
+            PlaylistItem {
+                id: 1,
+                channel_id: 1,
+                title: "A".into(),
+                url: "u".into(),
+                duration_secs: 3600,
+                sort_order: 0,
+            },
+            PlaylistItem {
+                id: 2,
+                channel_id: 1,
+                title: "B".into(),
+                url: "u".into(),
+                duration_secs: 1800,
+                sort_order: 1,
+            },
         ];
         // 4000 seconds in — 400 seconds into item B (after A's 3600)
         let (idx, offset) = current_position(&items, 4000, 0).unwrap();
@@ -176,8 +204,22 @@ mod tests {
     #[tokio::test]
     async fn test_current_position_wraps_around_to_start() {
         let items = vec![
-            PlaylistItem { id: 1, channel_id: 1, title: "A".into(), url: "u".into(), duration_secs: 3600, sort_order: 0 },
-            PlaylistItem { id: 2, channel_id: 1, title: "B".into(), url: "u".into(), duration_secs: 1800, sort_order: 1 },
+            PlaylistItem {
+                id: 1,
+                channel_id: 1,
+                title: "A".into(),
+                url: "u".into(),
+                duration_secs: 3600,
+                sort_order: 0,
+            },
+            PlaylistItem {
+                id: 2,
+                channel_id: 1,
+                title: "B".into(),
+                url: "u".into(),
+                duration_secs: 1800,
+                sort_order: 1,
+            },
         ];
         // total = 5400; 5500 seconds in wraps to 100 seconds into item A
         let (idx, offset) = current_position(&items, 5500, 0).unwrap();
@@ -201,6 +243,9 @@ mod tests {
         channel::delete(&pool, ch.id).await.unwrap();
 
         let items = list_for_channel(&pool, ch.id).await.unwrap();
-        assert!(items.is_empty(), "ON DELETE CASCADE should remove playlist items");
+        assert!(
+            items.is_empty(),
+            "ON DELETE CASCADE should remove playlist items"
+        );
     }
 }

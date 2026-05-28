@@ -7,9 +7,13 @@ use axum::{
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 
-use crate::{epg, model::{channel, playlist_item, source}, AppState};
-use crate::routes::{internal_error, render};
 use super::{AdminChannelRow, AdminPlaylistItemRow, AdminSourceRow};
+use crate::routes::{internal_error, render};
+use crate::{
+    epg,
+    model::{channel, playlist_item, source},
+    AppState,
+};
 
 // ── local display types ────────────────────────────────────────────────────
 
@@ -82,9 +86,7 @@ pub async fn admin_index() -> impl IntoResponse {
     Redirect::to("/admin/channels")
 }
 
-pub async fn channel_list(
-    State(state): State<AppState>,
-) -> Result<Html<String>, StatusCode> {
+pub async fn channel_list(State(state): State<AppState>) -> Result<Html<String>, StatusCode> {
     let all = channel::list(&state.pool).await.map_err(internal_error)?;
     let channels = all.into_iter().map(Into::into).collect();
     render(ChannelListTemplate { channels })

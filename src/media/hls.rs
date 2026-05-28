@@ -44,10 +44,15 @@ pub async fn fetch_hls_duration(client: &reqwest::Client, url: &str) -> Result<i
 
 /// Rewrites all non-comment URLs in an HLS manifest to route through /stream-proxy.
 pub fn rewrite_hls_urls(content: &str, base_url: &str) -> String {
-    let base_dir = base_url.rsplit_once('/').map(|(b, _)| b).unwrap_or(base_url);
+    let base_dir = base_url
+        .rsplit_once('/')
+        .map(|(b, _)| b)
+        .unwrap_or(base_url);
     let origin = {
         let after_scheme = base_url.find("://").map(|i| i + 3).unwrap_or(0);
-        let host_len = base_url[after_scheme..].find('/').unwrap_or(base_url[after_scheme..].len());
+        let host_len = base_url[after_scheme..]
+            .find('/')
+            .unwrap_or(base_url[after_scheme..].len());
         &base_url[..after_scheme + host_len]
     };
 
@@ -89,11 +94,16 @@ fn resolve_uri(uri: &str, base_url: &str) -> String {
     }
     if uri.starts_with('/') {
         let after_scheme = base_url.find("://").map(|i| i + 3).unwrap_or(0);
-        let host_len = base_url[after_scheme..].find('/').unwrap_or(base_url[after_scheme..].len());
+        let host_len = base_url[after_scheme..]
+            .find('/')
+            .unwrap_or(base_url[after_scheme..].len());
         let origin = &base_url[..after_scheme + host_len];
         return format!("{}{}", origin, uri);
     }
-    let base_dir = base_url.rsplit_once('/').map(|(b, _)| b).unwrap_or(base_url);
+    let base_dir = base_url
+        .rsplit_once('/')
+        .map(|(b, _)| b)
+        .unwrap_or(base_url);
     format!("{}/{}", base_dir, uri)
 }
 
@@ -146,7 +156,10 @@ mod tests {
     #[test]
     fn test_resolve_uri_absolute() {
         assert_eq!(
-            resolve_uri("https://cdn.example.com/seg.ts", "https://example.com/index.m3u8"),
+            resolve_uri(
+                "https://cdn.example.com/seg.ts",
+                "https://example.com/index.m3u8"
+            ),
             "https://cdn.example.com/seg.ts"
         );
     }
