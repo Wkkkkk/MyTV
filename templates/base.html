@@ -107,8 +107,16 @@
         });
       }
 
+      function proxyUrl(url) {
+        if (!url || url.startsWith('/')) return url;
+        var origin = window.location.origin;
+        if (url.startsWith(origin)) return url;
+        return '/stream-proxy?url=' + encodeURIComponent(url);
+      }
+
       function _loadSource(url, offset) {
         currentUrl = url;
+        url = proxyUrl(url);
         if (hls) {
           hls.loadSource(url);
           hls.once(Hls.Events.MANIFEST_PARSED, function() {

@@ -75,6 +75,7 @@ async fn main() -> Result<()> {
         .route("/guide/partial", get(routes::guide::guide_partial))
         .route("/channel/:id/tune", get(routes::player::tune))
         .route("/channel/:id/next", get(routes::player::next))
+        .route("/stream-proxy", get(routes::player::stream_proxy))
         .nest("/admin", admin_router)
         .with_state(state);
 

@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
-    response::Json,
+    http::{HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Json, Response},
 };
 use serde::{Deserialize, Serialize};
 
@@ -156,6 +156,105 @@ async fn next_vod_at(
             Err(StatusCode::SERVICE_UNAVAILABLE)
         }
     }
+}
+
+// ── stream proxy ──────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct StreamProxyQuery {
+    pub url: String,
+}
+
+pub async fn stream_proxy(
+    State(state): State<AppState>,
+    Query(q): Query<StreamProxyQuery>,
+) -> Response {
+    if !q.url.starts_with("http://") && !q.url.starts_with("https://") {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
+    let upstream = match state.http_client.get(&q.url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(url = %q.url, error = %e, "stream proxy fetch failed");
+            return StatusCode::BAD_GATEWAY.into_response();
+        }
+    };
+
+    let ct = upstream
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    let is_playlist = ct.contains("mpegurl")
+        || q.url.contains(".m3u8")
+        || q.url.contains(".m3u");
+
+    let body_bytes = match upstream.bytes().await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(url = %q.url, error = %e, "stream proxy read failed");
+            return StatusCode::BAD_GATEWAY.into_response();
+        }
+    };
+
+    let mut headers = HeaderMap::new();
+    headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
+
+    if is_playlist {
+        let text = String::from_utf8_lossy(&body_bytes);
+        let rewritten = rewrite_hls_urls(&text, &q.url);
+        headers.insert(
+            axum::http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/vnd.apple.mpegurl"),
+        );
+        (headers, rewritten).into_response()
+    } else {
+        if let Ok(val) = HeaderValue::from_str(&ct) {
+            headers.insert(axum::http::header::CONTENT_TYPE, val);
+        }
+        (headers, body_bytes).into_response()
+    }
+}
+
+fn rewrite_hls_urls(content: &str, base_url: &str) -> String {
+    let base_dir = base_url.rsplit_once('/').map(|(b, _)| b).unwrap_or(base_url);
+    let origin = {
+        let after_scheme = base_url.find("://").map(|i| i + 3).unwrap_or(0);
+        let host_len = base_url[after_scheme..].find('/').unwrap_or(base_url[after_scheme..].len());
+        &base_url[..after_scheme + host_len]
+    };
+
+    content
+        .lines()
+        .map(|line| {
+            if line.starts_with('#') || line.is_empty() {
+                return line.to_string();
+            }
+            let abs = if line.starts_with("http://") || line.starts_with("https://") {
+                line.to_string()
+            } else if line.starts_with('/') {
+                format!("{}{}", origin, line)
+            } else {
+                format!("{}/{}", base_dir, line)
+            };
+            format!("/stream-proxy?url={}", pct_encode(&abs))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn pct_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{:02X}", b),
+        })
+        .collect()
 }
 
 #[cfg(test)]
