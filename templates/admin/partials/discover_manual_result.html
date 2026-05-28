@@ -1,1 +1,15 @@
-<p>Manual result stub</p>
+<div style="border:1px solid #1e2030;border-radius:4px;padding:12px;margin-bottom:4px;background:#0a0a18">
+  <div style="font-size:0.78rem;color:#555;margin-bottom:6px;word-break:break-all">{{ url }}</div>
+  <div style="display:flex;gap:12px;align-items:center;font-size:0.8rem">
+    {% if is_live %}
+    <span class="badge badge-live">Live stream</span>
+    {% else %}
+    <span class="badge badge-vod">VOD</span>
+    {% endif %}
+    {% if duration_secs > 0 %}
+    <span style="color:#666">{{ duration_secs }}s</span>
+    {% endif %}
+    <span style="color:#444">kind: {{ source_kind }}</span>
+  </div>
+</div>
+{% include "admin/partials/discover_add_form.html" %}

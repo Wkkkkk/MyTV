@@ -1,1 +1,61 @@
-<p>Add form stub</p>
+<form action="/admin/discover/add" method="post"
+      style="border-top:1px solid #222;padding-top:12px;margin-top:4px">
+  <input type="hidden" name="url" value="{{ url }}">
+  <input type="hidden" name="is_live" value="{% if is_live %}true{% else %}false{% endif %}">
+  <input type="hidden" name="source_kind" value="{{ source_kind }}">
+
+  <div class="form-row" style="margin-bottom:10px">
+    <label>Title</label>
+    <input type="text" name="title" value="{{ title }}">
+  </div>
+
+  {% if show_duration_input %}
+  <div class="form-row" style="margin-bottom:10px">
+    <label>Duration (seconds)</label>
+    <input type="number" name="duration_secs" min="1" required placeholder="e.g. 3600" style="width:140px">
+  </div>
+  {% else %}
+  <input type="hidden" name="duration_secs" value="{{ duration_secs }}">
+  {% endif %}
+
+  <div class="form-row" style="margin-bottom:10px">
+    <label>Add to</label>
+    <select name="channel_choice" style="width:auto" onchange="discoverToggle(this.value,'{{ form_id }}')">
+      <option value="new">— New Channel —</option>
+      {% for ch in channels %}
+      <option value="{{ ch.id }}">{{ ch.name }} ({{ ch.type_str }})</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div id="new-ch-{{ form_id }}" style="padding-left:12px;border-left:2px solid #222;margin-bottom:10px">
+    <div class="form-row" style="margin-bottom:8px">
+      <label>Channel Name</label>
+      <input type="text" name="new_name" value="{{ title }}">
+    </div>
+    <div class="form-row" style="margin-bottom:8px">
+      <label>Category</label>
+      <input type="text" name="new_category" placeholder="news, sports, movies…">
+    </div>
+    <div class="form-row" style="margin-bottom:0">
+      <label>Type</label>
+      <select name="new_channel_type" style="width:auto">
+        {% if is_live %}
+        <option value="live">live</option>
+        <option value="vod_loop">vod_loop</option>
+        {% else %}
+        <option value="vod_loop">vod_loop</option>
+        <option value="live">live</option>
+        {% endif %}
+      </select>
+    </div>
+  </div>
+
+  <div id="exist-ch-{{ form_id }}" style="display:none;margin-bottom:10px">
+    <input type="hidden" name="new_name" value="">
+    <input type="hidden" name="new_category" value="">
+    <input type="hidden" name="new_channel_type" value="live">
+  </div>
+
+  <button class="btn btn-primary btn-sm" type="submit">Add to Channel →</button>
+</form>

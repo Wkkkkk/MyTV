@@ -359,34 +359,165 @@ pub fn parse_iso8601_duration(s: &str) -> i64 {
     total
 }
 
-// ── core add logic (stub — implemented in Task 3) ─────────────────────────
+// ── core add logic ────────────────────────────────────────────────────────
 
 pub async fn do_discover_add(
-    _pool: &sqlx::SqlitePool,
-    _url: &str,
-    _title: &str,
-    _source_kind: &str,
-    _duration_secs: i64,
-    _channel_choice: &str,
-    _new_name: &str,
-    _new_category: &str,
-    _new_channel_type: &str,
+    pool: &sqlx::SqlitePool,
+    url: &str,
+    title: &str,
+    source_kind: &str,
+    duration_secs: i64,
+    channel_choice: &str,
+    new_name: &str,
+    new_category: &str,
+    new_channel_type: &str,
 ) -> Result<i64, StatusCode> {
-    Err(StatusCode::NOT_IMPLEMENTED)
+    if url.is_empty() || (!url.starts_with("http://") && !url.starts_with("https://")) {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    if !["hls", "youtube_live", "iptv"].contains(&source_kind) {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    let channel_id = if channel_choice == "new" {
+        if new_name.trim().is_empty() {
+            return Err(StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        if new_category.trim().is_empty() {
+            return Err(StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        if !["live", "vod_loop"].contains(&new_channel_type) {
+            return Err(StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        let loop_anchor = if new_channel_type == "vod_loop" { Some(Utc::now()) } else { None };
+        let ch = channel::create(pool, channel::NewChannel {
+            name: new_name.trim().to_string(),
+            category: new_category.trim().to_string(),
+            logo_url: None,
+            channel_type: new_channel_type.to_string(),
+            sort_order: 0,
+            loop_anchor,
+        }).await.map_err(internal_error)?;
+        ch.id
+    } else {
+        channel_choice.parse::<i64>().map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?
+    };
+
+    let ch = channel::get(pool, channel_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    if ch.channel_type() == channel::ChannelType::VodLoop {
+        if duration_secs <= 0 {
+            return Err(StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        let items = playlist_item::list_for_channel(pool, channel_id)
+            .await.map_err(internal_error)?;
+        playlist_item::create(pool, playlist_item::NewPlaylistItem {
+            channel_id,
+            title: title.to_string(),
+            url: url.to_string(),
+            duration_secs,
+            sort_order: items.len() as i64,
+        }).await.map_err(internal_error)?;
+    } else {
+        source::create(pool, source::NewSource {
+            channel_id,
+            kind: source_kind.to_string(),
+            url: url.to_string(),
+            priority: 0,
+        }).await.map_err(internal_error)?;
+    }
+
+    Ok(channel_id)
 }
 
 // ── YouTube fetch (stub — implemented in Task 5) ──────────────────────────
 
 async fn fetch_youtube_results(
-    _keyword: &str,
-    _api_key: &str,
-    _client: &reqwest::Client,
+    keyword: &str,
+    api_key: &str,
+    client: &reqwest::Client,
 ) -> anyhow::Result<Vec<YoutubeResultRow>> {
-    Ok(vec![])
+    let search_resp: serde_json::Value = client
+        .get("https://www.googleapis.com/youtube/v3/search")
+        .query(&[
+            ("part", "snippet"),
+            ("type", "video"),
+            ("maxResults", "12"),
+            ("q", keyword),
+            ("key", api_key),
+        ])
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if let Some(err) = search_resp.get("error") {
+        let msg = err["message"].as_str().unwrap_or("YouTube API error").to_string();
+        anyhow::bail!("{}", msg);
+    }
+
+    let items = match search_resp["items"].as_array() {
+        Some(v) => v,
+        None => return Ok(vec![]),
+    };
+
+    let video_ids: Vec<&str> = items
+        .iter()
+        .filter_map(|item| item["id"]["videoId"].as_str())
+        .collect();
+
+    if video_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let ids_joined = video_ids.join(",");
+    let details_resp: serde_json::Value = client
+        .get("https://www.googleapis.com/youtube/v3/videos")
+        .query(&[("part", "contentDetails"), ("id", ids_joined.as_str()), ("key", api_key)])
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    let mut duration_map = std::collections::HashMap::<String, i64>::new();
+    if let Some(detail_items) = details_resp["items"].as_array() {
+        for item in detail_items {
+            let id = item["id"].as_str().unwrap_or("").to_string();
+            let dur_str = item["contentDetails"]["duration"].as_str().unwrap_or("PT0S");
+            duration_map.insert(id, parse_iso8601_duration(dur_str));
+        }
+    }
+
+    let rows = items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, item)| {
+            let video_id = item["id"]["videoId"].as_str()?;
+            let snippet = &item["snippet"];
+            let title = snippet["title"].as_str().unwrap_or("Unknown").to_string();
+            let channel_title = snippet["channelTitle"].as_str().unwrap_or("").to_string();
+            let is_live = snippet["liveBroadcastContent"].as_str() == Some("live");
+            let duration_secs = *duration_map.get(video_id).unwrap_or(&0);
+            let url = format!("https://www.youtube.com/watch?v={}", video_id);
+            Some(YoutubeResultRow { title, channel_title, is_live, duration_secs, url, form_id: i })
+        })
+        .collect();
+
+    Ok(rows)
 }
 
-async fn fetch_m3u(_client: &reqwest::Client) -> anyhow::Result<String> {
-    Ok(String::new())
+async fn fetch_m3u(client: &reqwest::Client) -> anyhow::Result<String> {
+    let text = client
+        .get("https://iptv-org.github.io/iptv/index.m3u")
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    Ok(text)
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────
@@ -517,5 +648,89 @@ mod tests {
         let result = filter_m3u(&channels, "US", "news");
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "CNN");
+    }
+
+    #[tokio::test]
+    async fn test_add_new_live_channel_creates_source() {
+        let pool = test_pool().await;
+        let ch_id = do_discover_add(
+            &pool, "https://example.com/s.m3u8", "CNN", "hls", 0,
+            "new", "CNN", "news", "live",
+        ).await.unwrap();
+        let ch = channel::get(&pool, ch_id).await.unwrap().unwrap();
+        assert_eq!(ch.r#type, "live");
+        let sources = source::list_for_channel(&pool, ch_id).await.unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].kind, "hls");
+        assert_eq!(sources[0].url, "https://example.com/s.m3u8");
+    }
+
+    #[tokio::test]
+    async fn test_add_new_vod_channel_creates_playlist_item() {
+        let pool = test_pool().await;
+        let ch_id = do_discover_add(
+            &pool, "https://example.com/ep1.mp4", "Ep 1", "hls", 3600,
+            "new", "My Show", "entertainment", "vod_loop",
+        ).await.unwrap();
+        let ch = channel::get(&pool, ch_id).await.unwrap().unwrap();
+        assert_eq!(ch.r#type, "vod_loop");
+        assert!(ch.loop_anchor.is_some());
+        let items = playlist_item::list_for_channel(&pool, ch_id).await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].duration_secs, 3600);
+        assert_eq!(items[0].title, "Ep 1");
+    }
+
+    #[tokio::test]
+    async fn test_add_source_to_existing_live_channel() {
+        let pool = test_pool().await;
+        let existing = channel::create(&pool, channel::NewChannel {
+            name: "Existing".into(), category: "news".into(), logo_url: None,
+            channel_type: "live".into(), sort_order: 0, loop_anchor: None,
+        }).await.unwrap();
+        let ch_id = do_discover_add(
+            &pool, "https://example.com/s.m3u8", "Existing", "iptv", 0,
+            &existing.id.to_string(), "", "", "",
+        ).await.unwrap();
+        assert_eq!(ch_id, existing.id);
+        let sources = source::list_for_channel(&pool, ch_id).await.unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].kind, "iptv");
+    }
+
+    #[tokio::test]
+    async fn test_add_playlist_item_to_existing_vod_channel() {
+        let pool = test_pool().await;
+        let existing = channel::create(&pool, channel::NewChannel {
+            name: "VOD".into(), category: "movies".into(), logo_url: None,
+            channel_type: "vod_loop".into(), sort_order: 0, loop_anchor: Some(Utc::now()),
+        }).await.unwrap();
+        let ch_id = do_discover_add(
+            &pool, "https://example.com/movie.mp4", "Movie", "hls", 5400,
+            &existing.id.to_string(), "", "", "",
+        ).await.unwrap();
+        let items = playlist_item::list_for_channel(&pool, ch_id).await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].duration_secs, 5400);
+    }
+
+    #[tokio::test]
+    async fn test_add_returns_422_when_new_name_empty() {
+        let pool = test_pool().await;
+        let result = do_discover_add(
+            &pool, "https://example.com/s.m3u8", "Test", "hls", 0,
+            "new", "", "news", "live",
+        ).await;
+        assert_eq!(result, Err(StatusCode::UNPROCESSABLE_ENTITY));
+    }
+
+    #[tokio::test]
+    async fn test_add_returns_422_when_vod_duration_zero() {
+        let pool = test_pool().await;
+        let result = do_discover_add(
+            &pool, "https://example.com/v.mp4", "Test", "hls", 0,
+            "new", "Show", "movies", "vod_loop",
+        ).await;
+        assert_eq!(result, Err(StatusCode::UNPROCESSABLE_ENTITY));
     }
 }

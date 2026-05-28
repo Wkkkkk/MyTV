@@ -1,1 +1,39 @@
-<p>M3U results stub</p>
+{% if rows.is_empty() %}
+<p class="empty-state">No channels matched — try different filters.</p>
+{% else %}
+<p style="font-size:0.78rem;color:#555;margin-bottom:8px">{{ rows.len() }} results (max 50)</p>
+<table>
+  <thead>
+    <tr><th>Name</th><th>Group</th><th>Country</th><th style="max-width:260px">URL</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.name }}</td>
+      <td style="color:#777">{{ row.group }}</td>
+      <td style="color:#777">{{ row.country }}</td>
+      <td style="font-size:0.75rem;word-break:break-all;max-width:260px;color:#555">{{ row.url }}</td>
+      <td style="white-space:nowrap">
+        <form hx-post="/admin/discover/add-form"
+              hx-target="#add-form-{{ row.form_id }}"
+              hx-swap="innerHTML"
+              style="display:inline">
+          <input type="hidden" name="url" value="{{ row.url }}">
+          <input type="hidden" name="title" value="{{ row.name }}">
+          <input type="hidden" name="is_live" value="true">
+          <input type="hidden" name="duration_secs" value="0">
+          <input type="hidden" name="source_kind" value="{{ row.source_kind }}">
+          <input type="hidden" name="form_id" value="{{ row.form_id }}">
+          <button type="submit" class="btn btn-primary btn-sm">Add</button>
+        </form>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="5" style="padding:0">
+        <div id="add-form-{{ row.form_id }}" style="padding:10px 14px;background:#080810"></div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

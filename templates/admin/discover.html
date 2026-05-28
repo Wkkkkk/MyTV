@@ -1,4 +1,89 @@
 {% extends "admin/base.html" %}
 {% block content %}
-<p>Discover stub</p>
+<div class="page-header">
+  <h2>Discover Channels</h2>
+</div>
+
+<div class="tabs">
+  <a class="tab active" id="tab-btn-m3u" href="javascript:void(0)" onclick="showDiscover('m3u')">M3U Import</a>
+  <a class="tab" id="tab-btn-youtube" href="javascript:void(0)" onclick="showDiscover('youtube')">YouTube</a>
+  <a class="tab" id="tab-btn-manual" href="javascript:void(0)" onclick="showDiscover('manual')">Manual URL</a>
+</div>
+
+<!-- M3U Tab -->
+<div id="tab-panel-m3u">
+  <form hx-post="/admin/discover/m3u/search"
+        hx-target="#m3u-results"
+        hx-swap="innerHTML"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
+    <div class="form-row" style="margin:0;min-width:140px">
+      <label>Country</label>
+      <input type="text" name="country" placeholder="e.g. US">
+    </div>
+    <div class="form-row" style="margin:0;min-width:160px">
+      <label>Category / Group</label>
+      <input type="text" name="group" placeholder="e.g. News">
+    </div>
+    <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Search</button>
+  </form>
+  <p class="empty-state" style="font-size:0.8rem">Enter a country or category filter, then click Search. Returns up to 50 channels from the iptv-org public index.</p>
+  <div id="m3u-results"></div>
+</div>
+
+<!-- YouTube Tab -->
+<div id="tab-panel-youtube" style="display:none">
+  {% if youtube_api_key_set %}
+  <form hx-post="/admin/discover/youtube/search"
+        hx-target="#yt-results"
+        hx-swap="innerHTML"
+        style="display:flex;gap:10px;align-items:flex-end;margin-bottom:16px">
+    <div class="form-row" style="margin:0;flex:1;min-width:200px">
+      <label>Keyword</label>
+      <input type="text" name="keyword" placeholder="search YouTube…">
+    </div>
+    <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Search</button>
+  </form>
+  <div id="yt-results"></div>
+  {% else %}
+  <p class="empty-state" style="padding:20px 0">
+    Set the <code style="background:#1a1a1a;padding:2px 6px;border-radius:3px">YOUTUBE_API_KEY</code>
+    environment variable to enable YouTube search.
+  </p>
+  {% endif %}
+</div>
+
+<!-- Manual Tab -->
+<div id="tab-panel-manual" style="display:none">
+  <form hx-post="/admin/discover/manual/resolve"
+        hx-target="#manual-result"
+        hx-swap="innerHTML"
+        style="display:flex;gap:10px;align-items:flex-end;margin-bottom:16px">
+    <div class="form-row" style="margin:0;flex:1;min-width:260px">
+      <label>Stream URL (HLS, IPTV, or YouTube)</label>
+      <input type="text" name="url" placeholder="https://…" required>
+    </div>
+    <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Resolve</button>
+  </form>
+  <div id="manual-result"></div>
+</div>
+
+<script>
+function showDiscover(tab) {
+  ['m3u', 'youtube', 'manual'].forEach(function(t) {
+    document.getElementById('tab-panel-' + t).style.display = t === tab ? '' : 'none';
+    document.getElementById('tab-btn-' + t).classList.toggle('active', t === tab);
+  });
+}
+function discoverToggle(value, formId) {
+  var newDiv = document.getElementById('new-ch-' + formId);
+  var existDiv = document.getElementById('exist-ch-' + formId);
+  if (value === 'new') {
+    if (newDiv) newDiv.style.display = '';
+    if (existDiv) existDiv.style.display = 'none';
+  } else {
+    if (newDiv) newDiv.style.display = 'none';
+    if (existDiv) existDiv.style.display = '';
+  }
+}
+</script>
 {% endblock %}
