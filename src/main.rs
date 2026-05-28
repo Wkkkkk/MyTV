@@ -72,6 +72,7 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/health", get(routes::health::health_check))
         .route("/guide", get(routes::guide::guide_page))
+        .route("/guide/", get(|| async { axum::response::Redirect::permanent("/guide") }))
         .route("/guide/partial", get(routes::guide::guide_partial))
         .route("/channel/:id/tune", get(routes::player::tune))
         .route("/channel/:id/next", get(routes::player::next))
