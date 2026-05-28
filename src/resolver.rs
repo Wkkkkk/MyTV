@@ -76,6 +76,73 @@ pub async fn fetch_duration_secs(url: &str) -> Result<i64> {
     Ok(duration.round() as i64)
 }
 
+/// Fetches the total duration of an HLS VOD stream by parsing its manifest.
+/// Follows master playlists to the first variant. Returns an error for live streams.
+pub async fn fetch_hls_duration(client: &reqwest::Client, url: &str) -> Result<i64> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        bail!("invalid URL scheme: {}", url);
+    }
+    let text = client
+        .get(url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+
+    // Master playlist → recurse into first variant
+    if text.contains("#EXT-X-STREAM-INF") {
+        let variant = first_variant_url(&text, url)
+            .ok_or_else(|| anyhow::anyhow!("no variant found in master playlist: {}", url))?;
+        return Box::pin(fetch_hls_duration(client, &variant)).await;
+    }
+
+    // Live streams have no EXT-X-ENDLIST and no fixed duration
+    if !text.contains("#EXT-X-ENDLIST") {
+        bail!("live HLS stream has no fixed duration: {}", url);
+    }
+
+    let total: f64 = text
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("#EXTINF:")?;
+            rest.split(',').next()?.parse::<f64>().ok()
+        })
+        .sum();
+
+    if total <= 0.0 {
+        bail!("could not parse duration from HLS manifest: {}", url);
+    }
+    Ok(total.ceil() as i64)
+}
+
+fn first_variant_url(manifest: &str, base_url: &str) -> Option<String> {
+    let base_dir = base_url.rsplit_once('/')?.0;
+    let origin = {
+        let after = base_url.find("://")? + 3;
+        let host_len = base_url[after..].find('/').unwrap_or(base_url[after..].len());
+        &base_url[..after + host_len]
+    };
+    let mut next_is_url = false;
+    for line in manifest.lines() {
+        if line.starts_with("#EXT-X-STREAM-INF") {
+            next_is_url = true;
+        } else if next_is_url && !line.starts_with('#') && !line.is_empty() {
+            return Some(if line.starts_with("http://") || line.starts_with("https://") {
+                line.to_string()
+            } else if line.starts_with('/') {
+                format!("{}{}", origin, line)
+            } else {
+                format!("{}/{}", base_dir, line)
+            });
+        } else if !line.is_empty() {
+            next_is_url = false;
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

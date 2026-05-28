@@ -479,7 +479,10 @@ pub async fn playlist_item_create(
                 StatusCode::UNPROCESSABLE_ENTITY
             })?;
         } else {
-            return Err(StatusCode::UNPROCESSABLE_ENTITY);
+            duration_secs = resolver::fetch_hls_duration(&state.http_client, &url).await.map_err(|e| {
+                tracing::warn!(url = %url, error = %e, "failed to fetch HLS duration");
+                StatusCode::UNPROCESSABLE_ENTITY
+            })?;
         }
     }
 

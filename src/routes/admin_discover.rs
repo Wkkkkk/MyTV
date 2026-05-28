@@ -184,6 +184,7 @@ pub async fn discover_add(
     let duration_secs: i64 = form.duration_secs.parse().unwrap_or(0);
     match do_discover_add(
         &state.pool,
+        &state.http_client,
         &form.url,
         &form.title,
         &form.source_kind,
@@ -394,6 +395,7 @@ pub fn parse_iso8601_duration(s: &str) -> i64 {
 
 pub async fn do_discover_add(
     pool: &sqlx::SqlitePool,
+    client: &reqwest::Client,
     url: &str,
     title: &str,
     source_kind: &str,
@@ -445,7 +447,10 @@ pub async fn do_discover_add(
                     StatusCode::UNPROCESSABLE_ENTITY
                 })?;
             } else {
-                return Err(StatusCode::UNPROCESSABLE_ENTITY);
+                duration_secs = resolver::fetch_hls_duration(client, url).await.map_err(|e| {
+                    tracing::warn!(url = %url, error = %e, "failed to fetch HLS duration in discover_add");
+                    StatusCode::UNPROCESSABLE_ENTITY
+                })?;
             }
         }
         let items = playlist_item::list_for_channel(pool, channel_id)
@@ -741,8 +746,9 @@ mod tests {
     #[tokio::test]
     async fn test_add_new_live_channel_creates_source() {
         let pool = test_pool().await;
+        let client = reqwest::Client::new();
         let ch_id = do_discover_add(
-            &pool, "https://example.com/s.m3u8", "CNN", "hls", 0,
+            &pool, &client, "https://example.com/s.m3u8", "CNN", "hls", 0,
             "new", "CNN", "news", "live",
         ).await.unwrap();
         let ch = channel::get(&pool, ch_id).await.unwrap().unwrap();
@@ -756,8 +762,9 @@ mod tests {
     #[tokio::test]
     async fn test_add_new_vod_channel_creates_playlist_item() {
         let pool = test_pool().await;
+        let client = reqwest::Client::new();
         let ch_id = do_discover_add(
-            &pool, "https://example.com/ep1.mp4", "Ep 1", "hls", 3600,
+            &pool, &client, "https://example.com/ep1.mp4", "Ep 1", "hls", 3600,
             "new", "My Show", "entertainment", "vod_loop",
         ).await.unwrap();
         let ch = channel::get(&pool, ch_id).await.unwrap().unwrap();
@@ -776,8 +783,9 @@ mod tests {
             name: "Existing".into(), category: "news".into(), logo_url: None,
             channel_type: "live".into(), sort_order: 0, loop_anchor: None,
         }).await.unwrap();
+        let client = reqwest::Client::new();
         let ch_id = do_discover_add(
-            &pool, "https://example.com/s.m3u8", "Existing", "iptv", 0,
+            &pool, &client, "https://example.com/s.m3u8", "Existing", "iptv", 0,
             &existing.id.to_string(), "", "", "",
         ).await.unwrap();
         assert_eq!(ch_id, existing.id);
@@ -793,8 +801,9 @@ mod tests {
             name: "VOD".into(), category: "movies".into(), logo_url: None,
             channel_type: "vod_loop".into(), sort_order: 0, loop_anchor: Some(Utc::now()),
         }).await.unwrap();
+        let client = reqwest::Client::new();
         let ch_id = do_discover_add(
-            &pool, "https://example.com/movie.mp4", "Movie", "hls", 5400,
+            &pool, &client, "https://example.com/movie.mp4", "Movie", "hls", 5400,
             &existing.id.to_string(), "", "", "",
         ).await.unwrap();
         let items = playlist_item::list_for_channel(&pool, ch_id).await.unwrap();
@@ -805,8 +814,9 @@ mod tests {
     #[tokio::test]
     async fn test_add_returns_422_when_new_name_empty() {
         let pool = test_pool().await;
+        let client = reqwest::Client::new();
         let result = do_discover_add(
-            &pool, "https://example.com/s.m3u8", "Test", "hls", 0,
+            &pool, &client, "https://example.com/s.m3u8", "Test", "hls", 0,
             "new", "", "news", "live",
         ).await;
         assert_eq!(result, Err(StatusCode::UNPROCESSABLE_ENTITY));
@@ -815,8 +825,9 @@ mod tests {
     #[tokio::test]
     async fn test_add_returns_422_when_vod_duration_zero() {
         let pool = test_pool().await;
+        let client = reqwest::Client::new();
         let result = do_discover_add(
-            &pool, "https://example.com/v.mp4", "Test", "hls", 0,
+            &pool, &client, "https://example.com/v.mp4", "Test", "hls", 0,
             "new", "Show", "movies", "vod_loop",
         ).await;
         assert_eq!(result, Err(StatusCode::UNPROCESSABLE_ENTITY));
