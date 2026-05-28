@@ -8,7 +8,10 @@ mod routes;
 mod source;
 
 use anyhow::Result;
-use axum::{middleware, routing::{get, post}, Router};
+use axum::{
+    extract::Request, middleware::{self, Next}, response::{IntoResponse, Redirect},
+    routing::{get, post}, Router,
+};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -18,6 +21,19 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub config: Arc<config::Config>,
     pub http_client: reqwest::Client,
+}
+
+async fn redirect_trailing_slash(req: Request, next: Next) -> axum::response::Response {
+    let path = req.uri().path();
+    if path != "/" && path.ends_with('/') {
+        let new_path = path.trim_end_matches('/');
+        let location = match req.uri().query() {
+            Some(q) => format!("{}?{}", new_path, q),
+            None => new_path.to_string(),
+        };
+        return Redirect::permanent(&location).into_response();
+    }
+    next.run(req).await
 }
 
 #[tokio::main]
@@ -72,12 +88,12 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/health", get(routes::health::health_check))
         .route("/guide", get(routes::guide::guide_page))
-        .route("/guide/", get(|| async { axum::response::Redirect::permanent("/guide") }))
         .route("/guide/partial", get(routes::guide::guide_partial))
         .route("/channel/:id/tune", get(routes::player::tune))
         .route("/channel/:id/next", get(routes::player::next))
         .route("/stream-proxy", get(routes::player::stream_proxy))
         .nest("/admin", admin_router)
+        .layer(middleware::from_fn(redirect_trailing_slash))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", config.port);
