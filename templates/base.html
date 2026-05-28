@@ -93,9 +93,12 @@
           if (data.fatal && currentChannelId) {
             console.warn('hls fatal error, trying next source:', data.type, data.details);
             fetch('/channel/' + currentChannelId + '/next')
-              .then(function(r) { return r.json(); })
-              .then(function(d) { if (d.url) _loadSource(d.url, d.start_offset_secs); })
-              .catch(function(err) { console.error('failover error:', err); });
+              .then(function(r) {
+                if (!r.ok) { showPlayerError(); return; }
+                return r.json();
+              })
+              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
+              .catch(function(err) { console.error('failover error:', err); showPlayerError(); });
           }
         });
       }
@@ -121,8 +124,21 @@
         }
       }
 
+      function showPlayerError() {
+        if (video) video.style.display = 'none';
+        var el = document.getElementById('player-error');
+        if (el) el.style.display = 'block';
+      }
+
+      function hidePlayerError() {
+        if (video) video.style.display = '';
+        var el = document.getElementById('player-error');
+        if (el) el.style.display = 'none';
+      }
+
       function tune(channelId) {
         currentChannelId = channelId;
+        hidePlayerError();
         document.getElementById('player-panel').style.display = 'block';
         fetch('/channel/' + channelId + '/tune')
           .then(function(r) {
@@ -130,7 +146,7 @@
             return r.json();
           })
           .then(function(d) { _loadSource(d.url, d.start_offset_secs); })
-          .catch(function(err) { console.error('tune error:', err); });
+          .catch(function(err) { console.error('tune error:', err); showPlayerError(); });
       }
 
       if (video) {
@@ -144,7 +160,7 @@
             .then(function(d) {
               if (d.url) _loadSource(d.url, d.start_offset_secs);
             })
-            .catch(function(err) { console.error('next error:', err); });
+            .catch(function(err) { console.error('next error:', err); showPlayerError(); });
         });
       }
 
