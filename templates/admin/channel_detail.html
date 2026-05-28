@@ -80,6 +80,34 @@
   </form>
 </div>
 
+<!-- Now & Upcoming (vod_loop only, rendered when schedule is computable) -->
+{% if !vod_schedule.is_empty() %}
+<div class="section">
+  <h3>Now &amp; Upcoming</h3>
+  <table>
+    <thead>
+      <tr><th></th><th>Title</th><th>Starts</th><th>Duration</th></tr>
+    </thead>
+    <tbody>
+      {% for row in vod_schedule %}
+      <tr>
+        <td style="white-space:nowrap">
+          {% if row.is_current %}
+          <span class="badge badge-live">NOW</span>
+          {% else %}
+          <span style="color:#555">{{ loop.index0 }}</span>
+          {% endif %}
+        </td>
+        <td>{{ row.title }}</td>
+        <td style="white-space:nowrap;color:#777;font-size:0.8rem">{{ row.start_time }}</td>
+        <td style="white-space:nowrap;color:#777;font-size:0.8rem">{{ row.duration_secs }}s</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 <!-- Playlist items (vod_loop only) -->
 {% if channel_type.as_str() == "vod_loop" %}
 <div class="section">
