@@ -210,14 +210,30 @@ pub async fn discover_m3u_search(
     };
     let all = parse_m3u(&raw);
     let matches = filter_m3u(&all, "", &form.group);
-    let rows: Vec<M3uResultRow> = matches.iter().enumerate().map(|(i, ch)| M3uResultRow {
-        name: ch.name.clone(),
-        group: ch.group.clone(),
-        country: ch.country.clone(),
-        url: ch.url.clone(),
-        source_kind: detect_source_kind(&ch.url).to_string(),
-        form_id: i,
+
+    // Check reachability concurrently; spawn all tasks first, then await in order.
+    let handles: Vec<_> = matches.iter().map(|ch| {
+        let client = state.http_client.clone();
+        let url = ch.url.clone();
+        tokio::spawn(async move { url_is_reachable(&client, &url).await })
     }).collect();
+    let reachable: Vec<bool> = {
+        let mut r = Vec::with_capacity(handles.len());
+        for h in handles { r.push(h.await.unwrap_or(false)); }
+        r
+    };
+
+    let rows: Vec<M3uResultRow> = matches.iter().zip(reachable)
+        .filter(|(_, ok)| *ok)
+        .enumerate()
+        .map(|(i, (ch, _))| M3uResultRow {
+            name: ch.name.clone(),
+            group: ch.group.clone(),
+            country: ch.country.clone(),
+            url: ch.url.clone(),
+            source_kind: detect_source_kind(&ch.url).to_string(),
+            form_id: i,
+        }).collect();
     match (M3uResultsTemplate { rows }).render() {
         Ok(html) => Html(html),
         Err(e) => { tracing::error!("template error: {e}"); Html("<p class=\"empty-state\" style=\"color:#f77\">Render error.</p>".to_string()) }
@@ -512,6 +528,18 @@ async fn fetch_youtube_results(
         .collect();
 
     Ok(rows)
+}
+
+async fn url_is_reachable(client: &reqwest::Client, url: &str) -> bool {
+    match client
+        .head(url)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+    {
+        Ok(r) => r.status().is_success() || r.status().is_redirection(),
+        Err(_) => false,
+    }
 }
 
 fn country_to_code(input: &str) -> Option<String> {
