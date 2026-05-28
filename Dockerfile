@@ -5,12 +5,6 @@ FROM rust:1-slim-bookworm AS builder
 
 WORKDIR /app
 
-# Inject local corporate/proxy CA so cargo can reach crates.io through the proxy
-COPY charles-ca.pem /usr/local/share/ca-certificates/charles-ca.crt
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && update-ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
 # Build dependencies layer (cached unless Cargo.toml/Cargo.lock change)
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs \
@@ -29,9 +23,6 @@ RUN strip /app/target/release/mytv
 FROM debian:bookworm-slim AS runtime
 
 WORKDIR /app
-
-# Inject local corporate/proxy CA (required when building behind an SSL-inspecting proxy)
-COPY charles-ca.pem /usr/local/share/ca-certificates/charles-ca.crt
 
 # ca-certificates: needed by reqwest (rustls) for HTTPS
 # python3-pip: used to install yt-dlp (called via Command::new("yt-dlp") at runtime)
