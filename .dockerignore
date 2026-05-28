@@ -1,0 +1,6 @@
+target/
+*.db
+*.pem
+!charles-ca.pem
+.env
+.git/
