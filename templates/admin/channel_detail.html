@@ -51,6 +51,13 @@
             <button class="btn btn-sm btn-danger" type="submit"
                     onclick="return confirm('Remove this source?')">Delete</button>
           </form>
+          <form hx-post="/admin/sources/{{ src.id }}/test"
+                hx-target="#src-test-{{ src.id }}"
+                hx-swap="innerHTML"
+                style="display:inline-block;margin-left:4px">
+            <button class="btn btn-sm" type="submit">Test</button>
+          </form>
+          <span id="src-test-{{ src.id }}"></span>
         </td>
       </tr>
       {% endfor %}
