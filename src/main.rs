@@ -55,6 +55,7 @@ async fn main() -> Result<()> {
         .route("/channels/:id/sources", post(routes::admin::source_create))
         .route("/sources/:id/delete", post(routes::admin::source_delete))
         .route("/sources/:id/toggle", post(routes::admin::source_toggle))
+        .route("/sources/:id/test", post(routes::admin::source_test))
         .route("/channels/:id/playlist", post(routes::admin::playlist_item_create))
         .route("/playlist/:id/delete", post(routes::admin::playlist_item_delete))
         .route("/discover", get(routes::admin_discover::discover_page))

@@ -522,6 +522,47 @@ pub async fn playlist_item_delete(
     Ok(Redirect::to(&format!("/admin/channels/{}", item.channel_id)))
 }
 
+pub async fn source_test(
+    State(state): State<AppState>,
+    Path(source_id): Path<i64>,
+) -> Result<Html<String>, StatusCode> {
+    let src = sqlx::query_as::<_, source::Source>(
+        "SELECT * FROM sources WHERE id = ?",
+    )
+    .bind(source_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let ok_html = r#"<span class="badge badge-on">OK</span>"#;
+    let fail_html = r#"<span style="color:#e94560;font-size:0.78rem">Failed</span>"#;
+
+    if resolver::needs_resolution(&src.url) {
+        return Ok(Html(match resolver::resolve_url(&src.url).await {
+            Ok(_) => ok_html.to_string(),
+            Err(_) => fail_html.to_string(),
+        }));
+    }
+
+    Ok(Html(match state
+        .http_client
+        .head(&src.url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
+            ok_html.to_string()
+        }
+        Ok(resp) => format!(
+            r#"<span style="color:#e94560;font-size:0.78rem">Failed: HTTP {}</span>"#,
+            resp.status().as_u16()
+        ),
+        Err(_) => fail_html.to_string(),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
