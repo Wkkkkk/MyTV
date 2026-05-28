@@ -14,6 +14,63 @@ A personal web app that repackages live internet streams and VOD content into a 
 
 ---
 
+## Quick start: adding your first channel
+
+The fastest way to verify everything works:
+
+**1. Open the admin UI** at `http://localhost:3000/admin` (default credentials: `admin` / `admin`, or whatever you set in `.env`).
+
+**2. Create a channel** — go to **Channels → New Channel**. Give it a name and category. Leave the type as **Live**.
+
+**3. Add a source** — on the channel detail page, paste an HLS `.m3u8` URL into the **Add Source** form and click Add.
+
+Public test streams that are reliably up:
+
+| Name | URL |
+|---|---|
+| Apple reference stream | `https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8` |
+| Mux test (Big Buck Bunny) | `https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8` |
+
+**4. Watch** — open `http://localhost:3000/guide` and click the channel name to tune in.
+
+For more channels, use **Discover** (`/admin/discover`) to browse the [iptv-org](https://github.com/iptv-org/iptv) index or search YouTube.
+
+---
+
+## Admin UI
+
+### Channels
+
+Each channel has a type — **Live** or **VOD** — set at creation time.
+
+**Live channels** play a real-time stream. Add one or more sources (HLS `.m3u8` or YouTube/Twitch URLs). If the primary source fails, MyTV automatically falls back to the next source. To check whether a source is reachable without tuning in, click the **Test** button on any source row — the result appears inline as OK or Failed.
+
+**VOD channels** loop a playlist continuously, like a FAST channel. Every viewer sees the same position (computed server-side from a fixed anchor time). Add playlist items in the order you want them to play.
+
+### Adding playlist items (VOD)
+
+Paste a URL and fill in a title and duration. For YouTube URLs, leave Duration blank — MyTV will call yt-dlp to fetch the duration automatically. For HLS/direct URLs, enter the duration in seconds (e.g. `3600` for a one-hour file).
+
+The **Now & Upcoming** table on the channel detail page shows what's currently playing in the loop and what's next, so you can verify the schedule without watching.
+
+### Discovery
+
+The **Discover** tab (`/admin/discover`) has three ways to find content:
+
+- **iptv-org** — search the public iptv-org M3U index by country or group. Matching streams can be added as live channels in one click.
+- **YouTube** — search YouTube by keyword (requires a YouTube API key — see [Getting a YouTube API key](#getting-a-youtube-api-key-optional)). Results show duration and can be added as VOD playlist items.
+- **Manual** — paste any HLS or YouTube URL directly.
+
+### Source types
+
+| URL pattern | How it's handled |
+|---|---|
+| `.m3u8` | Passed directly to the player |
+| `youtube.com`, `youtu.be` | Resolved via yt-dlp at tune-in time to a direct HLS URL |
+| `twitch.tv` | Resolved via yt-dlp at tune-in time |
+
+---
+
 ## Requirements
 
 | Dependency | Purpose |
