@@ -1,5 +1,7 @@
 # MyTV
 
+[![CI](https://github.com/Wkkkkk/MyTV/actions/workflows/ci.yml/badge.svg)](https://github.com/Wkkkkk/MyTV/actions/workflows/ci.yml)
+
 A personal web app that repackages live internet streams and VOD content into a cable TV–style experience. Browse channels through an EPG grid, click to watch. No app installs, no playlist management at watch time.
 
 ---
@@ -89,6 +91,18 @@ brew install yt-dlp
 pip install yt-dlp
 # or download the standalone binary from the releases page
 ```
+
+---
+
+## Development setup
+
+**Install git hooks** (run once after cloning):
+
+```bash
+./scripts/install-hooks.sh
+```
+
+This installs a pre-push hook that runs `cargo fmt --check`, `cargo clippy --all-targets`, and `cargo test` before every push.
 
 ---
 
@@ -274,6 +288,49 @@ YouTube changes its internal APIs frequently and yt-dlp releases patches weekly.
 ```
 
 Or with pip: `0 3 * * 0 pip install -q --upgrade yt-dlp`
+
+### Deploying to Fly.io
+
+**One-time setup:**
+
+1. Install the Fly CLI: https://fly.io/docs/hands-on/install-flyctl/
+2. Log in: `fly auth login`
+3. Create the app (choose a unique name when prompted):
+   ```bash
+   fly launch --no-deploy
+   ```
+   When asked about an existing `fly.toml`, say **yes** to use it.
+4. Create the persistent volume for the SQLite database:
+   ```bash
+   fly volumes create mytv_data --region ams --size 1
+   ```
+5. Set secrets:
+   ```bash
+   fly secrets set ADMIN_PASSWORD=<strong-password>
+   # Optional: fly secrets set YOUTUBE_API_KEY=<key>
+   ```
+6. Deploy:
+   ```bash
+   fly deploy
+   ```
+
+**Subsequent deploys:**
+
+```bash
+fly deploy
+```
+
+**Check logs:**
+
+```bash
+fly logs
+```
+
+**Open a console on the running machine:**
+
+```bash
+fly ssh console
+```
 
 ---
 
