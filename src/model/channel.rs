@@ -98,14 +98,13 @@ pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Channel>> {
 }
 
 pub async fn list(pool: &SqlitePool) -> Result<Vec<Channel>> {
-    sqlx::query_as::<_, Channel>(
-        "SELECT * FROM channels ORDER BY sort_order ASC, name ASC",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(Into::into)
+    sqlx::query_as::<_, Channel>("SELECT * FROM channels ORDER BY sort_order ASC, name ASC")
+        .fetch_all(pool)
+        .await
+        .map_err(Into::into)
 }
 
+#[allow(dead_code)]
 pub async fn list_by_category(pool: &SqlitePool, category: &str) -> Result<Vec<Channel>> {
     sqlx::query_as::<_, Channel>(
         "SELECT * FROM channels WHERE category = ? ORDER BY sort_order ASC, name ASC",
@@ -161,7 +160,9 @@ mod tests {
     async fn test_create_and_get_channel() {
         let pool = test_pool().await;
 
-        let ch = create(&pool, live("CNN International", "news")).await.unwrap();
+        let ch = create(&pool, live("CNN International", "news"))
+            .await
+            .unwrap();
 
         assert_eq!(ch.name, "CNN International");
         assert_eq!(ch.category, "news");

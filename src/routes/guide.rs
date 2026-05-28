@@ -10,7 +10,10 @@ use sqlx::SqlitePool;
 
 use crate::{
     epg,
-    model::{channel::{self, Channel, ChannelType}, playlist_item},
+    model::{
+        channel::{self, Channel, ChannelType},
+        playlist_item,
+    },
     AppState,
 };
 
@@ -30,6 +33,7 @@ pub struct TimeLabel {
 }
 
 pub struct ChannelRow {
+    #[allow(dead_code)]
     pub id: i64,
     pub name: String,
     pub programs: Vec<ProgramSlot>,
@@ -123,7 +127,11 @@ pub fn time_labels(window_start: DateTime<Utc>, window_end: DateTime<Utc>) -> Ve
     let start_ts = window_start.timestamp();
     let end_ts = window_end.timestamp();
     let rem = start_ts.rem_euclid(3600);
-    let first_tick = if rem == 0 { start_ts } else { start_ts + (3600 - rem) };
+    let first_tick = if rem == 0 {
+        start_ts
+    } else {
+        start_ts + (3600 - rem)
+    };
     let mut labels = Vec::new();
     let mut ts = first_tick;
     while ts <= end_ts {
@@ -166,7 +174,10 @@ async fn build_guide_data(
     let channels: Vec<Channel> = if category == "all" {
         all_channels
     } else {
-        all_channels.into_iter().filter(|c| c.category == category).collect()
+        all_channels
+            .into_iter()
+            .filter(|c| c.category == category)
+            .collect()
     };
 
     let mut rows = Vec::new();
@@ -328,8 +339,16 @@ mod tests {
         let (ws, we) = w();
         let e = make_entry(1, 3600, 7200, false);
         let slot = entry_to_slot(&e, ws, we).unwrap();
-        assert!((slot.left_pct - 25.0).abs() < 0.01, "left={}", slot.left_pct);
-        assert!((slot.width_pct - 25.0).abs() < 0.01, "width={}", slot.width_pct);
+        assert!(
+            (slot.left_pct - 25.0).abs() < 0.01,
+            "left={}",
+            slot.left_pct
+        );
+        assert!(
+            (slot.width_pct - 25.0).abs() < 0.01,
+            "width={}",
+            slot.width_pct
+        );
         assert!(!slot.is_live);
     }
 
@@ -347,7 +366,11 @@ mod tests {
         let e = make_entry(1, -3600, 3600, false);
         let slot = entry_to_slot(&e, ws, we).unwrap();
         assert!((slot.left_pct - 0.0).abs() < 0.01, "left={}", slot.left_pct);
-        assert!((slot.width_pct - 25.0).abs() < 0.01, "width={}", slot.width_pct);
+        assert!(
+            (slot.width_pct - 25.0).abs() < 0.01,
+            "width={}",
+            slot.width_pct
+        );
     }
 
     #[test]
@@ -355,8 +378,16 @@ mod tests {
         let (ws, we) = w();
         let e = make_entry(1, 10800, 18000, false);
         let slot = entry_to_slot(&e, ws, we).unwrap();
-        assert!((slot.left_pct - 75.0).abs() < 0.01, "left={}", slot.left_pct);
-        assert!((slot.width_pct - 25.0).abs() < 0.01, "width={}", slot.width_pct);
+        assert!(
+            (slot.left_pct - 75.0).abs() < 0.01,
+            "left={}",
+            slot.left_pct
+        );
+        assert!(
+            (slot.width_pct - 25.0).abs() < 0.01,
+            "width={}",
+            slot.width_pct
+        );
     }
 
     #[test]

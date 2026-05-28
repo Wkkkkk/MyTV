@@ -7,12 +7,12 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 
+use crate::routes::{internal_error, render};
 use crate::{
     media::{hls, m3u, resolver},
     model::{channel, playlist_item, source},
     AppState,
 };
-use crate::routes::{internal_error, render};
 
 // ── pure data types ────────────────────────────────────────────────────────
 
@@ -121,6 +121,7 @@ pub struct AddFormQuery {
 pub struct AddForm {
     pub url: String,
     pub title: String,
+    #[allow(dead_code)]
     pub is_live: String,
     pub duration_secs: String,
     pub source_kind: String,
@@ -142,9 +143,15 @@ pub async fn discover_add_form(
     State(state): State<AppState>,
     Form(form): Form<AddFormQuery>,
 ) -> Result<Html<String>, StatusCode> {
-    let channels = channel::list(&state.pool).await.map_err(internal_error)?
+    let channels = channel::list(&state.pool)
+        .await
+        .map_err(internal_error)?
         .into_iter()
-        .map(|ch| DiscoverChannelOption { id: ch.id, name: ch.name, type_str: ch.r#type })
+        .map(|ch| DiscoverChannelOption {
+            id: ch.id,
+            name: ch.name,
+            type_str: ch.r#type,
+        })
         .collect();
     let is_live = form.is_live == "true";
     let duration_secs: i64 = form.duration_secs.parse().unwrap_or(0);
@@ -205,18 +212,25 @@ pub async fn discover_m3u_search(
     let all = m3u::parse_m3u(&raw);
     let matches = m3u::filter_m3u(&all, "", &form.group);
 
-    let handles: Vec<_> = matches.iter().map(|ch| {
-        let client = state.http_client.clone();
-        let url = ch.url.clone();
-        tokio::spawn(async move { url_is_reachable(&client, &url).await })
-    }).collect();
+    let handles: Vec<_> = matches
+        .iter()
+        .map(|ch| {
+            let client = state.http_client.clone();
+            let url = ch.url.clone();
+            tokio::spawn(async move { url_is_reachable(&client, &url).await })
+        })
+        .collect();
     let reachable: Vec<bool> = {
         let mut r = Vec::with_capacity(handles.len());
-        for h in handles { r.push(h.await.unwrap_or(false)); }
+        for h in handles {
+            r.push(h.await.unwrap_or(false));
+        }
         r
     };
 
-    let rows: Vec<M3uResultRow> = matches.iter().zip(reachable)
+    let rows: Vec<M3uResultRow> = matches
+        .iter()
+        .zip(reachable)
         .filter(|(_, ok)| *ok)
         .enumerate()
         .map(|(i, (ch, _))| M3uResultRow {
@@ -226,10 +240,14 @@ pub async fn discover_m3u_search(
             url: ch.url.clone(),
             source_kind: detect_source_kind(&ch.url).to_string(),
             form_id: i,
-        }).collect();
+        })
+        .collect();
     match (M3uResultsTemplate { rows }).render() {
         Ok(html) => Html(html),
-        Err(e) => { tracing::error!("template error: {e}"); Html("<p class=\"empty-state\" style=\"color:#f77\">Render error.</p>".to_string()) }
+        Err(e) => {
+            tracing::error!("template error: {e}");
+            Html("<p class=\"empty-state\" style=\"color:#f77\">Render error.</p>".to_string())
+        }
     }
 }
 
@@ -237,20 +255,30 @@ pub async fn discover_youtube_search(
     State(state): State<AppState>,
     Form(form): Form<YoutubeSearchForm>,
 ) -> Html<String> {
-    let api_key = match &state.config.youtube_api_key {
-        Some(k) => k.clone(),
-        None => return Html("<p class=\"empty-state\" style=\"color:#f77\">YOUTUBE_API_KEY not configured.</p>".to_string()),
-    };
+    let api_key =
+        match &state.config.youtube_api_key {
+            Some(k) => k.clone(),
+            None => return Html(
+                "<p class=\"empty-state\" style=\"color:#f77\">YOUTUBE_API_KEY not configured.</p>"
+                    .to_string(),
+            ),
+        };
     let rows = match fetch_youtube_results(&form.keyword, &api_key, &state.http_client).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("YouTube API error: {e}");
-            return Html(format!("<p class=\"empty-state\" style=\"color:#f77\">YouTube search failed: {}.</p>", e));
+            return Html(format!(
+                "<p class=\"empty-state\" style=\"color:#f77\">YouTube search failed: {}.</p>",
+                e
+            ));
         }
     };
     match (YtResultsTemplate { rows }).render() {
         Ok(html) => Html(html),
-        Err(e) => { tracing::error!("template error: {e}"); Html("<p class=\"empty-state\" style=\"color:#f77\">Render error.</p>".to_string()) }
+        Err(e) => {
+            tracing::error!("template error: {e}");
+            Html("<p class=\"empty-state\" style=\"color:#f77\">Render error.</p>".to_string())
+        }
     }
 }
 
@@ -266,14 +294,24 @@ pub async fn discover_manual_resolve(
         tokio::time::timeout(
             std::time::Duration::from_secs(5),
             resolver::fetch_duration_secs(&form.url),
-        ).await.ok().and_then(|r| r.ok()).unwrap_or(0)
+        )
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or(0)
     } else {
         0
     };
     let is_live = duration_secs == 0;
-    let channels = channel::list(&state.pool).await.map_err(internal_error)?
+    let channels = channel::list(&state.pool)
+        .await
+        .map_err(internal_error)?
         .into_iter()
-        .map(|ch| DiscoverChannelOption { id: ch.id, name: ch.name, type_str: ch.r#type })
+        .map(|ch| DiscoverChannelOption {
+            id: ch.id,
+            name: ch.name,
+            type_str: ch.r#type,
+        })
         .collect();
     render(ManualResultTemplate {
         form_id: "manual".to_string(),
@@ -305,9 +343,18 @@ pub fn parse_iso8601_duration(s: &str) -> i64 {
     for ch in s.chars() {
         match ch {
             '0'..='9' => current.push(ch),
-            'H' => { total += current.parse::<i64>().unwrap_or(0) * 3600; current.clear(); }
-            'M' => { total += current.parse::<i64>().unwrap_or(0) * 60; current.clear(); }
-            'S' => { total += current.parse::<i64>().unwrap_or(0); current.clear(); }
+            'H' => {
+                total += current.parse::<i64>().unwrap_or(0) * 3600;
+                current.clear();
+            }
+            'M' => {
+                total += current.parse::<i64>().unwrap_or(0) * 60;
+                current.clear();
+            }
+            'S' => {
+                total += current.parse::<i64>().unwrap_or(0);
+                current.clear();
+            }
             _ => current.clear(),
         }
     }
@@ -316,6 +363,7 @@ pub fn parse_iso8601_duration(s: &str) -> i64 {
 
 // ── core add logic ────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub async fn do_discover_add(
     pool: &sqlx::SqlitePool,
     client: &reqwest::Client,
@@ -342,18 +390,29 @@ pub async fn do_discover_add(
         if !["live", "vod_loop"].contains(&new_channel_type) {
             return Err(StatusCode::UNPROCESSABLE_ENTITY);
         }
-        let loop_anchor = if new_channel_type == "vod_loop" { Some(Utc::now()) } else { None };
-        let ch = channel::create(pool, channel::NewChannel {
-            name: new_name.trim().to_string(),
-            category: new_category.trim().to_string(),
-            logo_url: None,
-            channel_type: new_channel_type.to_string(),
-            sort_order: 0,
-            loop_anchor,
-        }).await.map_err(internal_error)?;
+        let loop_anchor = if new_channel_type == "vod_loop" {
+            Some(Utc::now())
+        } else {
+            None
+        };
+        let ch = channel::create(
+            pool,
+            channel::NewChannel {
+                name: new_name.trim().to_string(),
+                category: new_category.trim().to_string(),
+                logo_url: None,
+                channel_type: new_channel_type.to_string(),
+                sort_order: 0,
+                loop_anchor,
+            },
+        )
+        .await
+        .map_err(internal_error)?;
         ch.id
     } else {
-        channel_choice.parse::<i64>().map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?
+        channel_choice
+            .parse::<i64>()
+            .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?
     };
 
     let ch = channel::get(pool, channel_id)
@@ -377,21 +436,32 @@ pub async fn do_discover_add(
             }
         }
         let items = playlist_item::list_for_channel(pool, channel_id)
-            .await.map_err(internal_error)?;
-        playlist_item::create(pool, playlist_item::NewPlaylistItem {
-            channel_id,
-            title: title.to_string(),
-            url: url.to_string(),
-            duration_secs,
-            sort_order: items.len() as i64,
-        }).await.map_err(internal_error)?;
+            .await
+            .map_err(internal_error)?;
+        playlist_item::create(
+            pool,
+            playlist_item::NewPlaylistItem {
+                channel_id,
+                title: title.to_string(),
+                url: url.to_string(),
+                duration_secs,
+                sort_order: items.len() as i64,
+            },
+        )
+        .await
+        .map_err(internal_error)?;
     } else {
-        source::create(pool, source::NewSource {
-            channel_id,
-            kind: source_kind.to_string(),
-            url: url.to_string(),
-            priority: 0,
-        }).await.map_err(internal_error)?;
+        source::create(
+            pool,
+            source::NewSource {
+                channel_id,
+                kind: source_kind.to_string(),
+                url: url.to_string(),
+                priority: 0,
+            },
+        )
+        .await
+        .map_err(internal_error)?;
     }
 
     Ok(channel_id)
@@ -419,7 +489,10 @@ async fn fetch_youtube_results(
         .await?;
 
     if let Some(err) = search_resp.get("error") {
-        let msg = err["message"].as_str().unwrap_or("YouTube API error").to_string();
+        let msg = err["message"]
+            .as_str()
+            .unwrap_or("YouTube API error")
+            .to_string();
         anyhow::bail!("{}", msg);
     }
 
@@ -440,7 +513,11 @@ async fn fetch_youtube_results(
     let ids_joined = video_ids.join(",");
     let details_resp: serde_json::Value = client
         .get("https://www.googleapis.com/youtube/v3/videos")
-        .query(&[("part", "contentDetails"), ("id", ids_joined.as_str()), ("key", api_key)])
+        .query(&[
+            ("part", "contentDetails"),
+            ("id", ids_joined.as_str()),
+            ("key", api_key),
+        ])
         .send()
         .await?
         .json()
@@ -450,7 +527,9 @@ async fn fetch_youtube_results(
     if let Some(detail_items) = details_resp["items"].as_array() {
         for item in detail_items {
             let id = item["id"].as_str().unwrap_or("").to_string();
-            let dur_str = item["contentDetails"]["duration"].as_str().unwrap_or("PT0S");
+            let dur_str = item["contentDetails"]["duration"]
+                .as_str()
+                .unwrap_or("PT0S");
             duration_map.insert(id, parse_iso8601_duration(dur_str));
         }
     }
@@ -466,7 +545,14 @@ async fn fetch_youtube_results(
             let is_live = snippet["liveBroadcastContent"].as_str() == Some("live");
             let duration_secs = *duration_map.get(video_id).unwrap_or(&0);
             let url = format!("https://www.youtube.com/watch?v={}", video_id);
-            Some(YoutubeResultRow { title, channel_title, is_live, duration_secs, url, form_id: i })
+            Some(YoutubeResultRow {
+                title,
+                channel_title,
+                is_live,
+                duration_secs,
+                url,
+                form_id: i,
+            })
         })
         .collect();
 
@@ -491,32 +577,82 @@ fn country_to_code(input: &str) -> Option<String> {
         return Some(s);
     }
     let map: &[(&str, &str)] = &[
-        ("afghanistan", "af"), ("albania", "al"), ("algeria", "dz"),
-        ("argentina", "ar"), ("australia", "au"), ("austria", "at"),
-        ("bangladesh", "bd"), ("belgium", "be"), ("brazil", "br"),
-        ("bulgaria", "bg"), ("canada", "ca"), ("chile", "cl"),
-        ("china", "cn"), ("colombia", "co"), ("croatia", "hr"),
-        ("czech republic", "cz"), ("denmark", "dk"), ("egypt", "eg"),
-        ("finland", "fi"), ("france", "fr"), ("germany", "de"),
-        ("ghana", "gh"), ("greece", "gr"), ("hong kong", "hk"),
-        ("hungary", "hu"), ("india", "in"), ("indonesia", "id"),
-        ("iran", "ir"), ("iraq", "iq"), ("ireland", "ie"),
-        ("israel", "il"), ("italy", "it"), ("japan", "jp"),
-        ("jordan", "jo"), ("kenya", "ke"), ("kuwait", "kw"),
-        ("lebanon", "lb"), ("malaysia", "my"), ("mexico", "mx"),
-        ("morocco", "ma"), ("netherlands", "nl"), ("new zealand", "nz"),
-        ("nigeria", "ng"), ("norway", "no"), ("pakistan", "pk"),
-        ("philippines", "ph"), ("poland", "pl"), ("portugal", "pt"),
-        ("qatar", "qa"), ("romania", "ro"), ("russia", "ru"),
-        ("saudi arabia", "sa"), ("serbia", "rs"), ("singapore", "sg"),
-        ("south africa", "za"), ("south korea", "kr"), ("korea", "kr"),
-        ("spain", "es"), ("sweden", "se"), ("switzerland", "ch"),
-        ("taiwan", "tw"), ("thailand", "th"), ("tunisia", "tn"),
-        ("turkey", "tr"), ("ukraine", "ua"), ("united arab emirates", "ae"),
-        ("uae", "ae"), ("united kingdom", "gb"), ("uk", "gb"),
-        ("united states", "us"), ("usa", "us"), ("vietnam", "vn"),
+        ("afghanistan", "af"),
+        ("albania", "al"),
+        ("algeria", "dz"),
+        ("argentina", "ar"),
+        ("australia", "au"),
+        ("austria", "at"),
+        ("bangladesh", "bd"),
+        ("belgium", "be"),
+        ("brazil", "br"),
+        ("bulgaria", "bg"),
+        ("canada", "ca"),
+        ("chile", "cl"),
+        ("china", "cn"),
+        ("colombia", "co"),
+        ("croatia", "hr"),
+        ("czech republic", "cz"),
+        ("denmark", "dk"),
+        ("egypt", "eg"),
+        ("finland", "fi"),
+        ("france", "fr"),
+        ("germany", "de"),
+        ("ghana", "gh"),
+        ("greece", "gr"),
+        ("hong kong", "hk"),
+        ("hungary", "hu"),
+        ("india", "in"),
+        ("indonesia", "id"),
+        ("iran", "ir"),
+        ("iraq", "iq"),
+        ("ireland", "ie"),
+        ("israel", "il"),
+        ("italy", "it"),
+        ("japan", "jp"),
+        ("jordan", "jo"),
+        ("kenya", "ke"),
+        ("kuwait", "kw"),
+        ("lebanon", "lb"),
+        ("malaysia", "my"),
+        ("mexico", "mx"),
+        ("morocco", "ma"),
+        ("netherlands", "nl"),
+        ("new zealand", "nz"),
+        ("nigeria", "ng"),
+        ("norway", "no"),
+        ("pakistan", "pk"),
+        ("philippines", "ph"),
+        ("poland", "pl"),
+        ("portugal", "pt"),
+        ("qatar", "qa"),
+        ("romania", "ro"),
+        ("russia", "ru"),
+        ("saudi arabia", "sa"),
+        ("serbia", "rs"),
+        ("singapore", "sg"),
+        ("south africa", "za"),
+        ("south korea", "kr"),
+        ("korea", "kr"),
+        ("spain", "es"),
+        ("sweden", "se"),
+        ("switzerland", "ch"),
+        ("taiwan", "tw"),
+        ("thailand", "th"),
+        ("tunisia", "tn"),
+        ("turkey", "tr"),
+        ("ukraine", "ua"),
+        ("united arab emirates", "ae"),
+        ("uae", "ae"),
+        ("united kingdom", "gb"),
+        ("uk", "gb"),
+        ("united states", "us"),
+        ("usa", "us"),
+        ("vietnam", "vn"),
     ];
-    map.iter().find(|(name, _)| s.contains(name)).map(|(_, code)| code.to_string())
+    map.iter()
+        .find(|(name, _)| s.contains(name))
+        .map(|(_, code)| code.to_string())
 }
 
 async fn fetch_m3u(client: &reqwest::Client, country_code: Option<&str>) -> anyhow::Result<String> {
@@ -539,7 +675,10 @@ async fn fetch_m3u(client: &reqwest::Client, country_code: Option<&str>) -> anyh
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, model::{channel, playlist_item, source}};
+    use crate::{
+        db,
+        model::{channel, playlist_item, source},
+    };
     use axum::http::StatusCode;
     use chrono::Utc;
 
@@ -549,10 +688,16 @@ mod tests {
 
     #[test]
     fn test_detect_source_kind() {
-        assert_eq!(detect_source_kind("https://www.youtube.com/watch?v=abc"), "youtube_live");
+        assert_eq!(
+            detect_source_kind("https://www.youtube.com/watch?v=abc"),
+            "youtube_live"
+        );
         assert_eq!(detect_source_kind("https://youtu.be/abc"), "youtube_live");
         assert_eq!(detect_source_kind("https://example.com/stream.m3u8"), "hls");
-        assert_eq!(detect_source_kind("https://iptv.example.com/channel/1"), "iptv");
+        assert_eq!(
+            detect_source_kind("https://iptv.example.com/channel/1"),
+            "iptv"
+        );
     }
 
     #[test]
@@ -569,9 +714,19 @@ mod tests {
         let pool = test_pool().await;
         let client = reqwest::Client::new();
         let ch_id = do_discover_add(
-            &pool, &client, "https://example.com/s.m3u8", "CNN", "hls", 0,
-            "new", "CNN", "news", "live",
-        ).await.unwrap();
+            &pool,
+            &client,
+            "https://example.com/s.m3u8",
+            "CNN",
+            "hls",
+            0,
+            "new",
+            "CNN",
+            "news",
+            "live",
+        )
+        .await
+        .unwrap();
         let ch = channel::get(&pool, ch_id).await.unwrap().unwrap();
         assert_eq!(ch.r#type, "live");
         let sources = source::list_for_channel(&pool, ch_id).await.unwrap();
@@ -585,9 +740,19 @@ mod tests {
         let pool = test_pool().await;
         let client = reqwest::Client::new();
         let ch_id = do_discover_add(
-            &pool, &client, "https://example.com/ep1.mp4", "Ep 1", "hls", 3600,
-            "new", "My Show", "entertainment", "vod_loop",
-        ).await.unwrap();
+            &pool,
+            &client,
+            "https://example.com/ep1.mp4",
+            "Ep 1",
+            "hls",
+            3600,
+            "new",
+            "My Show",
+            "entertainment",
+            "vod_loop",
+        )
+        .await
+        .unwrap();
         let ch = channel::get(&pool, ch_id).await.unwrap().unwrap();
         assert_eq!(ch.r#type, "vod_loop");
         assert!(ch.loop_anchor.is_some());
@@ -600,15 +765,34 @@ mod tests {
     #[tokio::test]
     async fn test_add_source_to_existing_live_channel() {
         let pool = test_pool().await;
-        let existing = channel::create(&pool, channel::NewChannel {
-            name: "Existing".into(), category: "news".into(), logo_url: None,
-            channel_type: "live".into(), sort_order: 0, loop_anchor: None,
-        }).await.unwrap();
+        let existing = channel::create(
+            &pool,
+            channel::NewChannel {
+                name: "Existing".into(),
+                category: "news".into(),
+                logo_url: None,
+                channel_type: "live".into(),
+                sort_order: 0,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap();
         let client = reqwest::Client::new();
         let ch_id = do_discover_add(
-            &pool, &client, "https://example.com/s.m3u8", "Existing", "iptv", 0,
-            &existing.id.to_string(), "", "", "",
-        ).await.unwrap();
+            &pool,
+            &client,
+            "https://example.com/s.m3u8",
+            "Existing",
+            "iptv",
+            0,
+            &existing.id.to_string(),
+            "",
+            "",
+            "",
+        )
+        .await
+        .unwrap();
         assert_eq!(ch_id, existing.id);
         let sources = source::list_for_channel(&pool, ch_id).await.unwrap();
         assert_eq!(sources.len(), 1);
@@ -618,15 +802,34 @@ mod tests {
     #[tokio::test]
     async fn test_add_playlist_item_to_existing_vod_channel() {
         let pool = test_pool().await;
-        let existing = channel::create(&pool, channel::NewChannel {
-            name: "VOD".into(), category: "movies".into(), logo_url: None,
-            channel_type: "vod_loop".into(), sort_order: 0, loop_anchor: Some(Utc::now()),
-        }).await.unwrap();
+        let existing = channel::create(
+            &pool,
+            channel::NewChannel {
+                name: "VOD".into(),
+                category: "movies".into(),
+                logo_url: None,
+                channel_type: "vod_loop".into(),
+                sort_order: 0,
+                loop_anchor: Some(Utc::now()),
+            },
+        )
+        .await
+        .unwrap();
         let client = reqwest::Client::new();
         let ch_id = do_discover_add(
-            &pool, &client, "https://example.com/movie.mp4", "Movie", "hls", 5400,
-            &existing.id.to_string(), "", "", "",
-        ).await.unwrap();
+            &pool,
+            &client,
+            "https://example.com/movie.mp4",
+            "Movie",
+            "hls",
+            5400,
+            &existing.id.to_string(),
+            "",
+            "",
+            "",
+        )
+        .await
+        .unwrap();
         let items = playlist_item::list_for_channel(&pool, ch_id).await.unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].duration_secs, 5400);
@@ -637,9 +840,18 @@ mod tests {
         let pool = test_pool().await;
         let client = reqwest::Client::new();
         let result = do_discover_add(
-            &pool, &client, "https://example.com/s.m3u8", "Test", "hls", 0,
-            "new", "", "news", "live",
-        ).await;
+            &pool,
+            &client,
+            "https://example.com/s.m3u8",
+            "Test",
+            "hls",
+            0,
+            "new",
+            "",
+            "news",
+            "live",
+        )
+        .await;
         assert_eq!(result, Err(StatusCode::UNPROCESSABLE_ENTITY));
     }
 
@@ -648,9 +860,18 @@ mod tests {
         let pool = test_pool().await;
         let client = reqwest::Client::new();
         let result = do_discover_add(
-            &pool, &client, "https://example.com/v.mp4", "Test", "hls", 0,
-            "new", "Show", "movies", "vod_loop",
-        ).await;
+            &pool,
+            &client,
+            "https://example.com/v.mp4",
+            "Test",
+            "hls",
+            0,
+            "new",
+            "Show",
+            "movies",
+            "vod_loop",
+        )
+        .await;
         assert_eq!(result, Err(StatusCode::UNPROCESSABLE_ENTITY));
     }
 }
