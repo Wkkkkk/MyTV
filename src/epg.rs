@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 
-use crate::playlist_item::{self, PlaylistItem};
+use crate::model::playlist_item::{self, PlaylistItem};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProgramEntry {

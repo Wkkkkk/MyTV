@@ -41,6 +41,14 @@ pub async fn create(pool: &SqlitePool, input: NewPlaylistItem) -> Result<Playlis
         .map_err(Into::into)
 }
 
+pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<PlaylistItem>> {
+    sqlx::query_as::<_, PlaylistItem>("SELECT * FROM playlist_items WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(Into::into)
+}
+
 pub async fn list_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<PlaylistItem>> {
     sqlx::query_as::<_, PlaylistItem>(
         "SELECT * FROM playlist_items WHERE channel_id = ? ORDER BY sort_order ASC",
@@ -94,7 +102,7 @@ pub fn current_position(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{channel, db};
+    use crate::{model::channel, db};
 
     async fn test_pool() -> SqlitePool {
         db::connect("sqlite::memory:").await.unwrap()

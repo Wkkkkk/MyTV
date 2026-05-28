@@ -38,6 +38,14 @@ pub async fn create(pool: &SqlitePool, input: NewSource) -> Result<Source> {
         .map_err(Into::into)
 }
 
+pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Source>> {
+    sqlx::query_as::<_, Source>("SELECT * FROM sources WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(Into::into)
+}
+
 pub async fn list_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<Source>> {
     sqlx::query_as::<_, Source>(
         "SELECT * FROM sources WHERE channel_id = ? ORDER BY priority ASC",
@@ -80,7 +88,7 @@ pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{channel, db};
+    use crate::{model::channel, db};
 
     async fn test_pool() -> SqlitePool {
         db::connect("sqlite::memory:").await.unwrap()

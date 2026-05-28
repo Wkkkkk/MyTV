@@ -9,8 +9,9 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::{
-    channel::{self, Channel, ChannelType},
-    epg, playlist_item, AppState,
+    epg,
+    model::{channel::{self, Channel, ChannelType}, playlist_item},
+    AppState,
 };
 
 // ── display types ──────────────────────────────────────────────────────────

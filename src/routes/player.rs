@@ -6,8 +6,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    channel::{self, ChannelType},
-    playlist_item, resolver, source, AppState,
+    media::{hls, resolver},
+    model::{channel::{self, ChannelType}, playlist_item, source},
+    AppState,
 };
 
 #[derive(Debug, Serialize)]
@@ -205,7 +206,7 @@ pub async fn stream_proxy(
 
     if is_playlist {
         let text = String::from_utf8_lossy(&body_bytes);
-        let rewritten = rewrite_hls_urls(&text, &q.url);
+        let rewritten = hls::rewrite_hls_urls(&text, &q.url);
         headers.insert(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/vnd.apple.mpegurl"),
@@ -217,44 +218,6 @@ pub async fn stream_proxy(
         }
         (headers, body_bytes).into_response()
     }
-}
-
-fn rewrite_hls_urls(content: &str, base_url: &str) -> String {
-    let base_dir = base_url.rsplit_once('/').map(|(b, _)| b).unwrap_or(base_url);
-    let origin = {
-        let after_scheme = base_url.find("://").map(|i| i + 3).unwrap_or(0);
-        let host_len = base_url[after_scheme..].find('/').unwrap_or(base_url[after_scheme..].len());
-        &base_url[..after_scheme + host_len]
-    };
-
-    content
-        .lines()
-        .map(|line| {
-            if line.starts_with('#') || line.is_empty() {
-                return line.to_string();
-            }
-            let abs = if line.starts_with("http://") || line.starts_with("https://") {
-                line.to_string()
-            } else if line.starts_with('/') {
-                format!("{}{}", origin, line)
-            } else {
-                format!("{}/{}", base_dir, line)
-            };
-            format!("/stream-proxy?url={}", pct_encode(&abs))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn pct_encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{:02X}", b),
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -570,7 +533,7 @@ mod tests {
             .await
             .unwrap();
         // Re-fetch the channel
-        let ch = crate::channel::get(&state.pool, ch.id).await.unwrap().unwrap();
+        let ch = channel::get(&state.pool, ch.id).await.unwrap().unwrap();
 
         let err = tune_vod_at(&state, &ch, 1000).await.unwrap_err();
         assert_eq!(err, StatusCode::INTERNAL_SERVER_ERROR);

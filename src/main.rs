@@ -1,11 +1,9 @@
-mod channel;
 mod config;
 mod db;
 mod epg;
-mod playlist_item;
-mod resolver;
+mod media;
+mod model;
 mod routes;
-mod source;
 
 use anyhow::Result;
 use axum::{
@@ -74,12 +72,12 @@ async fn main() -> Result<()> {
         .route("/sources/:id/test", post(routes::admin::source_test))
         .route("/channels/:id/playlist", post(routes::admin::playlist_item_create))
         .route("/playlist/:id/delete", post(routes::admin::playlist_item_delete))
-        .route("/discover", get(routes::admin_discover::discover_page))
-        .route("/discover/add-form", post(routes::admin_discover::discover_add_form))
-        .route("/discover/add", post(routes::admin_discover::discover_add))
-        .route("/discover/m3u/search", post(routes::admin_discover::discover_m3u_search))
-        .route("/discover/youtube/search", post(routes::admin_discover::discover_youtube_search))
-        .route("/discover/manual/resolve", post(routes::admin_discover::discover_manual_resolve))
+        .route("/discover", get(routes::admin::discover_page))
+        .route("/discover/add-form", post(routes::admin::discover_add_form))
+        .route("/discover/add", post(routes::admin::discover_add))
+        .route("/discover/m3u/search", post(routes::admin::discover_m3u_search))
+        .route("/discover/youtube/search", post(routes::admin::discover_youtube_search))
+        .route("/discover/manual/resolve", post(routes::admin::discover_manual_resolve))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             routes::admin::basic_auth,
