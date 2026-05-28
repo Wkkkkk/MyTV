@@ -111,7 +111,7 @@ This installs a pre-push hook that runs `cargo fmt --check`, `cargo clippy --all
 **1. Clone and build**
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/Wkkkkk/MyTV.git
 cd MyTV
 cargo build --release
 ```
