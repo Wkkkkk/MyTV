@@ -56,6 +56,7 @@ struct DiscoverAddFormTemplate {
     form_id: String,
     url: String,
     title: String,
+    group: String,
     is_live: bool,
     duration_secs: i64,
     source_kind: String,
@@ -81,6 +82,7 @@ struct ManualResultTemplate {
     form_id: String,
     url: String,
     title: String,
+    group: String,
     is_live: bool,
     duration_secs: i64,
     source_kind: String,
@@ -110,6 +112,7 @@ pub struct ManualResolveForm {
 pub struct AddFormQuery {
     pub url: String,
     pub title: String,
+    pub group: Option<String>,
     pub is_live: String,
     pub duration_secs: String,
     pub source_kind: String,
@@ -165,6 +168,7 @@ pub async fn discover_add_form(
         form_id: form.form_id,
         url: form.url,
         title: form.title,
+        group: form.group.unwrap_or_default(),
         is_live,
         duration_secs,
         source_kind: form.source_kind,
@@ -286,6 +290,7 @@ pub async fn discover_manual_resolve(
         form_id: "manual".to_string(),
         url: form.url.clone(),
         title: form.url.clone(),
+        group: String::new(),
         is_live,
         duration_secs,
         source_kind: detect_source_kind(&form.url).to_string(),
@@ -402,9 +407,6 @@ pub async fn do_discover_add(
 
     let channel_id = if channel_choice == "new" {
         if new_name.trim().is_empty() {
-            return Err(StatusCode::UNPROCESSABLE_ENTITY);
-        }
-        if new_category.trim().is_empty() {
             return Err(StatusCode::UNPROCESSABLE_ENTITY);
         }
         if !["live", "vod_loop"].contains(&new_channel_type) {
