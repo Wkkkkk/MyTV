@@ -104,17 +104,6 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<Channel>> {
         .map_err(Into::into)
 }
 
-#[allow(dead_code)]
-pub async fn list_by_category(pool: &SqlitePool, category: &str) -> Result<Vec<Channel>> {
-    sqlx::query_as::<_, Channel>(
-        "SELECT * FROM channels WHERE category = ? ORDER BY sort_order ASC, name ASC",
-    )
-    .bind(category)
-    .fetch_all(pool)
-    .await
-    .map_err(Into::into)
-}
-
 pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
     let rows = sqlx::query("DELETE FROM channels WHERE id = ?")
         .bind(id)
@@ -181,18 +170,6 @@ mod tests {
 
         let all = list(&pool).await.unwrap();
         assert_eq!(all.len(), 3);
-    }
-
-    #[tokio::test]
-    async fn test_list_by_category_filters_correctly() {
-        let pool = test_pool().await;
-        create(&pool, live("CNN", "news")).await.unwrap();
-        create(&pool, live("ESPN", "sports")).await.unwrap();
-        create(&pool, live("BBC", "news")).await.unwrap();
-
-        let news = list_by_category(&pool, "news").await.unwrap();
-        assert_eq!(news.len(), 2);
-        assert!(news.iter().all(|c| c.category == "news"));
     }
 
     #[tokio::test]

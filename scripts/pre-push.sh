@@ -8,6 +8,6 @@ echo "pre-push: cargo clippy"
 cargo clippy -- -D warnings
 
 echo "pre-push: cargo test"
-cargo test -- --test-threads=1
+cargo test
 
 echo "pre-push: all checks passed"

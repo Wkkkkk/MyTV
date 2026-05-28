@@ -33,8 +33,6 @@ pub struct TimeLabel {
 }
 
 pub struct ChannelRow {
-    #[allow(dead_code)]
-    pub id: i64,
     pub name: String,
     pub programs: Vec<ProgramSlot>,
 }
@@ -198,7 +196,6 @@ async fn build_guide_data(
             .filter_map(|e| entry_to_slot(e, window_start, window_end))
             .collect();
         rows.push(ChannelRow {
-            id: ch.id,
             name: ch.name.clone(),
             programs,
         });

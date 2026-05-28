@@ -121,8 +121,6 @@ pub struct AddFormQuery {
 pub struct AddForm {
     pub url: String,
     pub title: String,
-    #[allow(dead_code)]
-    pub is_live: String,
     pub duration_secs: String,
     pub source_kind: String,
     pub channel_choice: String,
@@ -173,18 +171,20 @@ pub async fn discover_add(
     Form(form): Form<AddForm>,
 ) -> impl IntoResponse {
     let duration_secs: i64 = form.duration_secs.parse().unwrap_or(0);
-    match do_discover_add(
-        &state.pool,
-        &state.http_client,
-        &form.url,
-        &form.title,
-        &form.source_kind,
+    match do_discover_add(DiscoverAddParams {
+        pool: &state.pool,
+        client: &state.http_client,
+        url: &form.url,
+        title: &form.title,
+        source_kind: &form.source_kind,
         duration_secs,
-        &form.channel_choice,
-        form.new_name.as_deref().unwrap_or(""),
-        form.new_category.as_deref().unwrap_or(""),
-        form.new_channel_type.as_deref().unwrap_or("live"),
-    ).await {
+        channel_choice: &form.channel_choice,
+        new_name: form.new_name.as_deref().unwrap_or(""),
+        new_category: form.new_category.as_deref().unwrap_or(""),
+        new_channel_type: form.new_channel_type.as_deref().unwrap_or("live"),
+    })
+    .await
+    {
         Ok(channel_id) => Redirect::to(&format!("/admin/channels/{}", channel_id)).into_response(),
         Err(status) => Html(format!(
             r#"<p style="color:#e94560;padding:16px">Error {}: could not add item — <a href="/admin/discover">go back</a></p>"#,
@@ -363,19 +363,32 @@ pub fn parse_iso8601_duration(s: &str) -> i64 {
 
 // ── core add logic ────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
-pub async fn do_discover_add(
-    pool: &sqlx::SqlitePool,
-    client: &reqwest::Client,
-    url: &str,
-    title: &str,
-    source_kind: &str,
-    duration_secs: i64,
-    channel_choice: &str,
-    new_name: &str,
-    new_category: &str,
-    new_channel_type: &str,
-) -> Result<i64, StatusCode> {
+pub struct DiscoverAddParams<'a> {
+    pub pool: &'a sqlx::SqlitePool,
+    pub client: &'a reqwest::Client,
+    pub url: &'a str,
+    pub title: &'a str,
+    pub source_kind: &'a str,
+    pub duration_secs: i64,
+    pub channel_choice: &'a str,
+    pub new_name: &'a str,
+    pub new_category: &'a str,
+    pub new_channel_type: &'a str,
+}
+
+pub async fn do_discover_add(params: DiscoverAddParams<'_>) -> Result<i64, StatusCode> {
+    let DiscoverAddParams {
+        pool,
+        client,
+        url,
+        title,
+        source_kind,
+        duration_secs,
+        channel_choice,
+        new_name,
+        new_category,
+        new_channel_type,
+    } = params;
     if url.is_empty() || (!url.starts_with("http://") && !url.starts_with("https://")) {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
@@ -713,18 +726,18 @@ mod tests {
     async fn test_add_new_live_channel_creates_source() {
         let pool = test_pool().await;
         let client = reqwest::Client::new();
-        let ch_id = do_discover_add(
-            &pool,
-            &client,
-            "https://example.com/s.m3u8",
-            "CNN",
-            "hls",
-            0,
-            "new",
-            "CNN",
-            "news",
-            "live",
-        )
+        let ch_id = do_discover_add(DiscoverAddParams {
+            pool: &pool,
+            client: &client,
+            url: "https://example.com/s.m3u8",
+            title: "CNN",
+            source_kind: "hls",
+            duration_secs: 0,
+            channel_choice: "new",
+            new_name: "CNN",
+            new_category: "news",
+            new_channel_type: "live",
+        })
         .await
         .unwrap();
         let ch = channel::get(&pool, ch_id).await.unwrap().unwrap();
@@ -739,18 +752,18 @@ mod tests {
     async fn test_add_new_vod_channel_creates_playlist_item() {
         let pool = test_pool().await;
         let client = reqwest::Client::new();
-        let ch_id = do_discover_add(
-            &pool,
-            &client,
-            "https://example.com/ep1.mp4",
-            "Ep 1",
-            "hls",
-            3600,
-            "new",
-            "My Show",
-            "entertainment",
-            "vod_loop",
-        )
+        let ch_id = do_discover_add(DiscoverAddParams {
+            pool: &pool,
+            client: &client,
+            url: "https://example.com/ep1.mp4",
+            title: "Ep 1",
+            source_kind: "hls",
+            duration_secs: 3600,
+            channel_choice: "new",
+            new_name: "My Show",
+            new_category: "entertainment",
+            new_channel_type: "vod_loop",
+        })
         .await
         .unwrap();
         let ch = channel::get(&pool, ch_id).await.unwrap().unwrap();
@@ -779,18 +792,18 @@ mod tests {
         .await
         .unwrap();
         let client = reqwest::Client::new();
-        let ch_id = do_discover_add(
-            &pool,
-            &client,
-            "https://example.com/s.m3u8",
-            "Existing",
-            "iptv",
-            0,
-            &existing.id.to_string(),
-            "",
-            "",
-            "",
-        )
+        let ch_id = do_discover_add(DiscoverAddParams {
+            pool: &pool,
+            client: &client,
+            url: "https://example.com/s.m3u8",
+            title: "Existing",
+            source_kind: "iptv",
+            duration_secs: 0,
+            channel_choice: &existing.id.to_string(),
+            new_name: "",
+            new_category: "",
+            new_channel_type: "",
+        })
         .await
         .unwrap();
         assert_eq!(ch_id, existing.id);
@@ -816,18 +829,18 @@ mod tests {
         .await
         .unwrap();
         let client = reqwest::Client::new();
-        let ch_id = do_discover_add(
-            &pool,
-            &client,
-            "https://example.com/movie.mp4",
-            "Movie",
-            "hls",
-            5400,
-            &existing.id.to_string(),
-            "",
-            "",
-            "",
-        )
+        let ch_id = do_discover_add(DiscoverAddParams {
+            pool: &pool,
+            client: &client,
+            url: "https://example.com/movie.mp4",
+            title: "Movie",
+            source_kind: "hls",
+            duration_secs: 5400,
+            channel_choice: &existing.id.to_string(),
+            new_name: "",
+            new_category: "",
+            new_channel_type: "",
+        })
         .await
         .unwrap();
         let items = playlist_item::list_for_channel(&pool, ch_id).await.unwrap();
@@ -839,18 +852,18 @@ mod tests {
     async fn test_add_returns_422_when_new_name_empty() {
         let pool = test_pool().await;
         let client = reqwest::Client::new();
-        let result = do_discover_add(
-            &pool,
-            &client,
-            "https://example.com/s.m3u8",
-            "Test",
-            "hls",
-            0,
-            "new",
-            "",
-            "news",
-            "live",
-        )
+        let result = do_discover_add(DiscoverAddParams {
+            pool: &pool,
+            client: &client,
+            url: "https://example.com/s.m3u8",
+            title: "Test",
+            source_kind: "hls",
+            duration_secs: 0,
+            channel_choice: "new",
+            new_name: "",
+            new_category: "news",
+            new_channel_type: "live",
+        })
         .await;
         assert_eq!(result, Err(StatusCode::UNPROCESSABLE_ENTITY));
     }
@@ -859,18 +872,18 @@ mod tests {
     async fn test_add_returns_422_when_vod_duration_zero() {
         let pool = test_pool().await;
         let client = reqwest::Client::new();
-        let result = do_discover_add(
-            &pool,
-            &client,
-            "https://example.com/v.mp4",
-            "Test",
-            "hls",
-            0,
-            "new",
-            "Show",
-            "movies",
-            "vod_loop",
-        )
+        let result = do_discover_add(DiscoverAddParams {
+            pool: &pool,
+            client: &client,
+            url: "https://example.com/v.mp4",
+            title: "Test",
+            source_kind: "hls",
+            duration_secs: 0,
+            channel_choice: "new",
+            new_name: "Show",
+            new_category: "movies",
+            new_channel_type: "vod_loop",
+        })
         .await;
         assert_eq!(result, Err(StatusCode::UNPROCESSABLE_ENTITY));
     }
