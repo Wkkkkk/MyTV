@@ -180,9 +180,9 @@ pub async fn discover_add_form(
 pub async fn discover_add(
     State(state): State<AppState>,
     Form(form): Form<AddForm>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> impl IntoResponse {
     let duration_secs: i64 = form.duration_secs.parse().unwrap_or(0);
-    let channel_id = do_discover_add(
+    match do_discover_add(
         &state.pool,
         &form.url,
         &form.title,
@@ -192,8 +192,13 @@ pub async fn discover_add(
         form.new_name.as_deref().unwrap_or(""),
         form.new_category.as_deref().unwrap_or(""),
         form.new_channel_type.as_deref().unwrap_or("live"),
-    ).await?;
-    Ok(Redirect::to(&format!("/admin/channels/{}", channel_id)))
+    ).await {
+        Ok(channel_id) => Redirect::to(&format!("/admin/channels/{}", channel_id)).into_response(),
+        Err(status) => Html(format!(
+            r#"<p style="color:#e94560;padding:16px">Error {}: could not add item — <a href="/admin/discover">go back</a></p>"#,
+            status.as_u16()
+        )).into_response(),
+    }
 }
 
 pub async fn discover_m3u_search(
@@ -432,8 +437,16 @@ pub async fn do_discover_add(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     if ch.channel_type() == channel::ChannelType::VodLoop {
+        let mut duration_secs = duration_secs;
         if duration_secs <= 0 {
-            return Err(StatusCode::UNPROCESSABLE_ENTITY);
+            if resolver::needs_resolution(url) {
+                duration_secs = resolver::fetch_duration_secs(url).await.map_err(|e| {
+                    tracing::warn!(url = %url, error = %e, "failed to auto-fetch duration in discover_add");
+                    StatusCode::UNPROCESSABLE_ENTITY
+                })?;
+            } else {
+                return Err(StatusCode::UNPROCESSABLE_ENTITY);
+            }
         }
         let items = playlist_item::list_for_channel(pool, channel_id)
             .await.map_err(internal_error)?;
