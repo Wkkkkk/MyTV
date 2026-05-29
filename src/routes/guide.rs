@@ -34,7 +34,23 @@ pub struct TimeLabel {
 
 pub struct ChannelRow {
     pub name: String,
+    pub category_icon: &'static str,
     pub programs: Vec<ProgramSlot>,
+}
+
+fn category_icon(category: &str) -> &'static str {
+    let c = category.to_lowercase();
+    if c.contains("news")                              { return "📰" }
+    if c.contains("sport")                             { return "⚽" }
+    if c.contains("movie") || c.contains("film") || c.contains("cinema") { return "🎬" }
+    if c.contains("music")                             { return "🎵" }
+    if c.contains("kid") || c.contains("child")        { return "🧒" }
+    if c.contains("documentary") || c.contains("docu") { return "🎥" }
+    if c.contains("entertainment")                     { return "🎭" }
+    if c.contains("cooking") || c.contains("food")     { return "🍳" }
+    if c.contains("travel")                            { return "✈️" }
+    if c.contains("science") || c.contains("tech")     { return "🔬" }
+    "📺"
 }
 
 // ── template structs ───────────────────────────────────────────────────────
@@ -197,6 +213,7 @@ async fn build_guide_data(
             .collect();
         rows.push(ChannelRow {
             name: ch.name.clone(),
+            category_icon: category_icon(&ch.category),
             programs,
         });
     }
@@ -451,5 +468,27 @@ mod tests {
         assert!(entry_to_slot(&make_entry(1, -3600, 0, false), ws, we).is_none());
         let slot = entry_to_slot(&make_entry(1, 0, 3600, false), ws, we).unwrap();
         assert!((slot.left_pct - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_category_icon_known_categories() {
+        assert_eq!(category_icon("News"), "📰");
+        assert_eq!(category_icon("SPORTS"), "⚽");
+        assert_eq!(category_icon("Movies"), "🎬");
+        assert_eq!(category_icon("Films"), "🎬");
+        assert_eq!(category_icon("cinema"), "🎬");
+        assert_eq!(category_icon("Music"), "🎵");
+        assert_eq!(category_icon("Kids"), "🧒");
+        assert_eq!(category_icon("Children"), "🧒");
+        assert_eq!(category_icon("Documentary"), "🎥");
+        assert_eq!(category_icon("Docu"), "🎥");
+        assert_eq!(category_icon("Entertainment"), "🎭");
+        assert_eq!(category_icon("Cooking"), "🍳");
+        assert_eq!(category_icon("Food"), "🍳");
+        assert_eq!(category_icon("Travel"), "✈️");
+        assert_eq!(category_icon("Science"), "🔬");
+        assert_eq!(category_icon("Tech"), "🔬");
+        assert_eq!(category_icon("Unknown"), "📺");
+        assert_eq!(category_icon(""), "📺");
     }
 }
