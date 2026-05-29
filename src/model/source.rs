@@ -88,12 +88,10 @@ pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool
 }
 
 pub async fn list_all(pool: &SqlitePool) -> Result<Vec<Source>> {
-    sqlx::query_as::<_, Source>(
-        "SELECT * FROM sources ORDER BY channel_id ASC, priority ASC",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(Into::into)
+    sqlx::query_as::<_, Source>("SELECT * FROM sources ORDER BY channel_id ASC, priority ASC")
+        .fetch_all(pool)
+        .await
+        .map_err(Into::into)
 }
 
 pub async fn update_health(
@@ -290,9 +288,12 @@ mod tests {
     async fn test_update_health_ok_resets_failures() {
         let pool = test_pool().await;
         let ch = make_channel(&pool).await;
-        let src = create(&pool, hls(ch.id, "https://primary.example.com/stream.m3u8", 1))
-            .await
-            .unwrap();
+        let src = create(
+            &pool,
+            hls(ch.id, "https://primary.example.com/stream.m3u8", 1),
+        )
+        .await
+        .unwrap();
 
         update_health(&pool, src.id, "error", Some("timeout"), 2, false)
             .await
@@ -312,9 +313,12 @@ mod tests {
     async fn test_update_health_disables_after_threshold() {
         let pool = test_pool().await;
         let ch = make_channel(&pool).await;
-        let src = create(&pool, hls(ch.id, "https://primary.example.com/stream.m3u8", 1))
-            .await
-            .unwrap();
+        let src = create(
+            &pool,
+            hls(ch.id, "https://primary.example.com/stream.m3u8", 1),
+        )
+        .await
+        .unwrap();
 
         update_health(&pool, src.id, "error", Some("connection refused"), 3, true)
             .await
@@ -324,6 +328,9 @@ mod tests {
         assert!(!updated.is_active);
         assert_eq!(updated.consecutive_failures, 3);
         assert_eq!(updated.last_status.as_deref(), Some("error"));
-        assert_eq!(updated.failure_reason.as_deref(), Some("connection refused"));
+        assert_eq!(
+            updated.failure_reason.as_deref(),
+            Some("connection refused")
+        );
     }
 }
