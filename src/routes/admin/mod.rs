@@ -44,6 +44,9 @@ pub struct AdminSourceRow {
     pub url: String,
     pub priority: i64,
     pub is_active: bool,
+    pub last_status: Option<String>,
+    pub consecutive_failures: i64,
+    pub failure_reason: Option<String>,
 }
 
 pub struct AdminPlaylistItemRow {
@@ -76,6 +79,9 @@ impl From<source::Source> for AdminSourceRow {
             url: s.url,
             priority: s.priority,
             is_active: s.is_active,
+            last_status: s.last_status,
+            consecutive_failures: s.consecutive_failures,
+            failure_reason: s.failure_reason,
         }
     }
 }

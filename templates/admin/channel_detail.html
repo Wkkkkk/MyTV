@@ -26,7 +26,7 @@
   {% else %}
   <table style="margin-bottom:16px">
     <thead>
-      <tr><th>Kind</th><th>URL</th><th>Priority</th><th>Active</th><th></th></tr>
+      <tr><th>Kind</th><th>URL</th><th>Priority</th><th>Active</th><th>Health</th><th></th></tr>
     </thead>
     <tbody>
       {% for src in sources %}
@@ -40,6 +40,24 @@
           {% else %}
           <span class="badge badge-off">off</span>
           {% endif %}
+        </td>
+        <td>
+          {% match src.last_status %}
+          {% when None %}
+          <span style="color:#888" title="Never checked">○</span>
+          {% when Some(status) %}
+          {% if status == "ok" %}
+          <span style="color:#4caf50" title="Healthy">●</span>
+          {% else %}
+          <span style="color:#e94560" title="Last check failed">●</span>
+          {% if let Some(reason) = src.failure_reason.as_ref() %}
+          <div style="font-size:0.7rem;color:#e94560;margin-top:2px">{{ reason }}</div>
+          {% endif %}
+          {% if !src.is_active && src.consecutive_failures >= 3 %}
+          <div style="font-size:0.7rem;color:#888">[auto-disabled]</div>
+          {% endif %}
+          {% endif %}
+          {% endmatch %}
         </td>
         <td style="white-space:nowrap">
           <form action="/admin/sources/{{ src.id }}/toggle" method="post" style="display:inline-block">
