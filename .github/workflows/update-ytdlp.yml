@@ -3,7 +3,7 @@ name: Update yt-dlp
 on:
   schedule:
     - cron: '0 9 * * 1'   # Monday 09:00 UTC
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 jobs:
   update:
