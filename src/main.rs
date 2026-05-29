@@ -1,6 +1,7 @@
 mod config;
 mod db;
 mod epg;
+mod health;
 mod media;
 mod model;
 mod routes;
@@ -55,6 +56,8 @@ async fn main() -> Result<()> {
         config: config.clone(),
         http_client,
     };
+
+    health::start(state.pool.clone(), state.http_client.clone());
 
     let admin_router: Router<AppState> = Router::new()
         .route("/", get(routes::admin::admin_index))
