@@ -1,7 +1,7 @@
 # fly.toml — Fly.io application configuration
 # Deploy manually with: fly deploy
 
-app = "mytv-app"
+app = "kunstv"
 primary_region = "ams"
 
 [env]
