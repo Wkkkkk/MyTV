@@ -39,7 +39,7 @@
     </div>
     {% for row in rows %}
     <div class="epg-row">
-      <div class="channel-col">{{ row.name }}</div>
+      <div class="channel-col">{{ row.category_icon }} {{ row.name }}</div>
       <div class="programs-col">
         {% if now_pct.is_some() %}
         <div class="now-line" style="left: {{ now_pct.unwrap() }}%"></div>
