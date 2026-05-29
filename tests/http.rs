@@ -37,6 +37,12 @@ fn authed(uri: &str) -> Request<Body> {
         .unwrap()
 }
 
+async fn body_json(response: axum::response::Response) -> serde_json::Value {
+    use http_body_util::BodyExt;
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -116,4 +122,62 @@ async fn test_trailing_slash_redirects() {
         response.headers().get("location").unwrap(),
         "/admin/channels"
     );
+}
+
+// ── Player contract tests ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_tune_live_ok_returns_stream_url() {
+    let response = app().await.oneshot(req("/channel/1/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(
+        json["url"].as_str().unwrap(),
+        "https://stream.example.com/live.m3u8"
+    );
+}
+
+#[tokio::test]
+async fn test_tune_live_all_sources_down_returns_503() {
+    let response = app().await.oneshot(req("/channel/2/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn test_next_live_returns_backup_when_no_failed_url() {
+    let response = app().await.oneshot(req("/channel/3/next")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(
+        json["url"].as_str().unwrap(),
+        "https://stream.example.com/backup.m3u8"
+    );
+}
+
+#[tokio::test]
+async fn test_next_live_all_sources_failed_returns_503() {
+    // backup is the only active source; passing it as failed_url leaves nothing
+    let response = app()
+        .await
+        .oneshot(req(
+            "/channel/3/next?failed_url=https%3A%2F%2Fstream.example.com%2Fbackup.m3u8",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn test_tune_vod_with_playlist_returns_stream_url() {
+    let response = app().await.oneshot(req("/channel/4/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    // exact episode depends on Utc::now() — assert URL is from the playlist
+    assert!(json["url"].as_str().unwrap().contains("vod.example.com/ep"));
+}
+
+#[tokio::test]
+async fn test_tune_vod_empty_playlist_returns_503() {
+    let response = app().await.oneshot(req("/channel/5/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
