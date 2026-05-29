@@ -234,13 +234,11 @@ async fn build_guide_data(
             .collect();
 
     let active_source_ids: std::collections::HashSet<i64> =
-        sqlx::query_scalar::<_, i64>(
-            "SELECT DISTINCT channel_id FROM sources WHERE is_active = 1",
-        )
-        .fetch_all(pool)
-        .await?
-        .into_iter()
-        .collect();
+        sqlx::query_scalar::<_, i64>("SELECT DISTINCT channel_id FROM sources WHERE is_active = 1")
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .collect();
 
     let mut rows = Vec::new();
     for ch in &channels {
@@ -259,8 +257,12 @@ async fn build_guide_data(
             .iter()
             .filter_map(|e| entry_to_slot(e, window_start, window_end))
             .collect();
-        let all_sources_down =
-            is_all_sources_down(ch.id, &ch.channel_type(), &all_source_ids, &active_source_ids);
+        let all_sources_down = is_all_sources_down(
+            ch.id,
+            &ch.channel_type(),
+            &all_source_ids,
+            &active_source_ids,
+        );
         rows.push(ChannelRow {
             name: ch.name.clone(),
             category_icon: category_icon(&ch.category),
@@ -567,7 +569,12 @@ mod tests {
         use std::collections::HashSet;
         let all: HashSet<i64> = [1i64].into_iter().collect();
         let active: HashSet<i64> = HashSet::new();
-        assert!(!is_all_sources_down(1, &ChannelType::VodLoop, &all, &active));
+        assert!(!is_all_sources_down(
+            1,
+            &ChannelType::VodLoop,
+            &all,
+            &active
+        ));
     }
 
     #[test]
