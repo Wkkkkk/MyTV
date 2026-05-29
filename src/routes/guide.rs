@@ -34,6 +34,7 @@ pub struct TimeLabel {
 
 pub struct ChannelRow {
     pub name: String,
+    #[allow(dead_code)]
     pub category_icon: &'static str,
     pub programs: Vec<ProgramSlot>,
 }
