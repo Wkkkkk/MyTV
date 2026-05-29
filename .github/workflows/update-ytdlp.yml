@@ -30,42 +30,48 @@ jobs:
 
       - name: Check if update needed
         id: check
+        env:
+          LATEST: ${{ steps.latest.outputs.version }}
+          PINNED: ${{ steps.pinned.outputs.version }}
         run: |
-          if [ "${{ steps.latest.outputs.version }}" = "${{ steps.pinned.outputs.version }}" ]; then
+          if [ "$LATEST" = "$PINNED" ]; then
             echo "needed=false" >> "$GITHUB_OUTPUT"
-            echo "yt-dlp is already at ${{ steps.pinned.outputs.version }}, nothing to do."
+            echo "yt-dlp is already at $PINNED, nothing to do."
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
-            echo "Update available: ${{ steps.pinned.outputs.version }} → ${{ steps.latest.outputs.version }}"
+            echo "Update available: $PINNED -> $LATEST"
           fi
 
       - name: Update Dockerfile
         if: steps.check.outputs.needed == 'true'
+        env:
+          LATEST: ${{ steps.latest.outputs.version }}
+          PINNED: ${{ steps.pinned.outputs.version }}
         run: |
-          sed -i "s/yt-dlp==${{ steps.pinned.outputs.version }}/yt-dlp==${{ steps.latest.outputs.version }}/" Dockerfile
+          sed -i "s/yt-dlp==$PINNED/yt-dlp==$LATEST/" Dockerfile
 
       - name: Create branch and open PR
         if: steps.check.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PREV_VERSION: ${{ steps.pinned.outputs.version }}
-          NEW_VERSION: ${{ steps.latest.outputs.version }}
+          LATEST: ${{ steps.latest.outputs.version }}
+          PINNED: ${{ steps.pinned.outputs.version }}
         run: |
-          BRANCH="chore/bump-ytdlp-${{ steps.latest.outputs.version }}"
+          BRANCH="chore/bump-ytdlp-$LATEST"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add Dockerfile
-          git commit -m "chore: bump yt-dlp to ${{ steps.latest.outputs.version }}"
+          git commit -m "chore: bump yt-dlp to $LATEST"
           git push origin "$BRANCH"
           BODY="Automated weekly update of the pinned yt-dlp version in the Dockerfile.
 
-**Previous version:** \`$PREV_VERSION\`
-**New version:** \`$NEW_VERSION\`
+**Previous version:** \`$PINNED\`
+**New version:** \`$LATEST\`
 
 [yt-dlp changelog](https://github.com/yt-dlp/yt-dlp/releases)"
           gh pr create \
-            --title "chore: bump yt-dlp to ${{ steps.latest.outputs.version }}" \
+            --title "chore: bump yt-dlp to $LATEST" \
             --body "$BODY" \
             --base main \
             --head "$BRANCH"
