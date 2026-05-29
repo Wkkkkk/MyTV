@@ -11,6 +11,7 @@ pub(crate) const FAILURE_THRESHOLD: i64 = 3;
 pub fn start(pool: SqlitePool, client: reqwest::Client) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(CHECK_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         interval.tick().await; // consume the immediate first tick so we don't check at startup
         loop {
             interval.tick().await;
