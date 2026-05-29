@@ -35,22 +35,54 @@ pub struct TimeLabel {
 pub struct ChannelRow {
     pub name: String,
     pub category_icon: &'static str,
+    pub all_sources_down: bool,
     pub programs: Vec<ProgramSlot>,
 }
 
 fn category_icon(category: &str) -> &'static str {
     let c = category.to_lowercase();
-    if c.contains("news")                              { return "📰" }
-    if c.contains("sport")                             { return "⚽" }
-    if c.contains("movie") || c.contains("film") || c.contains("cinema") { return "🎬" }
-    if c.contains("music")                             { return "🎵" }
-    if c.contains("kid") || c.contains("child")        { return "🧒" }
-    if c.contains("documentary") || c.contains("docu") { return "🎥" }
-    if c.contains("entertainment")                     { return "🎭" }
-    if c.contains("cooking") || c.contains("food")     { return "🍳" }
-    if c.contains("travel")                            { return "✈️" }
-    if c.contains("science") || c.contains("tech")     { return "🔬" }
+    if c.contains("news") {
+        return "📰";
+    }
+    if c.contains("sport") {
+        return "⚽";
+    }
+    if c.contains("movie") || c.contains("film") || c.contains("cinema") {
+        return "🎬";
+    }
+    if c.contains("music") {
+        return "🎵";
+    }
+    if c.contains("kid") || c.contains("child") {
+        return "🧒";
+    }
+    if c.contains("documentary") || c.contains("docu") {
+        return "🎥";
+    }
+    if c.contains("entertainment") {
+        return "🎭";
+    }
+    if c.contains("cooking") || c.contains("food") {
+        return "🍳";
+    }
+    if c.contains("travel") {
+        return "✈️";
+    }
+    if c.contains("science") || c.contains("tech") {
+        return "🔬";
+    }
     "📺"
+}
+
+fn is_all_sources_down(
+    channel_id: i64,
+    channel_type: &ChannelType,
+    all_source_ids: &std::collections::HashSet<i64>,
+    active_source_ids: &std::collections::HashSet<i64>,
+) -> bool {
+    matches!(channel_type, ChannelType::Live)
+        && all_source_ids.contains(&channel_id)
+        && !active_source_ids.contains(&channel_id)
 }
 
 // ── template structs ───────────────────────────────────────────────────────
@@ -194,6 +226,22 @@ async fn build_guide_data(
             .collect()
     };
 
+    let all_source_ids: std::collections::HashSet<i64> =
+        sqlx::query_scalar::<_, i64>("SELECT DISTINCT channel_id FROM sources")
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .collect();
+
+    let active_source_ids: std::collections::HashSet<i64> =
+        sqlx::query_scalar::<_, i64>(
+            "SELECT DISTINCT channel_id FROM sources WHERE is_active = 1",
+        )
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .collect();
+
     let mut rows = Vec::new();
     for ch in &channels {
         let entries = match ch.channel_type() {
@@ -211,9 +259,12 @@ async fn build_guide_data(
             .iter()
             .filter_map(|e| entry_to_slot(e, window_start, window_end))
             .collect();
+        let all_sources_down =
+            is_all_sources_down(ch.id, &ch.channel_type(), &all_source_ids, &active_source_ids);
         rows.push(ChannelRow {
             name: ch.name.clone(),
             category_icon: category_icon(&ch.category),
+            all_sources_down,
             programs,
         });
     }
@@ -490,5 +541,41 @@ mod tests {
         assert_eq!(category_icon("Tech"), "🔬");
         assert_eq!(category_icon("Unknown"), "📺");
         assert_eq!(category_icon(""), "📺");
+    }
+
+    #[test]
+    fn test_all_sources_down_live_all_inactive() {
+        use crate::model::channel::ChannelType;
+        use std::collections::HashSet;
+        let all: HashSet<i64> = [1i64].into_iter().collect();
+        let active: HashSet<i64> = HashSet::new();
+        assert!(is_all_sources_down(1, &ChannelType::Live, &all, &active));
+    }
+
+    #[test]
+    fn test_all_sources_down_live_has_active_source() {
+        use crate::model::channel::ChannelType;
+        use std::collections::HashSet;
+        let all: HashSet<i64> = [1i64].into_iter().collect();
+        let active: HashSet<i64> = [1i64].into_iter().collect();
+        assert!(!is_all_sources_down(1, &ChannelType::Live, &all, &active));
+    }
+
+    #[test]
+    fn test_all_sources_down_vod_never_flagged() {
+        use crate::model::channel::ChannelType;
+        use std::collections::HashSet;
+        let all: HashSet<i64> = [1i64].into_iter().collect();
+        let active: HashSet<i64> = HashSet::new();
+        assert!(!is_all_sources_down(1, &ChannelType::VodLoop, &all, &active));
+    }
+
+    #[test]
+    fn test_all_sources_down_no_sources_not_flagged() {
+        use crate::model::channel::ChannelType;
+        use std::collections::HashSet;
+        let all: HashSet<i64> = HashSet::new();
+        let active: HashSet<i64> = HashSet::new();
+        assert!(!is_all_sources_down(1, &ChannelType::Live, &all, &active));
     }
 }
