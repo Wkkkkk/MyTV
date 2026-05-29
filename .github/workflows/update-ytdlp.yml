@@ -48,6 +48,8 @@ jobs:
         if: steps.check.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREV_VERSION: ${{ steps.pinned.outputs.version }}
+          NEW_VERSION: ${{ steps.latest.outputs.version }}
         run: |
           BRANCH="chore/bump-ytdlp-${{ steps.latest.outputs.version }}"
           git config user.name "github-actions[bot]"
@@ -56,13 +58,14 @@ jobs:
           git add Dockerfile
           git commit -m "chore: bump yt-dlp to ${{ steps.latest.outputs.version }}"
           git push origin "$BRANCH"
+          BODY="Automated weekly update of the pinned yt-dlp version in the Dockerfile.
+
+**Previous version:** \`$PREV_VERSION\`
+**New version:** \`$NEW_VERSION\`
+
+[yt-dlp changelog](https://github.com/yt-dlp/yt-dlp/releases)"
           gh pr create \
             --title "chore: bump yt-dlp to ${{ steps.latest.outputs.version }}" \
-            --body "Automated weekly update of the pinned yt-dlp version in the Dockerfile.
-
-**Previous version:** \`${{ steps.pinned.outputs.version }}\`
-**New version:** \`${{ steps.latest.outputs.version }}\`
-
-[yt-dlp changelog](https://github.com/yt-dlp/yt-dlp/releases)" \
+            --body "$BODY" \
             --base main \
             --head "$BRANCH"
