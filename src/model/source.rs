@@ -10,6 +10,10 @@ pub struct Source {
     pub url: String,
     pub priority: i64,
     pub is_active: bool,
+    pub last_checked_at: Option<i64>,
+    pub last_status: Option<String>,
+    pub consecutive_failures: i64,
+    pub failure_reason: Option<String>,
 }
 
 pub struct NewSource {
@@ -81,6 +85,58 @@ pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool
         .await?
         .rows_affected();
     Ok(rows > 0)
+}
+
+pub async fn list_all(pool: &SqlitePool) -> Result<Vec<Source>> {
+    sqlx::query_as::<_, Source>(
+        "SELECT * FROM sources ORDER BY channel_id ASC, priority ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
+}
+
+pub async fn update_health(
+    pool: &SqlitePool,
+    id: i64,
+    status: &str,
+    reason: Option<&str>,
+    consecutive_failures: i64,
+    set_inactive: bool,
+) -> Result<()> {
+    if set_inactive {
+        sqlx::query(
+            "UPDATE sources
+             SET last_checked_at = strftime('%s','now'),
+                 last_status = ?,
+                 failure_reason = ?,
+                 consecutive_failures = ?,
+                 is_active = 0
+             WHERE id = ?",
+        )
+        .bind(status)
+        .bind(reason)
+        .bind(consecutive_failures)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE sources
+             SET last_checked_at = strftime('%s','now'),
+                 last_status = ?,
+                 failure_reason = ?,
+                 consecutive_failures = ?
+             WHERE id = ?",
+        )
+        .bind(status)
+        .bind(reason)
+        .bind(consecutive_failures)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -213,5 +269,61 @@ mod tests {
         set_active(&pool, src.id, true).await.unwrap();
         let sources = list_active_for_channel(&pool, ch.id).await.unwrap();
         assert_eq!(sources.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_list_all_returns_sources_from_all_channels() {
+        let pool = test_pool().await;
+        let ch1 = make_channel(&pool).await;
+        let ch2 = make_channel(&pool).await;
+        create(&pool, hls(ch1.id, "https://a.example.com/stream.m3u8", 1))
+            .await
+            .unwrap();
+        create(&pool, hls(ch2.id, "https://b.example.com/stream.m3u8", 1))
+            .await
+            .unwrap();
+        let all = list_all(&pool).await.unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_update_health_ok_resets_failures() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let src = create(&pool, hls(ch.id, "https://primary.example.com/stream.m3u8", 1))
+            .await
+            .unwrap();
+
+        update_health(&pool, src.id, "error", Some("timeout"), 2, false)
+            .await
+            .unwrap();
+        update_health(&pool, src.id, "ok", None, 0, false)
+            .await
+            .unwrap();
+
+        let updated = get(&pool, src.id).await.unwrap().unwrap();
+        assert_eq!(updated.last_status.as_deref(), Some("ok"));
+        assert_eq!(updated.consecutive_failures, 0);
+        assert!(updated.failure_reason.is_none());
+        assert!(updated.is_active);
+    }
+
+    #[tokio::test]
+    async fn test_update_health_disables_after_threshold() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let src = create(&pool, hls(ch.id, "https://primary.example.com/stream.m3u8", 1))
+            .await
+            .unwrap();
+
+        update_health(&pool, src.id, "error", Some("connection refused"), 3, true)
+            .await
+            .unwrap();
+
+        let updated = get(&pool, src.id).await.unwrap().unwrap();
+        assert!(!updated.is_active);
+        assert_eq!(updated.consecutive_failures, 3);
+        assert_eq!(updated.last_status.as_deref(), Some("error"));
+        assert_eq!(updated.failure_reason.as_deref(), Some("connection refused"));
     }
 }
