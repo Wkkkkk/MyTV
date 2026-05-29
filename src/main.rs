@@ -102,6 +102,7 @@ async fn main() -> Result<()> {
         ));
 
     let app = Router::new()
+        .route("/", get(|| async { Redirect::permanent("/guide") }))
         .route("/health", get(routes::health::health_check))
         .route("/guide", get(routes::guide::guide_page))
         .route("/guide/partial", get(routes::guide::guide_partial))
