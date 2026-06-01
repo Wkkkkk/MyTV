@@ -18,6 +18,10 @@ use crate::{
 pub struct TuneResponse {
     pub url: String,
     pub start_offset_secs: i64,
+    pub name: String,
+    pub logo_url: Option<String>,
+    pub category: String,
+    pub channel_type: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,6 +80,10 @@ async fn tune_live(
                 return Ok(Json(TuneResponse {
                     url,
                     start_offset_secs: 0,
+                    name: ch.name.clone(),
+                    logo_url: ch.logo_url.clone(),
+                    category: ch.category.clone(),
+                    channel_type: ch.r#type.clone(),
                 }))
             }
             Err(e) => {
@@ -112,6 +120,10 @@ async fn tune_vod_at(
         Ok(url) => Ok(Json(TuneResponse {
             url,
             start_offset_secs: offset,
+            name: ch.name.clone(),
+            logo_url: ch.logo_url.clone(),
+            category: ch.category.clone(),
+            channel_type: ch.r#type.clone(),
         })),
         Err(e) => {
             tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
@@ -138,6 +150,10 @@ async fn next_live(
                 return Ok(Json(TuneResponse {
                     url,
                     start_offset_secs: 0,
+                    name: ch.name.clone(),
+                    logo_url: ch.logo_url.clone(),
+                    category: ch.category.clone(),
+                    channel_type: ch.r#type.clone(),
                 }))
             }
             Err(e) => {
@@ -176,6 +192,10 @@ async fn next_vod_at(
         Ok(url) => Ok(Json(TuneResponse {
             url,
             start_offset_secs: 0,
+            name: ch.name.clone(),
+            logo_url: ch.logo_url.clone(),
+            category: ch.category.clone(),
+            channel_type: ch.r#type.clone(),
         })),
         Err(e) => {
             tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");

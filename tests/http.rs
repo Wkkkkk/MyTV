@@ -183,6 +183,30 @@ async fn test_tune_vod_empty_playlist_returns_503() {
 }
 
 #[tokio::test]
+async fn tune_response_includes_channel_metadata() {
+    let app = app().await;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/channel/1/tune")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["name"], "Live OK");
+    assert_eq!(json["channel_type"], "live");
+    assert!(json["url"].as_str().unwrap().contains("live.m3u8"));
+    assert!(json.get("logo_url").is_some());
+    assert!(json["category"].is_string());
+}
+
+#[tokio::test]
 async fn guide_embeds_epg_channels_json() {
     let app = app().await;
     let resp = app
