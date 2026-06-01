@@ -33,10 +33,27 @@ pub struct TimeLabel {
     pub left_pct: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HealthStatus {
+    Healthy,
+    Down,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BudgetStatus {
+    Direct,
+    Proxied,
+    Unknown,
+}
+
 pub struct ChannelRow {
     pub name: String,
     pub category_icon: &'static str,
-    pub all_sources_down: bool,
+    pub health_badge_class: &'static str,
+    pub health_badge_char: &'static str,
+    pub budget_badge_class: &'static str,
+    pub budget_badge_char: &'static str,
     pub programs: Vec<ProgramSlot>,
 }
 
@@ -75,15 +92,63 @@ fn category_icon(category: &str) -> &'static str {
     "📺"
 }
 
-fn is_all_sources_down(
+fn derive_health_status(
     channel_id: i64,
     channel_type: &ChannelType,
     all_source_ids: &std::collections::HashSet<i64>,
     active_source_ids: &std::collections::HashSet<i64>,
-) -> bool {
-    matches!(channel_type, ChannelType::Live)
-        && all_source_ids.contains(&channel_id)
-        && !active_source_ids.contains(&channel_id)
+) -> HealthStatus {
+    if !all_source_ids.contains(&channel_id) {
+        return HealthStatus::Unknown;
+    }
+    match channel_type {
+        ChannelType::Live => {
+            if active_source_ids.contains(&channel_id) {
+                HealthStatus::Healthy
+            } else {
+                HealthStatus::Down
+            }
+        }
+        ChannelType::VodLoop => HealthStatus::Healthy,
+    }
+}
+
+fn derive_budget_status(
+    channel_id: i64,
+    first_active_urls: &std::collections::HashMap<i64, String>,
+    cors_cache: &std::collections::HashMap<String, bool>,
+) -> BudgetStatus {
+    let url = match first_active_urls.get(&channel_id) {
+        Some(u) => u,
+        None => return BudgetStatus::Unknown,
+    };
+    if url.starts_with("http://") {
+        return BudgetStatus::Proxied;
+    }
+    let after = url.find("://").map(|i| i + 3).unwrap_or(0);
+    let host_end = url[after..].find('/').unwrap_or(url[after..].len());
+    let host_key = &url[..after + host_end];
+    match cors_cache.get(host_key) {
+        Some(&true) => BudgetStatus::Direct,
+        Some(&false) => BudgetStatus::Proxied,
+        None => BudgetStatus::Unknown,
+    }
+}
+
+fn health_badge(status: HealthStatus) -> (&'static str, &'static str) {
+    match status {
+        HealthStatus::Healthy => ("health-ok", "●"),
+        HealthStatus::Down => ("health-down", "●"),
+        HealthStatus::Unknown => ("health-unknown", "○"),
+    }
+}
+
+fn budget_badge(status: BudgetStatus) -> (&'static str, &'static str) {
+    match status {
+        BudgetStatus::Direct => ("budget-direct", "⚡"),
+        BudgetStatus::Proxied => ("budget-proxied", "☁"),
+        BudgetStatus::Unknown => ("budget-unknown", ""),
+    }
 }
 
 // ── template structs ───────────────────────────────────────────────────────
@@ -212,6 +277,7 @@ struct GuideData {
 
 async fn build_guide_data(
     pool: &SqlitePool,
+    cors_cache: &std::collections::HashMap<String, bool>,
     category: &str,
     offset_hours: i64,
 ) -> anyhow::Result<GuideData> {
@@ -253,6 +319,25 @@ async fn build_guide_data(
             .into_iter()
             .collect();
 
+    #[derive(sqlx::FromRow)]
+    struct SourceUrlRow {
+        channel_id: i64,
+        url: String,
+    }
+
+    let source_url_rows = sqlx::query_as::<_, SourceUrlRow>(
+        "SELECT channel_id, url FROM sources WHERE is_active = 1 ORDER BY channel_id, priority",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let first_active_urls: std::collections::HashMap<i64, String> = source_url_rows
+        .into_iter()
+        .fold(std::collections::HashMap::new(), |mut acc, row| {
+            acc.entry(row.channel_id).or_insert(row.url);
+            acc
+        });
+
     let mut rows = Vec::new();
     for ch in &channels {
         let entries = match ch.channel_type() {
@@ -270,16 +355,22 @@ async fn build_guide_data(
             .iter()
             .filter_map(|e| entry_to_slot(e, window_start, window_end))
             .collect();
-        let all_sources_down = is_all_sources_down(
+        let health = derive_health_status(
             ch.id,
             &ch.channel_type(),
             &all_source_ids,
             &active_source_ids,
         );
+        let budget = derive_budget_status(ch.id, &first_active_urls, cors_cache);
+        let (health_badge_class, health_badge_char) = health_badge(health);
+        let (budget_badge_class, budget_badge_char) = budget_badge(budget);
         rows.push(ChannelRow {
             name: ch.name.clone(),
             category_icon: category_icon(&ch.category),
-            all_sources_down,
+            health_badge_class,
+            health_badge_char,
+            budget_badge_class,
+            budget_badge_char,
             programs,
         });
     }
@@ -311,7 +402,8 @@ pub async fn guide_page(
     let category = params.category.unwrap_or_else(|| "all".to_string());
     let offset_hours = params.offset.unwrap_or(-2).clamp(-48, 48);
 
-    let data = build_guide_data(&state.pool, &category, offset_hours)
+    let cors_snapshot = state.cors_cache.read().await.clone();
+    let data = build_guide_data(&state.pool, &cors_snapshot, &category, offset_hours)
         .await
         .map_err(|e| {
             tracing::error!("guide data error: {e}");
@@ -346,7 +438,8 @@ pub async fn guide_partial(
     let category = params.category.unwrap_or_else(|| "all".to_string());
     let offset_hours = params.offset.unwrap_or(-2).clamp(-48, 48);
 
-    let data = build_guide_data(&state.pool, &category, offset_hours)
+    let cors_snapshot = state.cors_cache.read().await.clone();
+    let data = build_guide_data(&state.pool, &cors_snapshot, &category, offset_hours)
         .await
         .map_err(|e| {
             tracing::error!("guide data error: {e}");
@@ -562,43 +655,100 @@ mod tests {
     }
 
     #[test]
-    fn test_all_sources_down_live_all_inactive() {
-        use crate::model::channel::ChannelType;
+    fn test_derive_health_status_live_has_active_source() {
         use std::collections::HashSet;
-        let all: HashSet<i64> = [1i64].into_iter().collect();
+        let all: HashSet<i64> = [1].into_iter().collect();
+        let active: HashSet<i64> = [1].into_iter().collect();
+        assert_eq!(
+            derive_health_status(1, &ChannelType::Live, &all, &active),
+            HealthStatus::Healthy
+        );
+    }
+
+    #[test]
+    fn test_derive_health_status_live_all_inactive() {
+        use std::collections::HashSet;
+        let all: HashSet<i64> = [1].into_iter().collect();
         let active: HashSet<i64> = HashSet::new();
-        assert!(is_all_sources_down(1, &ChannelType::Live, &all, &active));
+        assert_eq!(
+            derive_health_status(1, &ChannelType::Live, &all, &active),
+            HealthStatus::Down
+        );
     }
 
     #[test]
-    fn test_all_sources_down_live_has_active_source() {
-        use crate::model::channel::ChannelType;
-        use std::collections::HashSet;
-        let all: HashSet<i64> = [1i64].into_iter().collect();
-        let active: HashSet<i64> = [1i64].into_iter().collect();
-        assert!(!is_all_sources_down(1, &ChannelType::Live, &all, &active));
-    }
-
-    #[test]
-    fn test_all_sources_down_vod_never_flagged() {
-        use crate::model::channel::ChannelType;
-        use std::collections::HashSet;
-        let all: HashSet<i64> = [1i64].into_iter().collect();
-        let active: HashSet<i64> = HashSet::new();
-        assert!(!is_all_sources_down(
-            1,
-            &ChannelType::VodLoop,
-            &all,
-            &active
-        ));
-    }
-
-    #[test]
-    fn test_all_sources_down_no_sources_not_flagged() {
-        use crate::model::channel::ChannelType;
+    fn test_derive_health_status_no_sources_unknown() {
         use std::collections::HashSet;
         let all: HashSet<i64> = HashSet::new();
         let active: HashSet<i64> = HashSet::new();
-        assert!(!is_all_sources_down(1, &ChannelType::Live, &all, &active));
+        assert_eq!(
+            derive_health_status(1, &ChannelType::Live, &all, &active),
+            HealthStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn test_derive_health_status_vod_always_healthy() {
+        use std::collections::HashSet;
+        let all: HashSet<i64> = [1].into_iter().collect();
+        let active: HashSet<i64> = HashSet::new();
+        assert_eq!(
+            derive_health_status(1, &ChannelType::VodLoop, &all, &active),
+            HealthStatus::Healthy
+        );
+    }
+
+    #[test]
+    fn test_derive_budget_status_http_always_proxied() {
+        use std::collections::HashMap;
+        let mut urls = HashMap::new();
+        urls.insert(1i64, "http://example.com/stream.m3u8".to_string());
+        assert_eq!(
+            derive_budget_status(1, &urls, &HashMap::new()),
+            BudgetStatus::Proxied
+        );
+    }
+
+    #[test]
+    fn test_derive_budget_status_https_cache_hit_direct() {
+        use std::collections::HashMap;
+        let mut urls = HashMap::new();
+        urls.insert(1i64, "https://example.com/stream.m3u8".to_string());
+        let mut cache = HashMap::new();
+        cache.insert("https://example.com".to_string(), true);
+        assert_eq!(derive_budget_status(1, &urls, &cache), BudgetStatus::Direct);
+    }
+
+    #[test]
+    fn test_derive_budget_status_https_cache_hit_proxied() {
+        use std::collections::HashMap;
+        let mut urls = HashMap::new();
+        urls.insert(1i64, "https://example.com/stream.m3u8".to_string());
+        let mut cache = HashMap::new();
+        cache.insert("https://example.com".to_string(), false);
+        assert_eq!(
+            derive_budget_status(1, &urls, &cache),
+            BudgetStatus::Proxied
+        );
+    }
+
+    #[test]
+    fn test_derive_budget_status_https_cache_miss_unknown() {
+        use std::collections::HashMap;
+        let mut urls = HashMap::new();
+        urls.insert(1i64, "https://example.com/stream.m3u8".to_string());
+        assert_eq!(
+            derive_budget_status(1, &urls, &HashMap::new()),
+            BudgetStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn test_derive_budget_status_no_source_unknown() {
+        use std::collections::HashMap;
+        assert_eq!(
+            derive_budget_status(1, &HashMap::new(), &HashMap::new()),
+            BudgetStatus::Unknown
+        );
     }
 }
