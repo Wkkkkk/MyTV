@@ -20,6 +20,22 @@
     #player-panel video{width:100%;max-height:50vh;display:block}
     #player-error{display:none;padding:32px;text-align:center;color:#e94560;background:#000;font-size:1rem}
 
+    /* ── player info bar ──────────────────────────────────────────── */
+    #player-info{display:none;align-items:center;gap:10px;padding:8px 12px;
+                 background:#111;border-bottom:1px solid #1c1c1c}
+    .pi-logo{width:28px;height:28px;border-radius:3px;flex-shrink:0;
+             display:flex;align-items:center;justify-content:center;
+             overflow:hidden;background:#222}
+    .pi-logo img{width:100%;height:100%;object-fit:contain}
+    .pi-logo span{color:#fff;font-size:13px;font-weight:700}
+    .pi-meta{flex:1;min-width:0}
+    .pi-name{display:block;color:#fff;font-size:0.85rem;font-weight:600;
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .pi-cat{display:block;color:#666;font-size:0.75rem}
+    .pi-live{background:#c0001a;color:#fff;font-size:0.6rem;font-weight:700;
+             padding:1px 5px;border-radius:2px;letter-spacing:0.5px;flex-shrink:0}
+    .pi-pos{font-size:0.75rem;color:#555;flex-shrink:0}
+
     /* ── epg nav (tabs + time nav) ────────────────────────────── */
     .epg-nav{display:flex;align-items:center;justify-content:space-between;
              flex-wrap:wrap;gap:8px;padding:8px 12px;background:#141420;border-bottom:1px solid #222}
@@ -66,6 +82,13 @@
       .channel-col{width:80px;font-size:0.7rem;padding:0 5px}
       .epg-grid{min-width:400px}
       .time-range{display:none}
+      #player-info{padding:6px 8px}
+      .pi-logo{width:24px;height:24px}
+      .pi-cat-text{display:none}
+    }
+
+    @media(min-width:1280px){
+      #player-panel video{max-height:60vh}
     }
   </style>
 </head>
