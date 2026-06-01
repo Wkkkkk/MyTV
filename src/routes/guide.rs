@@ -16,6 +16,7 @@ use crate::{
     },
     AppState,
 };
+use serde_json;
 
 // ── display types ──────────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ pub struct TimeLabel {
 }
 
 pub struct ChannelRow {
+    pub channel_id: i64,
     pub name: String,
     pub category_icon: &'static str,
     pub all_sources_down: bool,
@@ -99,6 +101,7 @@ struct GuidePageTemplate {
     labels: Vec<TimeLabel>,
     now_pct: Option<f64>,
     rows: Vec<ChannelRow>,
+    channels_json: String,
 }
 
 #[derive(Template)]
@@ -113,6 +116,7 @@ struct EpgContentTemplate {
     labels: Vec<TimeLabel>,
     now_pct: Option<f64>,
     rows: Vec<ChannelRow>,
+    channels_json: String,
 }
 
 // ── query params ───────────────────────────────────────────────────────────
@@ -204,6 +208,7 @@ struct GuideData {
     labels: Vec<TimeLabel>,
     now_pct: Option<f64>,
     rows: Vec<ChannelRow>,
+    channels_json: String,
 }
 
 async fn build_guide_data(
@@ -264,12 +269,21 @@ async fn build_guide_data(
             &active_source_ids,
         );
         rows.push(ChannelRow {
+            channel_id: ch.id,
             name: ch.name.clone(),
             category_icon: category_icon(&ch.category),
             all_sources_down,
             programs,
         });
     }
+
+    let channels_json = serde_json::to_string(
+        &rows
+            .iter()
+            .map(|r| serde_json::json!({"id": r.channel_id, "name": r.name}))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".to_string());
 
     Ok(GuideData {
         categories,
@@ -285,6 +299,7 @@ async fn build_guide_data(
         labels: time_labels(window_start, window_end),
         now_pct: now_line_pct(now, window_start, window_end),
         rows,
+        channels_json,
     })
 }
 
@@ -314,6 +329,7 @@ pub async fn guide_page(
         labels: data.labels,
         now_pct: data.now_pct,
         rows: data.rows,
+        channels_json: data.channels_json,
     }
     .render()
     .map_err(|e| {
@@ -348,6 +364,7 @@ pub async fn guide_partial(
         labels: data.labels,
         now_pct: data.now_pct,
         rows: data.rows,
+        channels_json: data.channels_json,
     }
     .render()
     .map_err(|e| {

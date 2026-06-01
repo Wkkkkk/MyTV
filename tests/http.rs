@@ -181,3 +181,30 @@ async fn test_tune_vod_empty_playlist_returns_503() {
     let response = app().await.oneshot(req("/channel/5/tune")).await.unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
+
+#[tokio::test]
+async fn guide_embeds_epg_channels_json() {
+    let app = app().await;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/guide")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = std::str::from_utf8(&body).unwrap();
+    assert!(
+        html.contains("window.epgChannels"),
+        "missing epgChannels script"
+    );
+    assert!(
+        html.contains("\"Live OK\""),
+        "missing channel name in epgChannels"
+    );
+}
