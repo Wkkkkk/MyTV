@@ -132,14 +132,23 @@
         return '📺';
       }
 
+      function escHtml(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
       function renderInfoBar(channel) {
         var bar = document.getElementById('player-info');
         if (!bar || !channel) return;
 
         var logoEl = bar.querySelector('.pi-logo');
         if (channel.logo_url) {
+          var img = document.createElement('img');
+          img.setAttribute('src', channel.logo_url);
+          img.alt = '';
+          img.style.cssText = 'width:100%;height:100%;object-fit:contain';
           logoEl.style.background = 'transparent';
-          logoEl.innerHTML = '<img src="' + channel.logo_url.replace(/['"]/g, '') + '" alt="">';
+          logoEl.innerHTML = '';
+          logoEl.appendChild(img);
         } else {
           logoEl.style.background = hashColor(channel.name || '');
           logoEl.innerHTML = '<span>' + escHtml((channel.name || '?')[0].toUpperCase()) + '</span>';
