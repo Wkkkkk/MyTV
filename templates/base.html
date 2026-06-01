@@ -107,6 +107,66 @@
       let hls = null;
       let currentChannelId = null;
       let currentUrl = null;
+      let currentChannel = null;
+
+      function hashColor(str) {
+        var h = 0;
+        for (var i = 0; i < str.length; i++) {
+          h = (str.charCodeAt(i) + ((h << 5) - h)) | 0;
+        }
+        return 'hsl(' + (Math.abs(h) % 360) + ',35%,28%)';
+      }
+
+      function channelIcon(category) {
+        var c = (category || '').toLowerCase();
+        if (c.indexOf('news') >= 0) return '📰';
+        if (c.indexOf('sport') >= 0) return '⚽';
+        if (c.indexOf('movie') >= 0 || c.indexOf('film') >= 0 || c.indexOf('cinema') >= 0) return '🎬';
+        if (c.indexOf('music') >= 0) return '🎵';
+        if (c.indexOf('kid') >= 0 || c.indexOf('child') >= 0) return '🧒';
+        if (c.indexOf('documentary') >= 0 || c.indexOf('docu') >= 0) return '🎥';
+        if (c.indexOf('entertainment') >= 0) return '🎭';
+        if (c.indexOf('cooking') >= 0 || c.indexOf('food') >= 0) return '🍳';
+        if (c.indexOf('travel') >= 0) return '✈️';
+        if (c.indexOf('science') >= 0 || c.indexOf('tech') >= 0) return '🔬';
+        return '📺';
+      }
+
+      function renderInfoBar(channel) {
+        var bar = document.getElementById('player-info');
+        if (!bar || !channel) return;
+
+        var logoEl = bar.querySelector('.pi-logo');
+        if (channel.logo_url) {
+          logoEl.style.background = 'transparent';
+          logoEl.innerHTML = '<img src="' + channel.logo_url.replace(/['"]/g, '') + '" alt="">';
+        } else {
+          logoEl.style.background = hashColor(channel.name || '');
+          logoEl.innerHTML = '<span>' + escHtml((channel.name || '?')[0].toUpperCase()) + '</span>';
+        }
+
+        bar.querySelector('.pi-name').textContent = channel.name || '';
+        bar.querySelector('.pi-cat-icon').textContent = channelIcon(channel.category);
+        bar.querySelector('.pi-cat-text').textContent = channel.category ? ' ' + channel.category : '';
+
+        var liveEl = bar.querySelector('.pi-live');
+        liveEl.style.display = channel.channel_type === 'live' ? '' : 'none';
+
+        var posEl = bar.querySelector('.pi-pos');
+        var channels = window.epgChannels || [];
+        var idx = -1;
+        for (var i = 0; i < channels.length; i++) {
+          if (channels[i].id === channel.channel_id) { idx = i; break; }
+        }
+        if (idx >= 0) {
+          posEl.textContent = 'Ch ' + (idx + 1) + ' / ' + channels.length;
+          posEl.style.display = '';
+        } else {
+          posEl.style.display = 'none';
+        }
+
+        bar.style.display = 'flex';
+      }
 
       if (video && Hls.isSupported()) {
         hls = new Hls();
@@ -195,7 +255,11 @@
             if (!r.ok) throw new Error('tune failed: ' + r.status);
             return r.json();
           })
-          .then(function(d) { _loadSource(d.url, d.start_offset_secs); })
+          .then(function(d) {
+            currentChannel = Object.assign({ channel_id: channelId }, d);
+            renderInfoBar(currentChannel);
+            _loadSource(d.url, d.start_offset_secs);
+          })
           .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'tune: ' + err); console.error('tune error:', err); showPlayerError(); });
       }
 
