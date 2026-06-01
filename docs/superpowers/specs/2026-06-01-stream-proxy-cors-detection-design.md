@@ -98,13 +98,61 @@ After fetching the manifest body and determining `is_playlist`:
 
 ---
 
+## Guide Network Budget Indicator
+
+The CORS cache is the source of truth for per-channel budget status. The guide exposes this to the viewer as two small pill badges in the channel column, visually separated:
+
+```
+[●] [⚡] BBC News      ← healthy · direct
+[●] [☁]  CNN           ← healthy · proxied
+[●] [ ]  Al Jazeera    ← healthy · unknown (not yet probed)
+[●] [⚡] Sky Sports    ← healthy · direct
+```
+
+### Budget states
+
+| State | Badge | Condition |
+|---|---|---|
+| Direct | blue `⚡` | First active source is HTTPS and cors_cache says `true` |
+| Proxied | amber `☁` | First active source is HTTP, or HTTPS with cors_cache `false` |
+| Unknown | no badge | HTTPS source not yet probed (cache miss) |
+
+### Health states
+
+The existing `all_sources_down` boolean is replaced by a richer `HealthStatus` enum rendered as a badge:
+
+| State | Badge | Condition |
+|---|---|---|
+| Healthy | green `●` | Channel has at least one active source |
+| Down | red `●` | Channel has sources, none active |
+| Unknown | grey `○` | Channel has no sources at all |
+
+### Data flow for guide
+
+`build_guide_data` in `routes/guide.rs` already queries `all_source_ids` and `active_source_ids`. It additionally queries the first active source URL per channel (`SELECT channel_id, url FROM sources WHERE is_active = 1 ORDER BY channel_id, priority ASC`), then for each channel:
+
+1. Derive `HealthStatus` from source presence and active state.
+2. Derive `BudgetStatus` by extracting `scheme://host` from the first active source URL and looking it up in `AppState.cors_cache`.
+
+Both statuses are added to `ChannelRow` and rendered as two `<span>` badges in `epg_content.html`.
+
+### Proactive probing (startup + health check cycle)
+
+The lazy-probe in `stream_proxy` only fires on first tune. For the guide to show budget status before any channel has been played, the health checker also probes CORS:
+
+- On startup and every 15-minute health check cycle, for each active HTTPS source, call `probe_cors` and populate `cors_cache`.
+- HTTP sources are skipped (always `Proxied`, no probe needed).
+- `health::start` receives `cors_cache: Arc<RwLock<HashMap<String, bool>>>` as an additional parameter alongside `pool` and `client`.
+
+---
+
 ## What Does Not Change
 
 - HTTP streams: always proxied, no probe, no cache lookup.
 - Master playlists: always proxied (variant URLs inside are `.m3u8` lines, treated as sub-playlists by the modified `rewrite_hls_urls`).
 - Non-playlist responses (raw `.ts`/`.m4s` that were proxied before): unchanged path — these only arrive at the proxy for streams in proxy mode.
 - Database schema: no changes.
-- Admin UI: no changes.
+- Admin sources UI: no changes (budget is a runtime signal, not persisted).
 
 ---
 
@@ -131,8 +179,11 @@ After fetching the manifest body and determining `is_playlist`:
 
 - **Unit:** `rewrite_hls_urls` with `direct_segments = true` — segment lines are absolute URLs, `.m3u8` lines still go through proxy.
 - **Unit:** `find_first_segment_url` — returns first non-comment, non-playlist line resolved to absolute URL; returns `None` for a master playlist.
-- **Unit:** `probe_cors` — mock HTTP client returning various header combinations.
+- **Unit:** `probe_cors` — mock HTTP client returning various header combinations (CORS present, absent, network error).
+- **Unit:** `BudgetStatus` derivation from `cors_cache` — HTTP URL → Proxied; HTTPS cache-hit true → Direct; HTTPS cache-miss → Unknown.
+- **Unit:** `HealthStatus` derivation — no sources → Unknown; sources but none active → Down; active source present → Healthy.
 - **Integration:** `stream_proxy` with a mock upstream that returns a variant playlist; assert rewritten URLs are direct when CORS probe returns `true`.
+- **Integration:** guide route renders `ChannelRow` with correct health and budget badge fields given seeded source state.
 
 ---
 
@@ -143,4 +194,7 @@ After fetching the manifest body and determining `is_playlist`:
 | `src/lib.rs` | Add `cors_cache` field to `AppState` |
 | `src/media/hls.rs` | Add `direct_segments` param to `rewrite_hls_urls`; add `find_first_segment_url`; add `probe_cors` |
 | `src/routes/player.rs` | `stream_proxy` handler: CORS cache lookup + probe + pass flag to rewriter |
-| `tests/http.rs` | Integration test for direct-segment rewriting |
+| `src/routes/guide.rs` | `ChannelRow` gains `health_status` + `budget_status`; `build_guide_data` queries first active source URL per channel and derives both statuses from CORS cache |
+| `src/health.rs` | Receives `cors_cache` param; probes CORS for all active HTTPS sources on startup and each 15-min cycle |
+| `templates/partials/epg_content.html` | Channel-col renders two badge spans: health (green/red/grey dot) and budget (blue ⚡ / amber ☁ / none) |
+| `tests/http.rs` | Integration tests for direct-segment rewriting and guide badge derivation |
