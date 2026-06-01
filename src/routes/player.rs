@@ -276,6 +276,9 @@ mod tests {
             pool,
             config,
             http_client: reqwest::Client::new(),
+            cors_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 

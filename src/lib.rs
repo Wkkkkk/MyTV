@@ -14,13 +14,18 @@ use axum::{
     Router,
 };
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
+
+pub type CorsCache = Arc<RwLock<HashMap<String, bool>>>;
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
     pub config: Arc<config::Config>,
     pub http_client: reqwest::Client,
+    pub cors_cache: CorsCache,
 }
 
 async fn redirect_trailing_slash(req: Request, next: Next) -> axum::response::Response {

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use mytv::{build_router, config::Config, db, AppState};
+use mytv::{build_router, config::Config, db, AppState, CorsCache};
 use tower::ServiceExt;
 
 async fn app() -> axum::Router {
@@ -20,6 +20,7 @@ async fn app() -> axum::Router {
             port: 0,
         }),
         http_client: reqwest::Client::new(),
+        cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
     build_router(state)
 }

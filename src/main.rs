@@ -1,6 +1,8 @@
 use anyhow::Result;
-use mytv::{build_router, config, db, health, AppState};
+use mytv::{build_router, config, db, health, AppState, CorsCache};
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -16,10 +18,13 @@ async fn main() -> Result<()> {
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
 
+    let cors_cache: CorsCache = Arc::new(RwLock::new(HashMap::new()));
+
     let state = AppState {
         pool,
         config: config.clone(),
         http_client,
+        cors_cache,
     };
 
     health::start(state.pool.clone(), state.http_client.clone());
