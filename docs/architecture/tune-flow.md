@@ -16,7 +16,7 @@ flowchart TD
     live --> src["list_active_for_channel\nordered by priority ASC"]
     src --> iter{"for each source"}
     iter --> res1["resolver::resolve_url(src.url)"]
-    res1 -->|ok| ok1(["200 { url, start_offset_secs: 0 }"])
+    res1 -->|ok| ok1(["200 { url, start_offset_secs, name, logo_url, category, channel_type }"])
     res1 -->|err| iter
     iter -->|all fail or none| s503a(["503 Service Unavailable"])
 
@@ -26,7 +26,7 @@ flowchart TD
     items -->|empty| s503b(["503 Service Unavailable"])
     items --> pos["current_position(items, now_secs, anchor_secs)"]
     pos --> res2["resolver::resolve_url(item.url)"]
-    res2 -->|ok| ok2(["200 { url, start_offset_secs: offset }"])
+    res2 -->|ok| ok2(["200 { url, start_offset_secs, name, logo_url, category, channel_type }"])
     res2 -->|err| s503c(["503 Service Unavailable"])
 ```
 
@@ -56,14 +56,14 @@ flowchart TD
     nlive --> src["list_active_for_channel\nfilter out failed_url"]
     src --> iter{"for each remaining source"}
     iter --> res1["resolver::resolve_url"]
-    res1 -->|ok| ok1(["200 { url, start_offset_secs: 0 }"])
+    res1 -->|ok| ok1(["200 { url, start_offset_secs, name, logo_url, category, channel_type }"])
     res1 -->|err| iter
     iter -->|none left| s503(["503 Service Unavailable"])
 
     nvod --> items["list_for_channel"]
     items --> idx["next_idx = (current_idx + 1) % len"]
     idx --> res2["resolver::resolve_url(items[next_idx].url)"]
-    res2 -->|ok| ok2(["200 { url, start_offset_secs: 0 }"])
+    res2 -->|ok| ok2(["200 { url, start_offset_secs, name, logo_url, category, channel_type }"])
     res2 -->|err| s503b(["503 Service Unavailable"])
 ```
 
@@ -76,3 +76,5 @@ flowchart TD
 **VOD `start_offset_secs`.** The player uses this value to seek mid-episode, making the channel behave like a broadcast schedule where every viewer sees the same content at the same time.
 
 **VOD `/next` ignores `failed_url`.** The VOD next handler advances to the next playlist item by index and ignores the `failed_url` parameter entirely — VOD items don't have fallback sources.
+
+**Channel metadata in response.** `/tune` and `/next` both include `name`, `logo_url`, `category`, and `channel_type` so the client can render the info bar without a separate fetch.
