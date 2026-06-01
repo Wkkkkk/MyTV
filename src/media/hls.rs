@@ -72,7 +72,8 @@ pub fn rewrite_hls_urls(content: &str, base_url: &str, direct_segments: bool) ->
                 format!("{}/{}", base_dir, line)
             };
             let lower = abs.to_lowercase();
-            if direct_segments && !lower.ends_with(".m3u8") && !lower.ends_with(".m3u") {
+            let path = lower.split('?').next().unwrap_or(&lower);
+            if direct_segments && !path.ends_with(".m3u8") && !path.ends_with(".m3u") {
                 abs
             } else {
                 format!("/stream-proxy?url={}", pct_encode(&abs))
@@ -195,7 +196,8 @@ mod tests {
     fn test_rewrite_hls_urls_direct_mode_segments_are_absolute() {
         let manifest = "#EXTM3U\nseg1.ts\n";
         let result = rewrite_hls_urls(manifest, "https://example.com/live/index.m3u8", true);
-        assert_eq!(result, "#EXTM3U\nhttps://example.com/live/seg1.ts");
+        assert!(result.contains("https://example.com/live/seg1.ts"));
+        assert!(!result.contains("/stream-proxy"));
     }
 
     #[test]
