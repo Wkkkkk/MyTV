@@ -8,11 +8,17 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const FAILURE_THRESHOLD: i64 = 3;
 
+enum HealthAction {
+    Disable,
+    Reenable,
+    None,
+}
+
 pub fn start(pool: SqlitePool, client: reqwest::Client) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(CHECK_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        interval.tick().await; // consume the immediate first tick so we don't check at startup
+        interval.tick().await;
         loop {
             interval.tick().await;
             check_all(&pool, &client).await;
@@ -35,7 +41,13 @@ async fn check_all(pool: &SqlitePool, client: &reqwest::Client) {
 
 async fn check_one(pool: &SqlitePool, client: &reqwest::Client, src: &Source) {
     let (ok, reason) = do_http_check(client, src).await;
-    let (new_failures, set_inactive) = process_result(src, ok);
+    let (new_failures, action) = process_result(src, ok);
+
+    let is_active = match action {
+        HealthAction::Disable => Some(false),
+        HealthAction::Reenable => Some(true),
+        HealthAction::None => None,
+    };
 
     if let Err(e) = source::update_health(
         pool,
@@ -43,7 +55,7 @@ async fn check_one(pool: &SqlitePool, client: &reqwest::Client, src: &Source) {
         if ok { "ok" } else { "error" },
         reason.as_deref(),
         new_failures,
-        set_inactive,
+        is_active,
     )
     .await
     {
@@ -51,12 +63,17 @@ async fn check_one(pool: &SqlitePool, client: &reqwest::Client, src: &Source) {
         return;
     }
 
-    if set_inactive {
-        tracing::warn!(
+    match action {
+        HealthAction::Disable => tracing::warn!(
             "health: source {} auto-disabled after {} consecutive failures",
             src.id,
             new_failures
-        );
+        ),
+        HealthAction::Reenable => tracing::info!(
+            "health: source {} auto-re-enabled after passing health check",
+            src.id
+        ),
+        HealthAction::None => {}
     }
 }
 
@@ -71,12 +88,10 @@ async fn do_http_check(client: &reqwest::Client, src: &Source) -> (bool, Option<
         return (false, Some(format!("HTTP {}", status.as_u16())));
     }
 
-    // YouTube live: HTTP 200 is sufficient — yt-dlp resolution is too slow for background checks
     if src.kind == "youtube_live" {
         return (true, None);
     }
 
-    // HLS / IPTV: read one chunk to verify the stream actually delivers bytes
     match resp.chunk().await {
         Ok(Some(_)) => (true, None),
         Ok(None) => (false, Some("stream returned no data".to_string())),
@@ -84,10 +99,16 @@ async fn do_http_check(client: &reqwest::Client, src: &Source) -> (bool, Option<
     }
 }
 
-fn process_result(src: &Source, ok: bool) -> (i64, bool) {
+fn process_result(src: &Source, ok: bool) -> (i64, HealthAction) {
     let new_failures = if ok { 0 } else { src.consecutive_failures + 1 };
-    let set_inactive = !ok && new_failures >= FAILURE_THRESHOLD && src.is_active;
-    (new_failures, set_inactive)
+    let action = if ok && !src.is_active {
+        HealthAction::Reenable
+    } else if !ok && new_failures >= FAILURE_THRESHOLD && src.is_active {
+        HealthAction::Disable
+    } else {
+        HealthAction::None
+    };
+    (new_failures, action)
 }
 
 #[cfg(test)]
@@ -115,9 +136,9 @@ mod tests {
             consecutive_failures: 2,
             ..mock_source()
         };
-        let (failures, disable) = process_result(&src, true);
+        let (failures, action) = process_result(&src, true);
         assert_eq!(failures, 0);
-        assert!(!disable);
+        assert!(matches!(action, HealthAction::None));
     }
 
     #[test]
@@ -126,9 +147,9 @@ mod tests {
             consecutive_failures: 1,
             ..mock_source()
         };
-        let (failures, disable) = process_result(&src, false);
+        let (failures, action) = process_result(&src, false);
         assert_eq!(failures, 2);
-        assert!(!disable);
+        assert!(matches!(action, HealthAction::None));
     }
 
     #[test]
@@ -137,9 +158,9 @@ mod tests {
             consecutive_failures: 2,
             ..mock_source()
         };
-        let (failures, disable) = process_result(&src, false);
+        let (failures, action) = process_result(&src, false);
         assert_eq!(failures, 3);
-        assert!(disable);
+        assert!(matches!(action, HealthAction::Disable));
     }
 
     #[test]
@@ -149,8 +170,28 @@ mod tests {
             is_active: false,
             ..mock_source()
         };
-        let (failures, disable) = process_result(&src, false);
+        let (failures, action) = process_result(&src, false);
         assert_eq!(failures, 3);
-        assert!(!disable);
+        assert!(matches!(action, HealthAction::None));
+    }
+
+    #[test]
+    fn test_process_result_reenables_inactive_source_on_success() {
+        let src = Source {
+            is_active: false,
+            consecutive_failures: 3,
+            ..mock_source()
+        };
+        let (failures, action) = process_result(&src, true);
+        assert_eq!(failures, 0);
+        assert!(matches!(action, HealthAction::Reenable));
+    }
+
+    #[test]
+    fn test_process_result_active_source_ok_no_action() {
+        let src = mock_source();
+        let (failures, action) = process_result(&src, true);
+        assert_eq!(failures, 0);
+        assert!(matches!(action, HealthAction::None));
     }
 }

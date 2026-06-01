@@ -100,21 +100,22 @@ pub async fn update_health(
     status: &str,
     reason: Option<&str>,
     consecutive_failures: i64,
-    set_inactive: bool,
+    is_active: Option<bool>,
 ) -> Result<()> {
-    if set_inactive {
+    if let Some(active) = is_active {
         sqlx::query(
             "UPDATE sources
              SET last_checked_at = strftime('%s','now'),
                  last_status = ?,
                  failure_reason = ?,
                  consecutive_failures = ?,
-                 is_active = 0
+                 is_active = ?
              WHERE id = ?",
         )
         .bind(status)
         .bind(reason)
         .bind(consecutive_failures)
+        .bind(active)
         .bind(id)
         .execute(pool)
         .await?;
@@ -295,10 +296,10 @@ mod tests {
         .await
         .unwrap();
 
-        update_health(&pool, src.id, "error", Some("timeout"), 2, false)
+        update_health(&pool, src.id, "error", Some("timeout"), 2, None)
             .await
             .unwrap();
-        update_health(&pool, src.id, "ok", None, 0, false)
+        update_health(&pool, src.id, "ok", None, 0, None)
             .await
             .unwrap();
 
@@ -320,9 +321,16 @@ mod tests {
         .await
         .unwrap();
 
-        update_health(&pool, src.id, "error", Some("connection refused"), 3, true)
-            .await
-            .unwrap();
+        update_health(
+            &pool,
+            src.id,
+            "error",
+            Some("connection refused"),
+            3,
+            Some(false),
+        )
+        .await
+        .unwrap();
 
         let updated = get(&pool, src.id).await.unwrap().unwrap();
         assert!(!updated.is_active);
@@ -332,5 +340,34 @@ mod tests {
             updated.failure_reason.as_deref(),
             Some("connection refused")
         );
+    }
+
+    #[tokio::test]
+    async fn test_update_health_reenables_disabled_source() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let src = create(
+            &pool,
+            hls(ch.id, "https://primary.example.com/stream.m3u8", 1),
+        )
+        .await
+        .unwrap();
+
+        // disable it first
+        update_health(&pool, src.id, "error", Some("timeout"), 3, Some(false))
+            .await
+            .unwrap();
+        let disabled = get(&pool, src.id).await.unwrap().unwrap();
+        assert!(!disabled.is_active);
+
+        // now re-enable it
+        update_health(&pool, src.id, "ok", None, 0, Some(true))
+            .await
+            .unwrap();
+        let reenabled = get(&pool, src.id).await.unwrap().unwrap();
+        assert!(reenabled.is_active);
+        assert_eq!(reenabled.consecutive_failures, 0);
+        assert_eq!(reenabled.last_status.as_deref(), Some("ok"));
+        assert!(reenabled.failure_reason.is_none());
     }
 }
