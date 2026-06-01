@@ -288,6 +288,53 @@
       }
 
       window.tune = tune;
+
+      document.addEventListener('keydown', function(e) {
+        var tag = (e.target.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+        if (e.key === ' ') {
+          e.preventDefault();
+          if (!video) return;
+          if (video.paused) { video.play().catch(function(){}); }
+          else { video.pause(); }
+          return;
+        }
+
+        if (e.key === 'f' || e.key === 'F') {
+          if (!video) return;
+          if (document.fullscreenElement) {
+            document.exitFullscreen();
+          } else {
+            video.requestFullscreen().catch(function(){});
+          }
+          return;
+        }
+
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          var channels = window.epgChannels || [];
+          if (!channels.length || !currentChannelId) return;
+          var idx = -1;
+          for (var i = 0; i < channels.length; i++) {
+            if (channels[i].id === currentChannelId) { idx = i; break; }
+          }
+          if (idx < 0) idx = 0;
+          var next = e.key === 'ArrowDown'
+            ? (idx + 1) % channels.length
+            : (idx - 1 + channels.length) % channels.length;
+          tune(channels[next].id);
+          return;
+        }
+
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          if (!currentChannel || currentChannel.channel_type !== 'vod_loop') return;
+          if (!video) return;
+          e.preventDefault();
+          video.currentTime += e.key === 'ArrowRight' ? 10 : -10;
+          return;
+        }
+      });
     });
   </script>
 </body>
