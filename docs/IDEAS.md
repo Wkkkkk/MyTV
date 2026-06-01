@@ -16,3 +16,4 @@ Backlog of potential improvements, roughly in priority order.
 6. **SQL indexes on foreign keys** — add indexes on `channel_id` in `sources` and `playlist_items` tables; both are heavily queried in WHERE/ORDER BY but currently unindexed (flagged by self-review U10)
 4. ~~**Multi-agent PR bug review**~~ — done: `pr-bug-review` skill with parallel correctness/security/architecture agents + synthesis pass
 5. ~~**Code quality review checklist**~~ — done: `self-review` skill with 13 universal checks (KISS/DRY, HTML a11y, SQL indexes, N+1, dead code, test gaps)
+7. **Source auto-re-enable after cooldown** — health checker currently auto-disables sources after 3 consecutive failures but never re-enables them; add cooldown logic so sources are re-activated automatically after N successful checks or a time window
