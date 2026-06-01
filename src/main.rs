@@ -27,7 +27,11 @@ async fn main() -> Result<()> {
         cors_cache,
     };
 
-    health::start(state.pool.clone(), state.http_client.clone());
+    health::start(
+        state.pool.clone(),
+        state.http_client.clone(),
+        state.cors_cache.clone(),
+    );
 
     let app = build_router(state);
     let addr = format!("0.0.0.0:{}", config.port);

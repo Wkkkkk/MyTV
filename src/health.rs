@@ -3,6 +3,7 @@ use std::time::Duration;
 use sqlx::SqlitePool;
 
 use crate::model::source::{self, Source};
+use crate::CorsCache;
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -14,19 +15,19 @@ enum HealthAction {
     None,
 }
 
-pub fn start(pool: SqlitePool, client: reqwest::Client) {
+pub fn start(pool: SqlitePool, client: reqwest::Client, cors_cache: CorsCache) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(CHECK_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         interval.tick().await;
         loop {
             interval.tick().await;
-            check_all(&pool, &client).await;
+            check_all(&pool, &client, &cors_cache).await;
         }
     });
 }
 
-async fn check_all(pool: &SqlitePool, client: &reqwest::Client) {
+async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &CorsCache) {
     let sources = match source::list_all(pool).await {
         Ok(s) => s,
         Err(e) => {
@@ -36,7 +37,36 @@ async fn check_all(pool: &SqlitePool, client: &reqwest::Client) {
     };
     for src in sources {
         check_one(pool, client, &src).await;
+        if src.url.starts_with("https://") {
+            probe_cors_for_source(client, cors_cache, &src).await;
+        }
     }
+}
+
+fn extract_manifest_host(url: &str) -> String {
+    let after = url.find("://").map(|i| i + 3).unwrap_or(0);
+    let host_end = url[after..].find('/').unwrap_or(url[after..].len());
+    url[..after + host_end].to_string()
+}
+
+async fn probe_cors_for_source(client: &reqwest::Client, cors_cache: &CorsCache, src: &Source) {
+    let body = match client.get(&src.url).timeout(HTTP_TIMEOUT).send().await {
+        Ok(r) if r.status().is_success() => match r.text().await {
+            Ok(t) => t,
+            Err(_) => return,
+        },
+        _ => return,
+    };
+
+    let segment_url = match crate::media::hls::find_first_segment_url(&body, &src.url) {
+        Some(u) => u,
+        None => return,
+    };
+
+    let result = crate::media::hls::probe_cors(client, &segment_url).await;
+    let host_key = extract_manifest_host(&src.url);
+    cors_cache.write().await.insert(host_key.clone(), result);
+    tracing::debug!(source_id = src.id, host = %host_key, cors = result, "CORS probe cached");
 }
 
 async fn check_one(pool: &SqlitePool, client: &reqwest::Client, src: &Source) {
