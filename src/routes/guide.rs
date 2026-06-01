@@ -34,7 +34,6 @@ pub struct TimeLabel {
 }
 
 pub struct ChannelRow {
-    pub channel_id: i64,
     pub name: String,
     pub category_icon: &'static str,
     pub all_sources_down: bool,
@@ -228,7 +227,8 @@ async fn build_guide_data(
             .map(|c| serde_json::json!({"id": c.id, "name": c.name}))
             .collect::<Vec<_>>(),
     )
-    .unwrap_or_else(|_| "[]".to_string());
+    .unwrap_or_else(|_| "[]".to_string())
+    .replace("</", r"<\/");
 
     let channels: Vec<Channel> = if category == "all" {
         all_channels
@@ -277,7 +277,6 @@ async fn build_guide_data(
             &active_source_ids,
         );
         rows.push(ChannelRow {
-            channel_id: ch.id,
             name: ch.name.clone(),
             category_icon: category_icon(&ch.category),
             all_sources_down,
