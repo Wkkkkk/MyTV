@@ -118,6 +118,7 @@ fn resolve_uri(uri: &str, base_url: &str) -> String {
 /// Returns the first resolved absolute segment URL from an HLS media playlist.
 /// Skips comment lines, empty lines, and sub-playlist lines (`.m3u8`/`.m3u`).
 /// Returns `None` for master playlists that contain only sub-playlist lines.
+#[allow(dead_code)]
 pub fn find_first_segment_url(content: &str, base_url: &str) -> Option<String> {
     let base_dir = base_url
         .rsplit_once('/')
