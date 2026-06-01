@@ -40,7 +40,7 @@
     </div>
     {% for row in rows %}
     <div class="epg-row">
-      <div class="channel-col"><span class="{{ row.health_badge_class }}">{{ row.health_badge_char }}</span><span class="{{ row.budget_badge_class }}">{{ row.budget_badge_char }}</span> {{ row.category_icon }} {{ row.name }}</div>
+      <div class="channel-col"><span class="status-badge {{ row.health_badge_class }}">{{ row.health_badge_char }}</span><span class="status-badge {{ row.budget_badge_class }}">{{ row.budget_badge_char }}</span> {{ row.category_icon }} {{ row.name }}</div>
       <div class="programs-col">
         {% if now_pct.is_some() %}
         <div class="now-line" style="left: {{ now_pct.unwrap() }}%"></div>
