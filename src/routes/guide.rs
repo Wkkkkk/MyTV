@@ -222,6 +222,14 @@ async fn build_guide_data(
     let all_channels = channel::list(pool).await?;
     let categories = channel::distinct_categories(&all_channels);
 
+    let channels_json = serde_json::to_string(
+        &all_channels
+            .iter()
+            .map(|c| serde_json::json!({"id": c.id, "name": c.name}))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".to_string());
+
     let channels: Vec<Channel> = if category == "all" {
         all_channels
     } else {
@@ -276,14 +284,6 @@ async fn build_guide_data(
             programs,
         });
     }
-
-    let channels_json = serde_json::to_string(
-        &rows
-            .iter()
-            .map(|r| serde_json::json!({"id": r.channel_id, "name": r.name}))
-            .collect::<Vec<_>>(),
-    )
-    .unwrap_or_else(|_| "[]".to_string());
 
     Ok(GuideData {
         categories,
