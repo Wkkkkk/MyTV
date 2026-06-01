@@ -98,18 +98,18 @@ fn derive_health_status(
     all_source_ids: &std::collections::HashSet<i64>,
     active_source_ids: &std::collections::HashSet<i64>,
 ) -> HealthStatus {
-    if !all_source_ids.contains(&channel_id) {
-        return HealthStatus::Unknown;
-    }
     match channel_type {
+        ChannelType::VodLoop => HealthStatus::Healthy,
         ChannelType::Live => {
+            if !all_source_ids.contains(&channel_id) {
+                return HealthStatus::Unknown;
+            }
             if active_source_ids.contains(&channel_id) {
                 HealthStatus::Healthy
             } else {
                 HealthStatus::Down
             }
         }
-        ChannelType::VodLoop => HealthStatus::Healthy,
     }
 }
 
@@ -691,6 +691,17 @@ mod tests {
     fn test_derive_health_status_vod_always_healthy() {
         use std::collections::HashSet;
         let all: HashSet<i64> = [1].into_iter().collect();
+        let active: HashSet<i64> = HashSet::new();
+        assert_eq!(
+            derive_health_status(1, &ChannelType::VodLoop, &all, &active),
+            HealthStatus::Healthy
+        );
+    }
+
+    #[test]
+    fn test_derive_health_status_vod_no_sources_still_healthy() {
+        use std::collections::HashSet;
+        let all: HashSet<i64> = HashSet::new();
         let active: HashSet<i64> = HashSet::new();
         assert_eq!(
             derive_health_status(1, &ChannelType::VodLoop, &all, &active),
