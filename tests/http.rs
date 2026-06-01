@@ -202,7 +202,10 @@ async fn tune_response_includes_channel_metadata() {
     assert_eq!(json["name"], "Live OK");
     assert_eq!(json["channel_type"], "live");
     assert!(json["url"].as_str().unwrap().contains("live.m3u8"));
-    assert!(json.get("logo_url").is_some());
+    assert!(
+        json["logo_url"].is_null(),
+        "logo_url should be null for seed channel 1 which has no logo"
+    );
     assert!(json["category"].is_string());
 }
 
