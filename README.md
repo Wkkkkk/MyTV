@@ -28,6 +28,19 @@ A personal web app that repackages live internet streams and VOD content into a 
 
 ---
 
+## Player controls
+
+| Key | Action |
+|-----|--------|
+| `Space` | Play / pause |
+| `F` | Toggle fullscreen |
+| `↑` / `↓` | Previous / next channel (respects active EPG category filter) |
+| `←` / `→` | Seek −10s / +10s (VOD channels only) |
+
+The channel info bar below the video shows the channel logo (or a coloured initial tile if no logo is set), name, category, and position in the current channel list.
+
+---
+
 ## Scope
 
 MyTV is a single-user personal server. It does not transcode, record, or manage multi-user access. It has no built-in HTTPS — put a reverse proxy in front for public deployments. It assumes you supply the stream URLs; it does not crawl or scrape content automatically.
