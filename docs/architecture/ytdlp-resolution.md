@@ -27,7 +27,7 @@ flowchart TD
     scheme -->|yes| spawn["spawn yt-dlp --print duration --no-playlist -- url\n(30s timeout)"]
     spawn -->|timeout| err2(["Error: timed out"])
     spawn -->|non-zero exit| err3(["Error: stderr message"])
-    spawn -->|ok| parse["parse stdout as f64\nvalidate finite and positive"]
+    spawn -->|ok| parse["parse stdout as f64\nvalidate finite and non-negative"]
     parse -->|invalid| err4(["Error: could not parse duration"])
     parse -->|ok| secs(["Return duration as i64 seconds"])
 ```
