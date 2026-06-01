@@ -151,6 +151,34 @@ pub fn find_first_segment_url(content: &str, base_url: &str) -> Option<String> {
     None
 }
 
+/// Returns true if the header map contains `Access-Control-Allow-Origin: *`.
+#[allow(dead_code)]
+pub fn has_cors_wildcard(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get("access-control-allow-origin")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.trim() == "*")
+        .unwrap_or(false)
+}
+
+/// HEAD-requests `url` and returns true if the response includes `Access-Control-Allow-Origin: *`.
+/// Returns false on any network or timeout error (proxy is the safe default).
+#[allow(dead_code)]
+pub async fn probe_cors(client: &reqwest::Client, url: &str) -> bool {
+    match client
+        .head(url)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+    {
+        Ok(resp) => has_cors_wildcard(resp.headers()),
+        Err(e) => {
+            tracing::debug!(url = %url, error = %e, "CORS probe failed, defaulting to proxy");
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +320,30 @@ mod tests {
             find_first_segment_url("#EXTM3U\n", "https://example.com/index.m3u8"),
             None
         );
+    }
+
+    #[test]
+    fn test_has_cors_wildcard_returns_true_for_star() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "access-control-allow-origin",
+            reqwest::header::HeaderValue::from_static("*"),
+        );
+        assert!(has_cors_wildcard(&headers));
+    }
+
+    #[test]
+    fn test_has_cors_wildcard_returns_false_when_absent() {
+        assert!(!has_cors_wildcard(&reqwest::header::HeaderMap::new()));
+    }
+
+    #[test]
+    fn test_has_cors_wildcard_returns_false_for_specific_origin() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "access-control-allow-origin",
+            reqwest::header::HeaderValue::from_static("https://example.com"),
+        );
+        assert!(!has_cors_wildcard(&headers));
     }
 }
