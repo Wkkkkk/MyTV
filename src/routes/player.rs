@@ -249,7 +249,7 @@ pub async fn stream_proxy(
 
     if is_playlist {
         let text = String::from_utf8_lossy(&body_bytes);
-        let rewritten = hls::rewrite_hls_urls(&text, &q.url);
+        let rewritten = hls::rewrite_hls_urls(&text, &q.url, false);
         headers.insert(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/vnd.apple.mpegurl"),

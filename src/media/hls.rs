@@ -43,7 +43,9 @@ pub async fn fetch_hls_duration(client: &reqwest::Client, url: &str) -> Result<i
 }
 
 /// Rewrites all non-comment URLs in an HLS manifest to route through /stream-proxy.
-pub fn rewrite_hls_urls(content: &str, base_url: &str) -> String {
+/// When direct_segments is true, segment URLs (.ts, etc) are written as absolute URLs,
+/// but playlist URLs (.m3u8) still route through /stream-proxy.
+pub fn rewrite_hls_urls(content: &str, base_url: &str, direct_segments: bool) -> String {
     let base_dir = base_url
         .rsplit_once('/')
         .map(|(b, _)| b)
@@ -69,7 +71,12 @@ pub fn rewrite_hls_urls(content: &str, base_url: &str) -> String {
             } else {
                 format!("{}/{}", base_dir, line)
             };
-            format!("/stream-proxy?url={}", pct_encode(&abs))
+            let lower = abs.to_lowercase();
+            if direct_segments && !lower.ends_with(".m3u8") && !lower.ends_with(".m3u") {
+                abs
+            } else {
+                format!("/stream-proxy?url={}", pct_encode(&abs))
+            }
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -114,28 +121,32 @@ mod tests {
     #[test]
     fn test_rewrite_hls_urls_absolute() {
         let manifest = "#EXTM3U\nhttps://cdn.example.com/seg1.ts\n";
-        let result = rewrite_hls_urls(manifest, "https://origin.example.com/live/index.m3u8");
+        let result = rewrite_hls_urls(
+            manifest,
+            "https://origin.example.com/live/index.m3u8",
+            false,
+        );
         assert!(result.contains("/stream-proxy?url=https%3A%2F%2Fcdn.example.com%2Fseg1.ts"));
     }
 
     #[test]
     fn test_rewrite_hls_urls_relative() {
         let manifest = "#EXTM3U\nseg1.ts\n";
-        let result = rewrite_hls_urls(manifest, "https://example.com/live/index.m3u8");
+        let result = rewrite_hls_urls(manifest, "https://example.com/live/index.m3u8", false);
         assert!(result.contains("/stream-proxy?url=https%3A%2F%2Fexample.com%2Flive%2Fseg1.ts"));
     }
 
     #[test]
     fn test_rewrite_hls_urls_root_relative() {
         let manifest = "#EXTM3U\n/hls/seg1.ts\n";
-        let result = rewrite_hls_urls(manifest, "https://example.com/live/index.m3u8");
+        let result = rewrite_hls_urls(manifest, "https://example.com/live/index.m3u8", false);
         assert!(result.contains("/stream-proxy?url=https%3A%2F%2Fexample.com%2Fhls%2Fseg1.ts"));
     }
 
     #[test]
     fn test_rewrite_hls_urls_leaves_comments_unchanged() {
         let manifest = "#EXTM3U\n#EXT-X-TARGETDURATION:6\nhttps://cdn.example.com/seg.ts\n";
-        let result = rewrite_hls_urls(manifest, "https://example.com/index.m3u8");
+        let result = rewrite_hls_urls(manifest, "https://example.com/index.m3u8", false);
         assert!(result.contains("#EXTM3U"));
         assert!(result.contains("#EXT-X-TARGETDURATION:6"));
     }
@@ -178,5 +189,27 @@ mod tests {
             resolve_uri("/hls/variant.m3u8", "https://example.com/live/master.m3u8"),
             "https://example.com/hls/variant.m3u8"
         );
+    }
+
+    #[test]
+    fn test_rewrite_hls_urls_direct_mode_segments_are_absolute() {
+        let manifest = "#EXTM3U\nseg1.ts\n";
+        let result = rewrite_hls_urls(manifest, "https://example.com/live/index.m3u8", true);
+        assert_eq!(result, "#EXTM3U\nhttps://example.com/live/seg1.ts");
+    }
+
+    #[test]
+    fn test_rewrite_hls_urls_direct_mode_playlists_still_proxied() {
+        let manifest = "#EXTM3U\nvariant.m3u8\n";
+        let result = rewrite_hls_urls(manifest, "https://example.com/master.m3u8", true);
+        assert!(result.contains("/stream-proxy?url="));
+        assert!(!result.contains("\nhttps://example.com/variant.m3u8"));
+    }
+
+    #[test]
+    fn test_rewrite_hls_urls_proxy_mode_all_proxied() {
+        let manifest = "#EXTM3U\nseg1.ts\n";
+        let result = rewrite_hls_urls(manifest, "https://example.com/live/index.m3u8", false);
+        assert!(result.contains("/stream-proxy?url="));
     }
 }
