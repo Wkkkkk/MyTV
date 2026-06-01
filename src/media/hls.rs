@@ -115,6 +115,41 @@ fn resolve_uri(uri: &str, base_url: &str) -> String {
     format!("{}/{}", base_dir, uri)
 }
 
+/// Returns the first resolved absolute segment URL from an HLS media playlist.
+/// Skips comment lines, empty lines, and sub-playlist lines (`.m3u8`/`.m3u`).
+/// Returns `None` for master playlists that contain only sub-playlist lines.
+pub fn find_first_segment_url(content: &str, base_url: &str) -> Option<String> {
+    let base_dir = base_url
+        .rsplit_once('/')
+        .map(|(b, _)| b)
+        .unwrap_or(base_url);
+    let after_scheme = base_url.find("://").map(|i| i + 3).unwrap_or(0);
+    let host_len = base_url[after_scheme..]
+        .find('/')
+        .unwrap_or(base_url[after_scheme..].len());
+    let origin = &base_url[..after_scheme + host_len];
+
+    for line in content.lines() {
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        let lower = line.to_lowercase();
+        let path = lower.split('?').next().unwrap_or(&lower);
+        if path.ends_with(".m3u8") || path.ends_with(".m3u") {
+            continue;
+        }
+        let abs = if line.starts_with("http://") || line.starts_with("https://") {
+            line.to_string()
+        } else if line.starts_with('/') {
+            format!("{}{}", origin, line)
+        } else {
+            format!("{}/{}", base_dir, line)
+        };
+        return Some(abs);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +248,48 @@ mod tests {
         let manifest = "#EXTM3U\nseg1.ts\n";
         let result = rewrite_hls_urls(manifest, "https://example.com/live/index.m3u8", false);
         assert!(result.contains("/stream-proxy?url="));
+    }
+
+    #[test]
+    fn test_find_first_segment_url_returns_resolved_ts() {
+        let manifest = "#EXTM3U\n#EXT-X-TARGETDURATION:6\nseg1.ts\nseg2.ts\n";
+        let result = find_first_segment_url(manifest, "https://example.com/live/index.m3u8");
+        assert_eq!(result, Some("https://example.com/live/seg1.ts".to_string()));
+    }
+
+    #[test]
+    fn test_find_first_segment_url_skips_m3u8_lines() {
+        let manifest = "#EXTM3U\nvariant.m3u8\nseg1.ts\n";
+        let result = find_first_segment_url(manifest, "https://example.com/live/index.m3u8");
+        assert_eq!(result, Some("https://example.com/live/seg1.ts".to_string()));
+    }
+
+    #[test]
+    fn test_find_first_segment_url_returns_none_for_master_playlist() {
+        let manifest = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvariant.m3u8\n";
+        let result = find_first_segment_url(manifest, "https://example.com/master.m3u8");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_find_first_segment_url_absolute_segment() {
+        let manifest = "#EXTM3U\nhttps://cdn.example.com/seg1.ts\n";
+        let result = find_first_segment_url(manifest, "https://example.com/live/index.m3u8");
+        assert_eq!(result, Some("https://cdn.example.com/seg1.ts".to_string()));
+    }
+
+    #[test]
+    fn test_find_first_segment_url_root_relative() {
+        let manifest = "#EXTM3U\n/hls/seg1.ts\n";
+        let result = find_first_segment_url(manifest, "https://example.com/live/index.m3u8");
+        assert_eq!(result, Some("https://example.com/hls/seg1.ts".to_string()));
+    }
+
+    #[test]
+    fn test_find_first_segment_url_returns_none_for_empty_manifest() {
+        assert_eq!(
+            find_first_segment_url("#EXTM3U\n", "https://example.com/index.m3u8"),
+            None
+        );
     }
 }
