@@ -6,7 +6,7 @@ Backlog of potential improvements, roughly in priority order.
 
 4. ~~**Source health monitoring**~~ — done: background checker, health badges in admin, guide warnings
 5. ~~**yt-dlp auto-update**~~ — done: `.github/workflows/ytdlp-update.yml` weekly PR workflow
-6. **Player UX + mobile/TV UI** — spec: `docs/superpowers/specs/2026-06-01-player-ux-design.md`. Channel info bar (logo, name, category, position), keyboard shortcuts (space/arrows/F), fullscreen, responsive CSS for phone and TV. Channel logos folded in here.
+6. **Player UX + mobile/TV UI** — spec: `docs/superpowers/specs/2026-06-01-player-ux-design.md`. Channel info bar (logo, name, category, position), keyboard shortcuts (space/arrows/F), fullscreen, responsive CSS for phone and TV. Channel logos folded in here. **Post-implementation: update README to document keyboard shortcuts and channel info bar.**
 
 ## Other ideas
 
