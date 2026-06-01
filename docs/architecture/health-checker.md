@@ -1,6 +1,6 @@
 # Health Checker & Source State Machine
 
-A background Tokio task checks every source URL every 15 minutes and auto-disables sources that fail repeatedly.
+A background Tokio task checks every source URL every 15 minutes and auto-disables sources that fail repeatedly. Sources that recover are automatically re-enabled on the next successful check.
 
 ## Tick Loop
 
@@ -16,10 +16,12 @@ flowchart TD
     check -->|hls / iptv| chunk["Read one chunk\nverify bytes delivered"]
     yt --> result[process_result]
     chunk --> result
-    result -->|ok| reset["failures = 0"]
+    result -->|"ok, is_active = true"| reset["failures = 0"]
+    result -->|"ok, is_active = false"| reenable["failures = 0\nset is_active = 1"]
     result -->|"fail, failures < 3"| inc["failures++"]
     result -->|"fail, failures ≥ 3\nand is_active = true"| disable["set is_active = 0"]
     reset --> db[update_health in DB]
+    reenable --> db
     inc --> db
     disable --> db
     db --> loop
@@ -34,13 +36,13 @@ stateDiagram-v2
     Active --> Active : check ok — failures reset to 0
     Active --> Active : check fails — failures < 3
     Active --> Disabled : check fails — failures reach 3
-    Disabled --> Disabled : check runs — no state change
+    Disabled --> Active : check ok — auto re-enabled
     Disabled --> Active : admin manually toggles on
 ```
 
 ## Notes
 
-**No auto-re-enable.** Once a source is disabled the health checker does not bring it back. The `process_result` guard (`src.is_active`) prevents the disable flag from firing again on an already-inactive source, but a successful check only resets `consecutive_failures` — it does not set `is_active = 1`. Re-enabling requires manual action via the admin toggle button.
+**Auto-re-enable.** When a disabled source passes a health check, `process_result` returns `HealthAction::Reenable` and `update_health` sets `is_active = 1`. The source returns to active rotation immediately on the next check cycle — no cooldown period. The `HealthAction` enum (private to `health.rs`) makes the three outcomes — `Disable`, `Reenable`, `None` — mutually exclusive.
 
 **Why `MissedTickBehavior::Skip`?** If a full check round (many sources all timing out at 5s each) takes longer than 15 minutes, any missed ticks are dropped rather than queued. This prevents a backlog of back-to-back check rounds after a slow cycle.
 
