@@ -329,7 +329,7 @@
 
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
           if (!currentChannel || currentChannel.channel_type !== 'vod_loop') return;
-          if (!video) return;
+          if (!video || video.readyState < 1) return;
           e.preventDefault();
           video.currentTime += e.key === 'ArrowRight' ? 10 : -10;
           return;
