@@ -115,7 +115,9 @@ The CORS cache is the source of truth for per-channel budget status. The guide e
 |---|---|---|
 | Direct | blue `⚡` | First active source is HTTPS and cors_cache says `true` |
 | Proxied | amber `☁` | First active source is HTTP, or HTTPS with cors_cache `false` |
-| Unknown | no badge | HTTPS source not yet probed (cache miss) |
+| Unknown | invisible placeholder | HTTPS source not yet probed (cache miss) |
+
+The unknown state renders a `<span>` of identical dimensions to the visible badges but with no background color and no icon. This keeps all channel names vertically aligned regardless of budget state.
 
 ### Health states
 
