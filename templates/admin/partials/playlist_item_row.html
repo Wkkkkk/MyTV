@@ -1,0 +1,25 @@
+<tr id="pl-row-{{ item.id }}">
+  <td style="color:#555">{{ item.sort_order }}</td>
+  <td>{{ item.title }}</td>
+  <td style="word-break:break-all;max-width:360px;font-size:0.78rem">{{ item.url }}</td>
+  <td style="white-space:nowrap">{{ item.duration_secs }}s</td>
+  <td>
+    {% if item.budget_badge_char.is_empty() %}
+    <span style="color:#888" title="Network budget not yet probed">·</span>
+    {% else %}
+    <span class="{{ item.budget_badge_class }}" title="Network budget">{{ item.budget_badge_char }}</span>
+    {% endif %}
+  </td>
+  <td style="white-space:nowrap">
+    <button class="btn btn-sm" type="button"
+            hx-post="/admin/playlist/{{ item.id }}/test"
+            hx-target="#pl-row-{{ item.id }}"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this">Test</button>
+    <form action="/admin/playlist/{{ item.id }}/delete" method="post"
+          style="display:inline-block;margin-left:4px">
+      <button class="btn btn-sm btn-danger" type="submit"
+              onclick="return confirm('Remove this item?')">Delete</button>
+    </form>
+  </td>
+</tr>

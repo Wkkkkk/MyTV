@@ -12,7 +12,7 @@ pub use discover::{
     discover_add, discover_add_form, discover_m3u_search, discover_manual_resolve, discover_page,
     discover_youtube_search,
 };
-pub use playlist::{playlist_item_create, playlist_item_delete};
+pub use playlist::{playlist_item_create, playlist_item_delete, playlist_item_test};
 pub use sources::{source_create, source_delete, source_test, source_toggle};
 
 use axum::{
@@ -57,6 +57,17 @@ pub struct AdminPlaylistItemRow {
     pub url: String,
     pub duration_secs: i64,
     pub sort_order: i64,
+    pub budget_badge_class: &'static str,
+    pub budget_badge_char: &'static str,
+}
+
+impl AdminPlaylistItemRow {
+    /// Fills the budget badge fields from a CORS-cache snapshot, keyed by this item's URL host.
+    pub fn apply_budget(&mut self, cors_cache: &std::collections::HashMap<String, bool>) {
+        let (class, glyph) = crate::budget::badge_for_url(&self.url, cors_cache);
+        self.budget_badge_class = class;
+        self.budget_badge_char = glyph;
+    }
 }
 
 // ── From impls ─────────────────────────────────────────────────────────────
@@ -76,8 +87,7 @@ impl From<channel::Channel> for AdminChannelRow {
 impl AdminSourceRow {
     /// Fills the budget badge fields from a CORS-cache snapshot, keyed by this source's URL host.
     pub fn apply_budget(&mut self, cors_cache: &std::collections::HashMap<String, bool>) {
-        let (class, glyph) =
-            crate::budget::budget_badge(crate::budget::status_for_url(&self.url, cors_cache));
+        let (class, glyph) = crate::budget::badge_for_url(&self.url, cors_cache);
         self.budget_badge_class = class;
         self.budget_badge_char = glyph;
     }
@@ -104,12 +114,16 @@ impl From<source::Source> for AdminSourceRow {
 
 impl From<playlist_item::PlaylistItem> for AdminPlaylistItemRow {
     fn from(i: playlist_item::PlaylistItem) -> Self {
+        let (budget_badge_class, budget_badge_char) =
+            crate::budget::budget_badge(crate::budget::BudgetStatus::Unknown);
         Self {
             id: i.id,
             title: i.title,
             url: i.url,
             duration_secs: i.duration_secs,
             sort_order: i.sort_order,
+            budget_badge_class,
+            budget_badge_char,
         }
     }
 }

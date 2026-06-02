@@ -1,16 +1,24 @@
+use askama::Template;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::{IntoResponse, Redirect},
+    response::{Html, IntoResponse, Redirect},
 };
 use serde::Deserialize;
 
-use crate::routes::internal_error;
+use crate::routes::admin::AdminPlaylistItemRow;
+use crate::routes::{internal_error, render};
 use crate::{
     media::{hls, resolver},
     model::{playlist_item, playlist_item::NewPlaylistItem},
     AppState,
 };
+
+#[derive(Template)]
+#[template(path = "admin/partials/playlist_item_row.html")]
+struct PlaylistItemRowTemplate {
+    item: AdminPlaylistItemRow,
+}
 
 // ── form input types ───────────────────────────────────────────────────────
 
@@ -82,4 +90,22 @@ pub async fn playlist_item_delete(
         "/admin/channels/{}",
         item.channel_id
     )))
+}
+
+pub async fn playlist_item_test(
+    State(state): State<AppState>,
+    Path(item_id): Path<i64>,
+) -> Result<Html<String>, StatusCode> {
+    let item = playlist_item::get(&state.pool, item_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    crate::health::probe_and_cache_cors(&state.http_client, &state.cors_cache, &item.url).await;
+
+    let cors = state.cors_cache.read().await.clone();
+    let mut row: AdminPlaylistItemRow = item.into();
+    row.apply_budget(&cors);
+
+    render(PlaylistItemRowTemplate { item: row })
 }
