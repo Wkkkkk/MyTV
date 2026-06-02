@@ -1,3 +1,4 @@
+use askama::Template;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -5,8 +6,8 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::media::resolver;
-use crate::routes::internal_error;
+use crate::routes::admin::AdminSourceRow;
+use crate::routes::{internal_error, render};
 use crate::{model::source, AppState};
 
 // ── form input types ───────────────────────────────────────────────────────
@@ -16,6 +17,12 @@ pub struct SourceForm {
     pub kind: String,
     pub url: String,
     pub priority: String,
+}
+
+#[derive(Template)]
+#[template(path = "admin/partials/source_row.html")]
+struct SourceRowTemplate {
+    src: AdminSourceRow,
 }
 
 // ── handlers ───────────────────────────────────────────────────────────────
@@ -85,32 +92,19 @@ pub async fn source_test(
         .map_err(internal_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let ok_html = r#"<span class="badge badge-on">OK</span>"#;
-    let fail_html = r#"<span style="color:#e94560;font-size:0.78rem">Failed</span>"#;
+    crate::health::check_source(&state.pool, &state.http_client, &state.cors_cache, &src).await;
 
-    if resolver::needs_resolution(&src.url) {
-        return Ok(Html(match resolver::resolve_url(&src.url).await {
-            Ok(_) => ok_html.to_string(),
-            Err(_) => fail_html.to_string(),
-        }));
-    }
+    let updated = source::get(&state.pool, source_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(Html(
-        match state
-            .http_client
-            .head(&src.url)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
-                ok_html.to_string()
-            }
-            Ok(resp) => format!(
-                r#"<span style="color:#e94560;font-size:0.78rem">Failed: HTTP {}</span>"#,
-                resp.status().as_u16()
-            ),
-            Err(_) => fail_html.to_string(),
-        },
-    ))
+    let cors = state.cors_cache.read().await.clone();
+    let (cls, glyph) =
+        crate::budget::budget_badge(crate::budget::status_for_url(&updated.url, &cors));
+    let mut row: AdminSourceRow = updated.into();
+    row.budget_badge_class = cls;
+    row.budget_badge_char = glyph;
+
+    render(SourceRowTemplate { src: row })
 }
