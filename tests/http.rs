@@ -5,6 +5,16 @@ use axum::http::{Request, StatusCode};
 use mytv::{build_router, config::Config, db, AppState};
 use tower::ServiceExt;
 
+// A bounded-timeout client so any test that triggers an outbound request (e.g.
+// the source Test endpoint hitting an unreachable seed URL) fails fast instead
+// of stalling on the production 5s health-check ceiling in restrictive CI.
+fn test_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(500))
+        .build()
+        .unwrap()
+}
+
 async fn app() -> axum::Router {
     let pool = db::connect("sqlite::memory:").await.unwrap();
     sqlx::query(include_str!("fixtures/seed.sql"))
@@ -19,7 +29,7 @@ async fn app() -> axum::Router {
             youtube_api_key: None,
             port: 0,
         }),
-        http_client: reqwest::Client::new(),
+        http_client: test_client(),
         cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
     build_router(state)
@@ -75,7 +85,7 @@ async fn app_with_cors(host: &str, direct: bool) -> axum::Router {
             youtube_api_key: None,
             port: 0,
         }),
-        http_client: reqwest::Client::new(),
+        http_client: test_client(),
         cors_cache,
     };
     build_router(state)
