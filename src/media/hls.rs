@@ -46,31 +46,13 @@ pub async fn fetch_hls_duration(client: &reqwest::Client, url: &str) -> Result<i
 /// When direct_segments is true, segment URLs (.ts, etc) are written as absolute URLs,
 /// but playlist URLs (.m3u8) still route through /stream-proxy.
 pub fn rewrite_hls_urls(content: &str, base_url: &str, direct_segments: bool) -> String {
-    let base_dir = base_url
-        .rsplit_once('/')
-        .map(|(b, _)| b)
-        .unwrap_or(base_url);
-    let origin = {
-        let after_scheme = base_url.find("://").map(|i| i + 3).unwrap_or(0);
-        let host_len = base_url[after_scheme..]
-            .find('/')
-            .unwrap_or(base_url[after_scheme..].len());
-        &base_url[..after_scheme + host_len]
-    };
-
     content
         .lines()
         .map(|line| {
             if line.starts_with('#') || line.is_empty() {
                 return line.to_string();
             }
-            let abs = if line.starts_with("http://") || line.starts_with("https://") {
-                line.to_string()
-            } else if line.starts_with('/') {
-                format!("{}{}", origin, line)
-            } else {
-                format!("{}/{}", base_dir, line)
-            };
+            let abs = resolve_uri(line, base_url);
             let lower = abs.to_lowercase();
             let path = lower.split('?').next().unwrap_or(&lower);
             if direct_segments && !path.ends_with(".m3u8") && !path.ends_with(".m3u") {
@@ -95,18 +77,22 @@ pub fn pct_encode(s: &str) -> String {
         .collect()
 }
 
+/// Returns the `scheme://host` prefix of a URL (no path, no query).
+fn origin_of(url: &str) -> &str {
+    let after_scheme = url.find("://").map(|i| i + 3).unwrap_or(0);
+    let host_len = url[after_scheme..]
+        .find('/')
+        .unwrap_or(url[after_scheme..].len());
+    &url[..after_scheme + host_len]
+}
+
 /// Resolves a URI from an HLS manifest relative to the manifest's own URL.
 fn resolve_uri(uri: &str, base_url: &str) -> String {
     if uri.starts_with("http://") || uri.starts_with("https://") {
         return uri.to_string();
     }
     if uri.starts_with('/') {
-        let after_scheme = base_url.find("://").map(|i| i + 3).unwrap_or(0);
-        let host_len = base_url[after_scheme..]
-            .find('/')
-            .unwrap_or(base_url[after_scheme..].len());
-        let origin = &base_url[..after_scheme + host_len];
-        return format!("{}{}", origin, uri);
+        return format!("{}{}", origin_of(base_url), uri);
     }
     let base_dir = base_url
         .rsplit_once('/')
@@ -119,16 +105,6 @@ fn resolve_uri(uri: &str, base_url: &str) -> String {
 /// Skips comment lines, empty lines, and sub-playlist lines (`.m3u8`/`.m3u`).
 /// Returns `None` for master playlists that contain only sub-playlist lines.
 pub fn find_first_segment_url(content: &str, base_url: &str) -> Option<String> {
-    let base_dir = base_url
-        .rsplit_once('/')
-        .map(|(b, _)| b)
-        .unwrap_or(base_url);
-    let after_scheme = base_url.find("://").map(|i| i + 3).unwrap_or(0);
-    let host_len = base_url[after_scheme..]
-        .find('/')
-        .unwrap_or(base_url[after_scheme..].len());
-    let origin = &base_url[..after_scheme + host_len];
-
     for line in content.lines() {
         if line.starts_with('#') || line.is_empty() {
             continue;
@@ -138,14 +114,7 @@ pub fn find_first_segment_url(content: &str, base_url: &str) -> Option<String> {
         if path.ends_with(".m3u8") || path.ends_with(".m3u") {
             continue;
         }
-        let abs = if line.starts_with("http://") || line.starts_with("https://") {
-            line.to_string()
-        } else if line.starts_with('/') {
-            format!("{}{}", origin, line)
-        } else {
-            format!("{}/{}", base_dir, line)
-        };
-        return Some(abs);
+        return Some(resolve_uri(line, base_url));
     }
     None
 }
@@ -153,9 +122,7 @@ pub fn find_first_segment_url(content: &str, base_url: &str) -> Option<String> {
 /// Extracts `scheme://host` from a URL, stripping any path/query.
 /// This is the canonical CORS-cache key (the source-URL host).
 pub fn extract_manifest_host(url: &str) -> String {
-    let after = url.find("://").map(|i| i + 3).unwrap_or(0);
-    let host_end = url[after..].find('/').unwrap_or(url[after..].len());
-    url[..after + host_end].to_string()
+    origin_of(url).to_string()
 }
 
 /// Returns the first sub-playlist (`.m3u8`/`.m3u`) line in a master playlist,
