@@ -211,26 +211,22 @@ pub struct StreamProxyQuery {
     pub url: String,
 }
 
-fn extract_manifest_host(url: &str) -> String {
-    let after = url.find("://").map(|i| i + 3).unwrap_or(0);
-    let host_end = url[after..].find('/').unwrap_or(url[after..].len());
-    url[..after + host_end].to_string()
-}
-
 async fn resolve_direct_segments(state: &AppState, content: &str, base_url: &str) -> bool {
-    let segment_url = match hls::find_first_segment_url(content, base_url) {
-        Some(u) => u,
-        None => return false,
-    };
-    if !segment_url.starts_with("https://") {
-        return false;
-    }
-    let host_key = extract_manifest_host(base_url);
+    let host_key = hls::extract_manifest_host(base_url);
     {
         let cache = state.cors_cache.read().await;
         if let Some(&cached) = cache.get(&host_key) {
             return cached;
         }
+    }
+    let segment_url =
+        match hls::find_segment_with_descent(&state.http_client, content, base_url).await {
+            Some(u) => u,
+            None => return false,
+        };
+    if !segment_url.starts_with("https://") {
+        state.cors_cache.write().await.insert(host_key, false);
+        return false;
     }
     let result = hls::probe_cors(&state.http_client, &segment_url).await;
     tracing::debug!(host = %host_key, cors = result, "CORS probe result cached");
