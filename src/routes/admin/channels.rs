@@ -271,11 +271,24 @@ pub async fn channel_detail(
         vec![]
     };
 
+    let cors = state.cors_cache.read().await.clone();
+    let sources: Vec<AdminSourceRow> = srcs
+        .into_iter()
+        .map(|s| {
+            let (cls, ch_glyph) =
+                crate::budget::budget_badge(crate::budget::status_for_url(&s.url, &cors));
+            let mut row: AdminSourceRow = s.into();
+            row.budget_badge_class = cls;
+            row.budget_badge_char = ch_glyph;
+            row
+        })
+        .collect();
+
     render(ChannelDetailTemplate {
         channel_id: ch.id,
         channel_name: ch.name,
         channel_type: ch.r#type,
-        sources: srcs.into_iter().map(Into::into).collect(),
+        sources,
         playlist_items: items.into_iter().map(Into::into).collect(),
         vod_schedule,
     })
