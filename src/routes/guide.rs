@@ -9,6 +9,7 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::{
+    budget::{budget_badge, status_for_url, BudgetStatus},
     epg,
     model::{
         channel::{self, Channel, ChannelType},
@@ -37,13 +38,6 @@ pub struct TimeLabel {
 pub enum HealthStatus {
     Healthy,
     Down,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BudgetStatus {
-    Direct,
-    Proxied,
     Unknown,
 }
 
@@ -118,19 +112,8 @@ fn derive_budget_status(
     first_active_urls: &std::collections::HashMap<i64, String>,
     cors_cache: &std::collections::HashMap<String, bool>,
 ) -> BudgetStatus {
-    let url = match first_active_urls.get(&channel_id) {
-        Some(u) => u,
-        None => return BudgetStatus::Unknown,
-    };
-    if url.starts_with("http://") {
-        return BudgetStatus::Proxied;
-    }
-    let after = url.find("://").map(|i| i + 3).unwrap_or(0);
-    let host_end = url[after..].find('/').unwrap_or(url[after..].len());
-    let host_key = &url[..after + host_end];
-    match cors_cache.get(host_key) {
-        Some(&true) => BudgetStatus::Direct,
-        Some(&false) => BudgetStatus::Proxied,
+    match first_active_urls.get(&channel_id) {
+        Some(url) => status_for_url(url, cors_cache),
         None => BudgetStatus::Unknown,
     }
 }
@@ -140,14 +123,6 @@ fn health_badge(status: HealthStatus) -> (&'static str, &'static str) {
         HealthStatus::Healthy => ("health-ok", "●"),
         HealthStatus::Down => ("health-down", "●"),
         HealthStatus::Unknown => ("health-unknown", "○"),
-    }
-}
-
-fn budget_badge(status: BudgetStatus) -> (&'static str, &'static str) {
-    match status {
-        BudgetStatus::Direct => ("budget-direct", "⚡"),
-        BudgetStatus::Proxied => ("budget-proxied", "☁"),
-        BudgetStatus::Unknown => ("budget-unknown", ""),
     }
 }
 
@@ -706,51 +681,6 @@ mod tests {
         assert_eq!(
             derive_health_status(1, &ChannelType::VodLoop, &all, &active),
             HealthStatus::Healthy
-        );
-    }
-
-    #[test]
-    fn test_derive_budget_status_http_always_proxied() {
-        use std::collections::HashMap;
-        let mut urls = HashMap::new();
-        urls.insert(1i64, "http://example.com/stream.m3u8".to_string());
-        assert_eq!(
-            derive_budget_status(1, &urls, &HashMap::new()),
-            BudgetStatus::Proxied
-        );
-    }
-
-    #[test]
-    fn test_derive_budget_status_https_cache_hit_direct() {
-        use std::collections::HashMap;
-        let mut urls = HashMap::new();
-        urls.insert(1i64, "https://example.com/stream.m3u8".to_string());
-        let mut cache = HashMap::new();
-        cache.insert("https://example.com".to_string(), true);
-        assert_eq!(derive_budget_status(1, &urls, &cache), BudgetStatus::Direct);
-    }
-
-    #[test]
-    fn test_derive_budget_status_https_cache_hit_proxied() {
-        use std::collections::HashMap;
-        let mut urls = HashMap::new();
-        urls.insert(1i64, "https://example.com/stream.m3u8".to_string());
-        let mut cache = HashMap::new();
-        cache.insert("https://example.com".to_string(), false);
-        assert_eq!(
-            derive_budget_status(1, &urls, &cache),
-            BudgetStatus::Proxied
-        );
-    }
-
-    #[test]
-    fn test_derive_budget_status_https_cache_miss_unknown() {
-        use std::collections::HashMap;
-        let mut urls = HashMap::new();
-        urls.insert(1i64, "https://example.com/stream.m3u8".to_string());
-        assert_eq!(
-            derive_budget_status(1, &urls, &HashMap::new()),
-            BudgetStatus::Unknown
         );
     }
 
