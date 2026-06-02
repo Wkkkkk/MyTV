@@ -39,7 +39,7 @@ pub async fn tune(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     match ch.channel_type() {
-        ChannelType::Live => tune_live(&state, &ch).await,
+        ChannelType::Live => next_live(&state, &ch, None).await,
         ChannelType::VodLoop => {
             let now_secs = chrono::Utc::now().timestamp();
             tune_vod_at(&state, &ch, now_secs).await
@@ -66,70 +66,15 @@ pub async fn next(
     }
 }
 
-async fn tune_live(
-    state: &AppState,
-    ch: &channel::Channel,
-) -> Result<Json<TuneResponse>, StatusCode> {
-    let sources = source::list_active_for_channel(&state.pool, ch.id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    for src in &sources {
-        match resolver::resolve_url(&src.url).await {
-            Ok(url) => {
-                return Ok(Json(TuneResponse {
-                    url,
-                    start_offset_secs: 0,
-                    name: ch.name.clone(),
-                    logo_url: ch.logo_url.clone(),
-                    category: ch.category.clone(),
-                    channel_type: ch.r#type.clone(),
-                }))
-            }
-            Err(e) => {
-                tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source")
-            }
-        }
-    }
-    Err(StatusCode::SERVICE_UNAVAILABLE)
-}
-
-async fn tune_vod_at(
-    state: &AppState,
-    ch: &channel::Channel,
-    now_secs: i64,
-) -> Result<Json<TuneResponse>, StatusCode> {
-    let anchor_secs = ch
-        .loop_anchor
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
-        .timestamp();
-
-    let items = playlist_item::list_for_channel(&state.pool, ch.id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    if items.is_empty() {
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
-    }
-
-    let (idx, offset) = playlist_item::current_position(&items, now_secs, anchor_secs)
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-
-    let item = &items[idx];
-    match resolver::resolve_url(&item.url).await {
-        Ok(url) => Ok(Json(TuneResponse {
-            url,
-            start_offset_secs: offset,
-            name: ch.name.clone(),
-            logo_url: ch.logo_url.clone(),
-            category: ch.category.clone(),
-            channel_type: ch.r#type.clone(),
-        })),
-        Err(e) => {
-            tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
-            Err(StatusCode::SERVICE_UNAVAILABLE)
-        }
-    }
+fn tune_response(ch: &channel::Channel, url: String, start_offset_secs: i64) -> Json<TuneResponse> {
+    Json(TuneResponse {
+        url,
+        start_offset_secs,
+        name: ch.name.clone(),
+        logo_url: ch.logo_url.clone(),
+        category: ch.category.clone(),
+        channel_type: ch.r#type.clone(),
+    })
 }
 
 async fn next_live(
@@ -146,16 +91,7 @@ async fn next_live(
         .filter(|s| Some(s.url.as_str()) != failed_url)
     {
         match resolver::resolve_url(&src.url).await {
-            Ok(url) => {
-                return Ok(Json(TuneResponse {
-                    url,
-                    start_offset_secs: 0,
-                    name: ch.name.clone(),
-                    logo_url: ch.logo_url.clone(),
-                    category: ch.category.clone(),
-                    channel_type: ch.r#type.clone(),
-                }))
-            }
+            Ok(url) => return Ok(tune_response(ch, url, 0)),
             Err(e) => {
                 tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source")
             }
@@ -164,11 +100,11 @@ async fn next_live(
     Err(StatusCode::SERVICE_UNAVAILABLE)
 }
 
-async fn next_vod_at(
+async fn vod_items_and_index(
     state: &AppState,
     ch: &channel::Channel,
     now_secs: i64,
-) -> Result<Json<TuneResponse>, StatusCode> {
+) -> Result<(Vec<playlist_item::PlaylistItem>, usize, i64), StatusCode> {
     let anchor_secs = ch
         .loop_anchor
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
@@ -182,21 +118,37 @@ async fn next_vod_at(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    let (idx, _) = playlist_item::current_position(&items, now_secs, anchor_secs)
+    let (idx, offset) = playlist_item::current_position(&items, now_secs, anchor_secs)
         .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    Ok((items, idx, offset))
+}
 
+async fn tune_vod_at(
+    state: &AppState,
+    ch: &channel::Channel,
+    now_secs: i64,
+) -> Result<Json<TuneResponse>, StatusCode> {
+    let (items, idx, offset) = vod_items_and_index(state, ch, now_secs).await?;
+    let item = &items[idx];
+    match resolver::resolve_url(&item.url).await {
+        Ok(url) => Ok(tune_response(ch, url, offset)),
+        Err(e) => {
+            tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }
+}
+
+async fn next_vod_at(
+    state: &AppState,
+    ch: &channel::Channel,
+    now_secs: i64,
+) -> Result<Json<TuneResponse>, StatusCode> {
+    let (items, idx, _) = vod_items_and_index(state, ch, now_secs).await?;
     let next_idx = (idx + 1) % items.len();
     let item = &items[next_idx];
-
     match resolver::resolve_url(&item.url).await {
-        Ok(url) => Ok(Json(TuneResponse {
-            url,
-            start_offset_secs: 0,
-            name: ch.name.clone(),
-            logo_url: ch.logo_url.clone(),
-            category: ch.category.clone(),
-            channel_type: ch.r#type.clone(),
-        })),
+        Ok(url) => Ok(tune_response(ch, url, 0)),
         Err(e) => {
             tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
             Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -357,7 +309,7 @@ mod tests {
         .await
         .unwrap();
 
-        let result = tune_live(&state, &ch).await.unwrap();
+        let result = next_live(&state, &ch, None).await.unwrap();
         assert_eq!(result.url, "https://primary.example.com/stream.m3u8");
         assert_eq!(result.start_offset_secs, 0);
     }
@@ -391,7 +343,7 @@ mod tests {
         .await
         .unwrap();
 
-        let result = tune_live(&state, &ch).await.unwrap();
+        let result = next_live(&state, &ch, None).await.unwrap();
         assert_eq!(result.url, "https://backup.example.com/stream.m3u8");
     }
 
@@ -400,7 +352,7 @@ mod tests {
         let state = test_state().await;
         let ch = make_live_channel(&state).await;
 
-        let err = tune_live(&state, &ch).await.unwrap_err();
+        let err = next_live(&state, &ch, None).await.unwrap_err();
         assert_eq!(err, StatusCode::SERVICE_UNAVAILABLE);
     }
 
