@@ -82,15 +82,29 @@ pub async fn check_source(
         HealthAction::None => {}
     }
 
-    // Only probe CORS for reachable HTTPS sources: a down source would just
-    // incur a second timeout, and its cached budget is best left as-is.
-    if ok && src.url.starts_with("https://") {
-        if let Some(result) = crate::media::hls::probe_source_cors(client, &src.url).await {
-            let host_key = crate::media::hls::extract_manifest_host(&src.url);
-            cors_cache.write().await.insert(host_key.clone(), result);
-            tracing::debug!(source_id = src.id, host = %host_key, cors = result, "CORS probe cached");
-        }
+    // Only probe CORS for reachable sources: a down source would just incur a
+    // second timeout, and its cached budget is best left as-is.
+    if ok {
+        probe_and_cache_cors(client, cors_cache, &src.url).await;
     }
+}
+
+/// Probes CORS for one URL and caches the result keyed by host. Returns `None`
+/// (a no-op, leaving the cache unchanged) for non-HTTPS URLs or resolution-needed
+/// (youtube/twitch) URLs, which have no stable HLS manifest to probe.
+pub async fn probe_and_cache_cors(
+    client: &reqwest::Client,
+    cors_cache: &CorsCache,
+    url: &str,
+) -> Option<bool> {
+    if !url.starts_with("https://") || crate::media::resolver::needs_resolution(url) {
+        return None;
+    }
+    let result = crate::media::hls::probe_source_cors(client, url).await?;
+    let host = crate::media::hls::extract_manifest_host(url);
+    tracing::debug!(host = %host, cors = result, "CORS probe cached");
+    cors_cache.write().await.insert(host, result);
+    Some(result)
 }
 
 async fn do_http_check(client: &reqwest::Client, src: &Source) -> (bool, Option<String>) {
@@ -212,5 +226,25 @@ mod tests {
         let (failures, action) = process_result(&src, true);
         assert_eq!(failures, 0);
         assert!(matches!(action, HealthAction::None));
+    }
+
+    #[tokio::test]
+    async fn test_probe_and_cache_cors_skips_non_https() {
+        let cache: crate::CorsCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let client = reqwest::Client::new();
+        let result = probe_and_cache_cors(&client, &cache, "http://x.example.com/s.m3u8").await;
+        assert_eq!(result, None);
+        assert!(cache.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_probe_and_cache_cors_skips_resolution_needed() {
+        let cache: crate::CorsCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let client = reqwest::Client::new();
+        let result = probe_and_cache_cors(&client, &cache, "https://youtube.com/watch?v=abc").await;
+        assert_eq!(result, None);
+        assert!(cache.read().await.is_empty());
     }
 }
