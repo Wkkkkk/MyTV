@@ -275,11 +275,8 @@ pub async fn channel_detail(
     let sources: Vec<AdminSourceRow> = srcs
         .into_iter()
         .map(|s| {
-            let (cls, ch_glyph) =
-                crate::budget::budget_badge(crate::budget::status_for_url(&s.url, &cors));
             let mut row: AdminSourceRow = s.into();
-            row.budget_badge_class = cls;
-            row.budget_badge_char = ch_glyph;
+            row.apply_budget(&cors);
             row
         })
         .collect();

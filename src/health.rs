@@ -108,6 +108,9 @@ async fn do_http_check(client: &reqwest::Client, src: &Source) -> (bool, Option<
         return (true, None);
     }
 
+    // reqwest's per-request `.timeout(HTTP_TIMEOUT)` is a total deadline covering
+    // the body read, so this `chunk()` can't hang past HTTP_TIMEOUT even on a stream
+    // that connects then stalls.
     match resp.chunk().await {
         Ok(Some(_)) => (true, None),
         Ok(None) => (false, Some("stream returned no data".to_string())),

@@ -100,11 +100,8 @@ pub async fn source_test(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let cors = state.cors_cache.read().await.clone();
-    let (cls, glyph) =
-        crate::budget::budget_badge(crate::budget::status_for_url(&updated.url, &cors));
     let mut row: AdminSourceRow = updated.into();
-    row.budget_badge_class = cls;
-    row.budget_badge_char = glyph;
+    row.apply_budget(&cors);
 
     render(SourceRowTemplate { src: row })
 }

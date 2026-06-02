@@ -73,6 +73,16 @@ impl From<channel::Channel> for AdminChannelRow {
     }
 }
 
+impl AdminSourceRow {
+    /// Fills the budget badge fields from a CORS-cache snapshot, keyed by this source's URL host.
+    pub fn apply_budget(&mut self, cors_cache: &std::collections::HashMap<String, bool>) {
+        let (class, glyph) =
+            crate::budget::budget_badge(crate::budget::status_for_url(&self.url, cors_cache));
+        self.budget_badge_class = class;
+        self.budget_badge_char = glyph;
+    }
+}
+
 impl From<source::Source> for AdminSourceRow {
     fn from(s: source::Source) -> Self {
         Self {

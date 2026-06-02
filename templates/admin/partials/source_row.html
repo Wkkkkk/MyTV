@@ -44,11 +44,11 @@
       <button class="btn btn-sm btn-danger" type="submit"
               onclick="return confirm('Remove this source?')">Delete</button>
     </form>
-    <form hx-post="/admin/sources/{{ src.id }}/test"
-          hx-target="#src-row-{{ src.id }}"
-          hx-swap="outerHTML"
-          style="display:inline-block;margin-left:4px">
-      <button class="btn btn-sm" type="submit">Test</button>
-    </form>
+    <button class="btn btn-sm" type="button"
+            hx-post="/admin/sources/{{ src.id }}/test"
+            hx-target="#src-row-{{ src.id }}"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            style="margin-left:4px">Test</button>
   </td>
 </tr>
