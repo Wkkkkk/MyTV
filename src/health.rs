@@ -82,7 +82,9 @@ pub async fn check_source(
         HealthAction::None => {}
     }
 
-    if src.url.starts_with("https://") {
+    // Only probe CORS for reachable HTTPS sources: a down source would just
+    // incur a second timeout, and its cached budget is best left as-is.
+    if ok && src.url.starts_with("https://") {
         if let Some(result) = crate::media::hls::probe_source_cors(client, &src.url).await {
             let host_key = crate::media::hls::extract_manifest_host(&src.url);
             cors_cache.write().await.insert(host_key.clone(), result);
