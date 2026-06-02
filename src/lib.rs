@@ -1,3 +1,4 @@
+mod budget;
 pub mod config;
 pub mod db;
 mod epg;
