@@ -22,6 +22,14 @@ pub fn status_for_url(url: &str, cors_cache: &HashMap<String, bool>) -> BudgetSt
     }
 }
 
+/// Convenience: the (CSS class, glyph) badge pair for a URL given the CORS cache.
+pub fn badge_for_url(
+    url: &str,
+    cors_cache: &HashMap<String, bool>,
+) -> (&'static str, &'static str) {
+    budget_badge(status_for_url(url, cors_cache))
+}
+
 /// Maps a budget status to a (CSS class, glyph) pair. Unknown renders an empty glyph.
 pub fn budget_badge(status: BudgetStatus) -> (&'static str, &'static str) {
     match status {

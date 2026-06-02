@@ -95,22 +95,11 @@
   {% else %}
   <table style="margin-bottom:16px">
     <thead>
-      <tr><th>#</th><th>Title</th><th>URL</th><th>Duration</th><th></th></tr>
+      <tr><th>#</th><th>Title</th><th>URL</th><th>Duration</th><th>Budget</th><th></th></tr>
     </thead>
     <tbody>
       {% for item in playlist_items %}
-      <tr>
-        <td style="color:#555">{{ item.sort_order }}</td>
-        <td>{{ item.title }}</td>
-        <td style="word-break:break-all;max-width:360px;font-size:0.78rem">{{ item.url }}</td>
-        <td style="white-space:nowrap">{{ item.duration_secs }}s</td>
-        <td>
-          <form action="/admin/playlist/{{ item.id }}/delete" method="post">
-            <button class="btn btn-sm btn-danger" type="submit"
-                    onclick="return confirm('Remove this item?')">Delete</button>
-          </form>
-        </td>
-      </tr>
+      {% include "admin/partials/playlist_item_row.html" %}
       {% endfor %}
     </tbody>
   </table>

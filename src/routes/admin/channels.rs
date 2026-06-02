@@ -281,12 +281,21 @@ pub async fn channel_detail(
         })
         .collect();
 
+    let playlist_items: Vec<AdminPlaylistItemRow> = items
+        .into_iter()
+        .map(|i| {
+            let mut row: AdminPlaylistItemRow = i.into();
+            row.apply_budget(&cors);
+            row
+        })
+        .collect();
+
     render(ChannelDetailTemplate {
         channel_id: ch.id,
         channel_name: ch.name,
         channel_type: ch.r#type,
         sources,
-        playlist_items: items.into_iter().map(Into::into).collect(),
+        playlist_items,
         vod_schedule,
     })
 }
