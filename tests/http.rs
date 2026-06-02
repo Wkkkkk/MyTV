@@ -236,3 +236,35 @@ async fn guide_embeds_epg_channels_json() {
         "missing channel name in epgChannels"
     );
 }
+
+// ── Static file routes ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_favicon_svg() {
+    let app = app().await;
+    let response = app.oneshot(req("/favicon.svg")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "image/svg+xml",
+    );
+}
+
+#[tokio::test]
+async fn test_manifest_json() {
+    let app = app().await;
+    let response = app.oneshot(req("/manifest.json")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "application/manifest+json",
+    );
+}
+
+#[tokio::test]
+async fn test_favicon_ico_redirect() {
+    let app = app().await;
+    let response = app.oneshot(req("/favicon.ico")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(response.headers().get("location").unwrap(), "/favicon.svg",);
+}
