@@ -44,6 +44,43 @@ async fn body_json(response: axum::response::Response) -> serde_json::Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
+fn authed_post(uri: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("Authorization", "Basic dXNlcjp0ZXN0")
+        .body(Body::empty())
+        .unwrap()
+}
+
+async fn body_text(response: axum::response::Response) -> String {
+    use http_body_util::BodyExt;
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    String::from_utf8_lossy(&bytes).to_string()
+}
+
+async fn app_with_cors(host: &str, direct: bool) -> axum::Router {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    sqlx::query(include_str!("fixtures/seed.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let cors_cache = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+    cors_cache.write().await.insert(host.to_string(), direct);
+    let state = AppState {
+        pool,
+        config: Arc::new(Config {
+            database_url: "sqlite::memory:".to_string(),
+            admin_password: "test".to_string(),
+            youtube_api_key: None,
+            port: 0,
+        }),
+        http_client: reqwest::Client::new(),
+        cors_cache,
+    };
+    build_router(state)
+}
+
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -267,4 +304,46 @@ async fn test_favicon_ico_redirect() {
     let response = app.oneshot(req("/favicon.ico")).await.unwrap();
     assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
     assert_eq!(response.headers().get("location").unwrap(), "/favicon.svg",);
+}
+
+// ── Admin Test button / guide budget badge ────────────────────────────────
+
+#[tokio::test]
+async fn test_source_test_returns_row_partial_not_ok_badge() {
+    // Source 1 (https, unreachable in tests) -> check writes an "error" status.
+    let response = app()
+        .await
+        .oneshot(authed_post("/admin/sources/1/test"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("src-row-1"),
+        "response should be the row partial"
+    );
+    assert!(
+        body.contains("\u{25CF}"),
+        "row should render a health dot (\u{25CF})"
+    );
+    assert!(
+        !body.contains(">OK<"),
+        "old OK badge text must be gone, got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn test_guide_renders_direct_budget_badge_from_cache() {
+    // Channel 1's first active source host is https://stream.example.com.
+    let response = app_with_cors("https://stream.example.com", true)
+        .await
+        .oneshot(req("/guide"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("\u{26A1}"),
+        "guide should show the direct budget badge (lightning)"
+    );
 }
