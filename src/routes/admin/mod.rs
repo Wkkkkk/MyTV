@@ -47,6 +47,8 @@ pub struct AdminSourceRow {
     pub last_status: Option<String>,
     pub consecutive_failures: i64,
     pub failure_reason: Option<String>,
+    pub budget_badge_class: &'static str,
+    pub budget_badge_char: &'static str,
 }
 
 pub struct AdminPlaylistItemRow {
@@ -82,6 +84,8 @@ impl From<source::Source> for AdminSourceRow {
             last_status: s.last_status,
             consecutive_failures: s.consecutive_failures,
             failure_reason: s.failure_reason,
+            budget_badge_class: "budget-unknown",
+            budget_badge_char: "",
         }
     }
 }
