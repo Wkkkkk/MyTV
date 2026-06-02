@@ -150,6 +150,70 @@ pub fn find_first_segment_url(content: &str, base_url: &str) -> Option<String> {
     None
 }
 
+/// Extracts `scheme://host` from a URL, stripping any path/query.
+/// This is the canonical CORS-cache key (the source-URL host).
+pub fn extract_manifest_host(url: &str) -> String {
+    let after = url.find("://").map(|i| i + 3).unwrap_or(0);
+    let host_end = url[after..].find('/').unwrap_or(url[after..].len());
+    url[..after + host_end].to_string()
+}
+
+/// Returns the first sub-playlist (`.m3u8`/`.m3u`) line in a master playlist,
+/// resolved to an absolute URL. `None` if there is no sub-playlist line.
+pub fn find_first_variant_url(content: &str, base_url: &str) -> Option<String> {
+    for line in content.lines() {
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        let lower = line.to_lowercase();
+        let path = lower.split('?').next().unwrap_or(&lower);
+        if path.ends_with(".m3u8") || path.ends_with(".m3u") {
+            return Some(resolve_uri(line, base_url));
+        }
+    }
+    None
+}
+
+/// Finds a segment URL to CORS-probe, descending one level if `content` is a master playlist.
+/// Returns `None` if no segment can be found within one descent.
+pub async fn find_segment_with_descent(
+    client: &reqwest::Client,
+    content: &str,
+    base_url: &str,
+) -> Option<String> {
+    if let Some(seg) = find_first_segment_url(content, base_url) {
+        return Some(seg);
+    }
+    let variant = find_first_variant_url(content, base_url)?;
+    let body = fetch_text(client, &variant).await?;
+    find_first_segment_url(&body, &variant)
+}
+
+/// Determines whether segments for `source_url` can be fetched directly by the browser.
+/// `Some(true)` = direct (HTTPS segment with `Access-Control-Allow-Origin: *`),
+/// `Some(false)` = must proxy (HTTP segment, or HTTPS without CORS),
+/// `None` = could not determine (network error, or no segment after one descent).
+pub async fn probe_source_cors(client: &reqwest::Client, source_url: &str) -> Option<bool> {
+    let body = fetch_text(client, source_url).await?;
+    let segment = find_segment_with_descent(client, &body, source_url).await?;
+    if segment.starts_with("http://") {
+        return Some(false);
+    }
+    Some(probe_cors(client, &segment).await)
+}
+
+async fn fetch_text(client: &reqwest::Client, url: &str) -> Option<String> {
+    client
+        .get(url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .ok()?
+        .text()
+        .await
+        .ok()
+}
+
 /// Returns true if the header map contains `Access-Control-Allow-Origin: *`.
 pub fn has_cors_wildcard(headers: &reqwest::header::HeaderMap) -> bool {
     headers
@@ -342,5 +406,45 @@ mod tests {
             reqwest::header::HeaderValue::from_static("https://example.com"),
         );
         assert!(!has_cors_wildcard(&headers));
+    }
+
+    #[test]
+    fn test_extract_manifest_host_strips_path() {
+        assert_eq!(
+            extract_manifest_host("https://cdn.example.com/live/index.m3u8"),
+            "https://cdn.example.com"
+        );
+    }
+
+    #[test]
+    fn test_extract_manifest_host_no_path() {
+        assert_eq!(
+            extract_manifest_host("https://cdn.example.com"),
+            "https://cdn.example.com"
+        );
+    }
+
+    #[test]
+    fn test_find_first_variant_url_resolves_relative() {
+        let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nvariant/720.m3u8\n";
+        assert_eq!(
+            find_first_variant_url(master, "https://h.com/live/master.m3u8"),
+            Some("https://h.com/live/variant/720.m3u8".to_string())
+        );
+    }
+
+    #[test]
+    fn test_find_first_variant_url_none_for_media_playlist() {
+        let media = "#EXTM3U\n#EXTINF:6,\nseg1.ts\n";
+        assert_eq!(find_first_variant_url(media, "https://h.com/v.m3u8"), None);
+    }
+
+    #[tokio::test]
+    async fn test_find_segment_with_descent_depth_zero() {
+        // base already a variant: segment found without any network call
+        let client = reqwest::Client::new();
+        let media = "#EXTM3U\n#EXTINF:6,\nhttps://cdn.com/seg1.ts\n";
+        let seg = find_segment_with_descent(&client, media, "https://h.com/v.m3u8").await;
+        assert_eq!(seg.as_deref(), Some("https://cdn.com/seg1.ts"));
     }
 }
