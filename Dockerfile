@@ -16,6 +16,7 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs \
 COPY src ./src
 COPY migrations ./migrations
 COPY templates ./templates
+COPY static ./static
 RUN touch src/main.rs && cargo build --release
 RUN strip /app/target/release/mytv
 
