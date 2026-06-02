@@ -85,6 +85,8 @@ impl AdminSourceRow {
 
 impl From<source::Source> for AdminSourceRow {
     fn from(s: source::Source) -> Self {
+        let (budget_badge_class, budget_badge_char) =
+            crate::budget::budget_badge(crate::budget::BudgetStatus::Unknown);
         Self {
             id: s.id,
             kind: s.kind,
@@ -94,8 +96,8 @@ impl From<source::Source> for AdminSourceRow {
             last_status: s.last_status,
             consecutive_failures: s.consecutive_failures,
             failure_reason: s.failure_reason,
-            budget_badge_class: "budget-unknown",
-            budget_badge_char: "",
+            budget_badge_class,
+            budget_badge_char,
         }
     }
 }
