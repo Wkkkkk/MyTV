@@ -38,6 +38,34 @@ async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &Cor
     for src in sources {
         check_source(pool, client, cors_cache, &src).await;
     }
+    probe_all_playlist_cors(pool, client, cors_cache).await;
+}
+
+async fn probe_all_playlist_cors(
+    pool: &SqlitePool,
+    client: &reqwest::Client,
+    cors_cache: &CorsCache,
+) {
+    let items = match crate::model::playlist_item::list_all(pool).await {
+        Ok(i) => i,
+        Err(e) => {
+            tracing::error!("health: failed to fetch playlist items: {e}");
+            return;
+        }
+    };
+    // Dedupe by host so each CDN is probed at most once per cycle.
+    let mut probed_hosts = std::collections::HashSet::new();
+    for item in items {
+        if !item.url.starts_with("https://") || crate::media::resolver::needs_resolution(&item.url)
+        {
+            continue;
+        }
+        let host = crate::media::hls::extract_manifest_host(&item.url);
+        if !probed_hosts.insert(host) {
+            continue;
+        }
+        probe_and_cache_cors(client, cors_cache, &item.url).await;
+    }
 }
 
 pub async fn check_source(
