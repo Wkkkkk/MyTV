@@ -59,6 +59,15 @@ pub async fn list_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<
     .map_err(Into::into)
 }
 
+pub async fn list_all(pool: &SqlitePool) -> Result<Vec<PlaylistItem>> {
+    sqlx::query_as::<_, PlaylistItem>(
+        "SELECT * FROM playlist_items ORDER BY channel_id, sort_order ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
+}
+
 pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
     let rows = sqlx::query("DELETE FROM playlist_items WHERE id = ?")
         .bind(id)
@@ -231,6 +240,17 @@ mod tests {
     async fn test_current_position_empty_playlist_returns_none() {
         let result = current_position(&[], 1000, 0);
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_list_all_returns_items_across_channels() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        create(&pool, item(ch.id, "ep1", 1800, 0)).await.unwrap();
+        create(&pool, item(ch.id, "ep2", 2400, 1)).await.unwrap();
+
+        let all = list_all(&pool).await.unwrap();
+        assert_eq!(all.len(), 2);
     }
 
     #[tokio::test]
