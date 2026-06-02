@@ -357,3 +357,20 @@ async fn test_guide_renders_direct_budget_badge_from_cache() {
         "guide should show the direct budget badge (lightning)"
     );
 }
+
+#[tokio::test]
+async fn test_guide_renders_vod_budget_badge_from_cache() {
+    // Channel 4 (VOD) plays items hosted on https://vod.example.com. Only that
+    // host is seeded into the cache, so the lightning badge must come from VOD.
+    let response = app_with_cors("https://vod.example.com", true)
+        .await
+        .oneshot(req("/guide"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("\u{26A1}"),
+        "guide should show the direct budget badge (lightning) for the VOD channel"
+    );
+}

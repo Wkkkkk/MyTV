@@ -107,15 +107,34 @@ fn derive_health_status(
     }
 }
 
-fn derive_budget_status(
-    channel_id: i64,
-    first_active_urls: &std::collections::HashMap<i64, String>,
+fn budget_for_url(
+    url: Option<&str>,
     cors_cache: &std::collections::HashMap<String, bool>,
 ) -> BudgetStatus {
-    match first_active_urls.get(&channel_id) {
-        Some(url) => status_for_url(url, cors_cache),
+    match url {
+        Some(u) => status_for_url(u, cors_cache),
         None => BudgetStatus::Unknown,
     }
+}
+
+/// The URL whose host determines a VOD channel's guide budget badge: the
+/// currently-playing item (via the loop anchor), falling back to the first item
+/// when there is no anchor. `None` for an empty playlist.
+fn vod_budget_url(
+    items: &[playlist_item::PlaylistItem],
+    anchor: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    if items.is_empty() {
+        return None;
+    }
+    let idx = match anchor {
+        Some(a) => playlist_item::current_position(items, now.timestamp(), a.timestamp())
+            .map(|(i, _)| i)
+            .unwrap_or(0),
+        None => 0,
+    };
+    Some(items[idx].url.clone())
 }
 
 fn health_badge(status: HealthStatus) -> (&'static str, &'static str) {
@@ -315,15 +334,25 @@ async fn build_guide_data(
 
     let mut rows = Vec::new();
     for ch in &channels {
-        let entries = match ch.channel_type() {
-            ChannelType::Live => vec![epg::live_entry(ch.id, &ch.name, window_start, window_end)],
+        let (entries, budget_url) = match ch.channel_type() {
+            ChannelType::Live => (
+                vec![epg::live_entry(ch.id, &ch.name, window_start, window_end)],
+                first_active_urls.get(&ch.id).cloned(),
+            ),
             ChannelType::VodLoop => {
-                if let Some(anchor) = ch.loop_anchor {
-                    let items = playlist_item::list_for_channel(pool, ch.id).await?;
-                    epg::vod_schedule(ch.id, &items, anchor.timestamp(), window_start, window_end)
-                } else {
-                    vec![]
-                }
+                let items = playlist_item::list_for_channel(pool, ch.id).await?;
+                let entries = match ch.loop_anchor {
+                    Some(anchor) => epg::vod_schedule(
+                        ch.id,
+                        &items,
+                        anchor.timestamp(),
+                        window_start,
+                        window_end,
+                    ),
+                    None => vec![],
+                };
+                let budget_url = vod_budget_url(&items, ch.loop_anchor, now);
+                (entries, budget_url)
             }
         };
         let programs: Vec<ProgramSlot> = entries
@@ -336,7 +365,7 @@ async fn build_guide_data(
             &all_source_ids,
             &active_source_ids,
         );
-        let budget = derive_budget_status(ch.id, &first_active_urls, cors_cache);
+        let budget = budget_for_url(budget_url.as_deref(), cors_cache);
         let (health_badge_class, health_badge_char) = health_badge(health);
         let (budget_badge_class, budget_badge_char) = budget_badge(budget);
         rows.push(ChannelRow {
@@ -447,6 +476,7 @@ pub async fn guide_partial(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn dt(secs: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(secs, 0).unwrap()
@@ -684,12 +714,77 @@ mod tests {
         );
     }
 
+    fn mk_item(url: &str, dur: i64) -> playlist_item::PlaylistItem {
+        playlist_item::PlaylistItem {
+            id: 0,
+            channel_id: 1,
+            title: "t".into(),
+            url: url.into(),
+            duration_secs: dur,
+            sort_order: 0,
+        }
+    }
+
     #[test]
-    fn test_derive_budget_status_no_source_unknown() {
-        use std::collections::HashMap;
+    fn test_budget_for_url_none_is_unknown() {
+        assert_eq!(budget_for_url(None, &HashMap::new()), BudgetStatus::Unknown);
+    }
+
+    #[test]
+    fn test_budget_for_url_http_is_proxied() {
         assert_eq!(
-            derive_budget_status(1, &HashMap::new(), &HashMap::new()),
-            BudgetStatus::Unknown
+            budget_for_url(Some("http://x.example.com/s.m3u8"), &HashMap::new()),
+            BudgetStatus::Proxied
+        );
+    }
+
+    #[test]
+    fn test_budget_for_url_https_cache_hit_direct() {
+        let mut cache = HashMap::new();
+        cache.insert("https://x.example.com".to_string(), true);
+        assert_eq!(
+            budget_for_url(Some("https://x.example.com/s.m3u8"), &cache),
+            BudgetStatus::Direct
+        );
+    }
+
+    #[test]
+    fn test_vod_budget_url_empty_is_none() {
+        assert_eq!(vod_budget_url(&[], None, dt(0)), None);
+    }
+
+    #[test]
+    fn test_vod_budget_url_no_anchor_uses_first_item() {
+        let items = vec![
+            mk_item("https://a/1.mp4", 100),
+            mk_item("https://b/2.mp4", 100),
+        ];
+        assert_eq!(
+            vod_budget_url(&items, None, dt(150)).as_deref(),
+            Some("https://a/1.mp4")
+        );
+    }
+
+    #[test]
+    fn test_vod_budget_url_uses_currently_playing_item() {
+        let items = vec![
+            mk_item("https://a/1.mp4", 100),
+            mk_item("https://b/2.mp4", 100),
+        ];
+        // anchor=0, now=150 → 150s into the loop → second item (after the first 100s)
+        assert_eq!(
+            vod_budget_url(&items, Some(dt(0)), dt(150)).as_deref(),
+            Some("https://b/2.mp4")
+        );
+    }
+
+    #[test]
+    fn test_vod_budget_url_zero_duration_falls_back_to_first_item() {
+        // All items have duration 0 → current_position returns None → fall back to item 0.
+        let items = vec![mk_item("https://a/1.mp4", 0), mk_item("https://b/2.mp4", 0)];
+        assert_eq!(
+            vod_budget_url(&items, Some(dt(0)), dt(150)).as_deref(),
+            Some("https://a/1.mp4")
         );
     }
 }
