@@ -1,0 +1,54 @@
+<tr id="src-row-{{ src.id }}">
+  <td>{{ src.kind }}</td>
+  <td style="word-break:break-all;max-width:400px;font-size:0.78rem">{{ src.url }}</td>
+  <td>{{ src.priority }}</td>
+  <td>
+    {% if src.is_active %}
+    <span class="badge badge-on">on</span>
+    {% else %}
+    <span class="badge badge-off">off</span>
+    {% endif %}
+  </td>
+  <td>
+    {% match src.last_status %}
+    {% when None %}
+    <span style="color:#888" title="Never checked">○</span>
+    {% when Some(status) %}
+    {% if status == "ok" %}
+    <span style="color:#4caf50" title="Healthy">●</span>
+    {% else %}
+    <span style="color:#e94560" title="Last check failed">●</span>
+    {% if let Some(reason) = src.failure_reason.as_ref() %}
+    <div style="font-size:0.7rem;color:#e94560;margin-top:2px">{{ reason }}</div>
+    {% endif %}
+    {% if !src.is_active && src.consecutive_failures >= 3 %}
+    <div style="font-size:0.7rem;color:#888">[auto-disabled]</div>
+    {% endif %}
+    {% endif %}
+    {% endmatch %}
+  </td>
+  <td>
+    {% if src.budget_badge_char.is_empty() %}
+    <span style="color:#888" title="Network budget not yet probed">·</span>
+    {% else %}
+    <span class="{{ src.budget_badge_class }}" title="Network budget">{{ src.budget_badge_char }}</span>
+    {% endif %}
+  </td>
+  <td style="white-space:nowrap">
+    <form action="/admin/sources/{{ src.id }}/toggle" method="post" style="display:inline-block">
+      <button class="btn btn-sm" type="submit">
+        {% if src.is_active %}Disable{% else %}Enable{% endif %}
+      </button>
+    </form>
+    <form action="/admin/sources/{{ src.id }}/delete" method="post" style="display:inline-block;margin-left:4px">
+      <button class="btn btn-sm btn-danger" type="submit"
+              onclick="return confirm('Remove this source?')">Delete</button>
+    </form>
+    <form hx-post="/admin/sources/{{ src.id }}/test"
+          hx-target="#src-row-{{ src.id }}"
+          hx-swap="outerHTML"
+          style="display:inline-block;margin-left:4px">
+      <button class="btn btn-sm" type="submit">Test</button>
+    </form>
+  </td>
+</tr>
