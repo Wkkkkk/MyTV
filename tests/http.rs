@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use mytv::{build_router, config::Config, db, AppState, CorsCache};
+use mytv::{build_router, config::Config, db, AppState};
 use tower::ServiceExt;
 
 async fn app() -> axum::Router {
