@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
+/// A channel row as stored in the database.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Channel {
     pub id: i64,
@@ -14,6 +15,7 @@ pub struct Channel {
     pub loop_anchor: Option<DateTime<Utc>>,
 }
 
+/// Channel playback mode.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChannelType {
     Live,
@@ -29,6 +31,7 @@ impl Channel {
     }
 }
 
+/// Input for creating a new channel.
 pub struct NewChannel {
     pub name: String,
     pub category: String,
@@ -38,6 +41,7 @@ pub struct NewChannel {
     pub loop_anchor: Option<DateTime<Utc>>,
 }
 
+/// Insert a new channel and return it.
 pub async fn create(pool: &SqlitePool, input: NewChannel) -> Result<Channel> {
     if !["live", "vod_loop"].contains(&input.channel_type.as_str()) {
         anyhow::bail!("invalid channel_type: {}", input.channel_type);
@@ -61,6 +65,7 @@ pub async fn create(pool: &SqlitePool, input: NewChannel) -> Result<Channel> {
         .ok_or_else(|| anyhow::anyhow!("channel not found after insert"))
 }
 
+/// Input for updating an existing channel.
 #[derive(Debug)]
 pub struct UpdateChannel {
     pub name: String,
@@ -71,6 +76,7 @@ pub struct UpdateChannel {
     pub loop_anchor: Option<DateTime<Utc>>,
 }
 
+/// Update a channel by id; returns None if not found.
 pub async fn update(pool: &SqlitePool, id: i64, input: UpdateChannel) -> Result<Option<Channel>> {
     let rows = sqlx::query(
         "UPDATE channels SET name = ?, category = ?, logo_url = ?, type = ?, sort_order = ?, loop_anchor = ? WHERE id = ?",
@@ -92,6 +98,7 @@ pub async fn update(pool: &SqlitePool, id: i64, input: UpdateChannel) -> Result<
     get(pool, id).await
 }
 
+/// Fetch a channel by id.
 pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Channel>> {
     sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = ?")
         .bind(id)
@@ -100,6 +107,7 @@ pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Channel>> {
         .map_err(Into::into)
 }
 
+/// List all channels ordered by sort_order.
 pub async fn list(pool: &SqlitePool) -> Result<Vec<Channel>> {
     sqlx::query_as::<_, Channel>("SELECT * FROM channels ORDER BY sort_order ASC, name ASC")
         .fetch_all(pool)
@@ -107,6 +115,7 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<Channel>> {
         .map_err(Into::into)
 }
 
+/// Delete a channel by id; returns true if a row was removed.
 pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
     let rows = sqlx::query("DELETE FROM channels WHERE id = ?")
         .bind(id)
@@ -116,7 +125,7 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
     Ok(rows > 0)
 }
 
-/// Returns a sorted, deduplicated list of category names from a channel slice.
+/// Return sorted, deduplicated category names from a channel list.
 pub fn distinct_categories(channels: &[Channel]) -> Vec<String> {
     let mut cats: Vec<String> = channels
         .iter()

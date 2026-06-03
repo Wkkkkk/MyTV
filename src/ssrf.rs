@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::net::lookup_host;
 use tokio::sync::RwLock;
 
+/// Errors returned by SSRF URL validation.
 #[derive(Debug)]
 pub enum SsrfError {
     BlockedAddress(IpAddr),
@@ -36,6 +37,7 @@ fn is_blocked(ip: IpAddr) -> bool {
     }
 }
 
+/// Returns Ok if url resolves to a public IP; Err if private/loopback/link-local.
 pub async fn is_safe_url(url: &str) -> Result<(), SsrfError> {
     let parsed = reqwest::Url::parse(url).map_err(|_| SsrfError::UnsupportedScheme)?;
     match parsed.scheme() {
@@ -66,8 +68,10 @@ pub async fn is_safe_url(url: &str) -> Result<(), SsrfError> {
     Ok(())
 }
 
+/// In-memory cache mapping hostname → time of last successful is_safe_url check.
 pub type SsrfCache = Arc<RwLock<HashMap<String, std::time::Instant>>>;
 
+/// Like is_safe_url but skips the DNS lookup if the hostname was validated within 60 s.
 pub async fn is_safe_url_cached(url: &str, cache: &SsrfCache) -> Result<(), SsrfError> {
     let parsed = reqwest::Url::parse(url).map_err(|_| SsrfError::UnsupportedScheme)?;
     match parsed.scheme() {

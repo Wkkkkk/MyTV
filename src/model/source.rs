@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
+/// A source row as stored in the database.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Source {
     pub id: i64,
@@ -16,6 +17,7 @@ pub struct Source {
     pub failure_reason: Option<String>,
 }
 
+/// Input for creating a new source.
 pub struct NewSource {
     pub channel_id: i64,
     pub kind: String,
@@ -23,6 +25,7 @@ pub struct NewSource {
     pub priority: i64,
 }
 
+/// Insert a new source and return it.
 pub async fn create(pool: &SqlitePool, input: NewSource) -> Result<Source> {
     if !["hls", "youtube_live", "iptv"].contains(&input.kind.as_str()) {
         anyhow::bail!("invalid source kind: {}", input.kind);
@@ -45,6 +48,7 @@ pub async fn create(pool: &SqlitePool, input: NewSource) -> Result<Source> {
         .map_err(Into::into)
 }
 
+/// Fetch a source by id.
 pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Source>> {
     sqlx::query_as::<_, Source>("SELECT * FROM sources WHERE id = ?")
         .bind(id)
@@ -53,6 +57,7 @@ pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Source>> {
         .map_err(Into::into)
 }
 
+/// List all sources for a channel ordered by priority.
 pub async fn list_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<Source>> {
     sqlx::query_as::<_, Source>("SELECT * FROM sources WHERE channel_id = ? ORDER BY priority ASC")
         .bind(channel_id)
@@ -61,6 +66,7 @@ pub async fn list_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<
         .map_err(Into::into)
 }
 
+/// List only active sources for a channel ordered by priority.
 pub async fn list_active_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<Source>> {
     sqlx::query_as::<_, Source>(
         "SELECT * FROM sources WHERE channel_id = ? AND is_active = 1 ORDER BY priority ASC",
@@ -71,6 +77,7 @@ pub async fn list_active_for_channel(pool: &SqlitePool, channel_id: i64) -> Resu
     .map_err(Into::into)
 }
 
+/// Delete a source by id; returns true if a row was removed.
 pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
     let rows = sqlx::query("DELETE FROM sources WHERE id = ?")
         .bind(id)
@@ -80,6 +87,7 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
     Ok(rows > 0)
 }
 
+/// Set the is_active flag on a source; returns true if a row was updated.
 pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool> {
     let rows = sqlx::query("UPDATE sources SET is_active = ? WHERE id = ?")
         .bind(active)
@@ -90,6 +98,7 @@ pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool
     Ok(rows > 0)
 }
 
+/// List all sources across all channels ordered by channel_id then priority.
 pub async fn list_all(pool: &SqlitePool) -> Result<Vec<Source>> {
     sqlx::query_as::<_, Source>("SELECT * FROM sources ORDER BY channel_id ASC, priority ASC")
         .fetch_all(pool)
@@ -97,6 +106,7 @@ pub async fn list_all(pool: &SqlitePool) -> Result<Vec<Source>> {
         .map_err(Into::into)
 }
 
+/// Update health check fields on a source; optionally changes is_active.
 pub async fn update_health(
     pool: &SqlitePool,
     id: i64,

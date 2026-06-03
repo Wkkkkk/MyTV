@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
+/// A playlist item row as stored in the database.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PlaylistItem {
     pub id: i64,
@@ -12,6 +13,7 @@ pub struct PlaylistItem {
     pub sort_order: i64,
 }
 
+/// Input for creating a new playlist item.
 pub struct NewPlaylistItem {
     pub channel_id: i64,
     pub title: String,
@@ -20,6 +22,7 @@ pub struct NewPlaylistItem {
     pub sort_order: i64,
 }
 
+/// Insert a new playlist item and return it.
 pub async fn create(pool: &SqlitePool, input: NewPlaylistItem) -> Result<PlaylistItem> {
     let id = sqlx::query(
         "INSERT INTO playlist_items (channel_id, title, url, duration_secs, sort_order)
@@ -41,6 +44,7 @@ pub async fn create(pool: &SqlitePool, input: NewPlaylistItem) -> Result<Playlis
         .map_err(Into::into)
 }
 
+/// Fetch a playlist item by id.
 pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<PlaylistItem>> {
     sqlx::query_as::<_, PlaylistItem>("SELECT * FROM playlist_items WHERE id = ?")
         .bind(id)
@@ -49,6 +53,7 @@ pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<PlaylistItem>> {
         .map_err(Into::into)
 }
 
+/// List all playlist items for a channel ordered by sort_order.
 pub async fn list_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<PlaylistItem>> {
     sqlx::query_as::<_, PlaylistItem>(
         "SELECT * FROM playlist_items WHERE channel_id = ? ORDER BY sort_order ASC",
@@ -59,6 +64,7 @@ pub async fn list_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<
     .map_err(Into::into)
 }
 
+/// List all playlist items across all channels ordered by channel_id then sort_order.
 pub async fn list_all(pool: &SqlitePool) -> Result<Vec<PlaylistItem>> {
     sqlx::query_as::<_, PlaylistItem>(
         "SELECT * FROM playlist_items ORDER BY channel_id, sort_order ASC",
@@ -68,6 +74,7 @@ pub async fn list_all(pool: &SqlitePool) -> Result<Vec<PlaylistItem>> {
     .map_err(Into::into)
 }
 
+/// Delete a playlist item by id; returns true if a row was removed.
 pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
     let rows = sqlx::query("DELETE FROM playlist_items WHERE id = ?")
         .bind(id)
@@ -77,6 +84,7 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
     Ok(rows > 0)
 }
 
+/// Sum the duration of all items in the playlist.
 pub fn total_duration_secs(items: &[PlaylistItem]) -> i64 {
     items.iter().map(|i| i.duration_secs).sum()
 }

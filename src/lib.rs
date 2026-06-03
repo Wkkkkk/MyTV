@@ -20,9 +20,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Shared in-memory cache mapping CDN host → CORS-allows-wildcard.
 pub type CorsCache = Arc<RwLock<HashMap<String, bool>>>;
 pub use ssrf::SsrfCache;
 
+/// Shared application state cloned into every Axum handler.
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
@@ -46,6 +48,7 @@ async fn redirect_trailing_slash(req: Request, next: Next) -> axum::response::Re
     next.run(req).await
 }
 
+/// Build the Axum router with all routes and middleware wired up.
 pub fn build_router(state: AppState) -> Router {
     let admin_router: Router<AppState> = Router::new()
         .route("/", get(routes::admin::admin_index))
