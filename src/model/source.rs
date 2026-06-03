@@ -24,6 +24,9 @@ pub struct NewSource {
 }
 
 pub async fn create(pool: &SqlitePool, input: NewSource) -> Result<Source> {
+    if !["hls", "youtube_live", "iptv"].contains(&input.kind.as_str()) {
+        anyhow::bail!("invalid source kind: {}", input.kind);
+    }
     let id = sqlx::query(
         "INSERT INTO sources (channel_id, kind, url, priority, is_active) VALUES (?, ?, ?, ?, 1)",
     )

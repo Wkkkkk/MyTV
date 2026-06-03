@@ -39,6 +39,9 @@ pub struct NewChannel {
 }
 
 pub async fn create(pool: &SqlitePool, input: NewChannel) -> Result<Channel> {
+    if !["live", "vod_loop"].contains(&input.channel_type.as_str()) {
+        anyhow::bail!("invalid channel_type: {}", input.channel_type);
+    }
     let id = sqlx::query(
         "INSERT INTO channels (name, category, logo_url, type, sort_order, loop_anchor)
          VALUES (?, ?, ?, ?, ?, ?)",
