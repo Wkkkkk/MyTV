@@ -432,3 +432,13 @@ async fn stream_proxy_blocks_private_rfc1918() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+#[tokio::test]
+async fn stream_proxy_rejects_non_http_scheme() {
+    let response = app()
+        .await
+        .oneshot(req("/stream-proxy?url=file:///etc/passwd"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

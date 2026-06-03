@@ -199,6 +199,7 @@ pub async fn stream_proxy(
     let mut upstream = None;
 
     for _ in 0..5 {
+        // DNS resolved at check time; a hostile server can rebind between check and connect (TOCTOU).
         if let Err(e) = crate::ssrf::is_safe_url(&url).await {
             tracing::warn!(url = %url, reason = %e, "stream proxy SSRF check failed");
             return StatusCode::UNPROCESSABLE_ENTITY.into_response();
