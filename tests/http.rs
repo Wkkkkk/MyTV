@@ -509,3 +509,68 @@ async fn channel_create_requires_auth() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+// Channel update
+
+#[tokio::test]
+async fn channel_update_redirects_on_success() {
+    // Channel 1 ("Live OK") exists in seed data
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/channels/1",
+            "name=Updated+Channel&category=test&channel_type=live&sort_order=1&logo_url=&loop_anchor=",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn channel_update_rejects_invalid_type() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/channels/1",
+            "name=Updated+Channel&category=test&channel_type=invalid&sort_order=1&logo_url=&loop_anchor=",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn channel_update_returns_404_for_missing_channel() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/channels/9999",
+            "name=Ghost&category=test&channel_type=live&sort_order=0&logo_url=&loop_anchor=",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+// Channel delete
+
+#[tokio::test]
+async fn channel_delete_redirects_on_success() {
+    // Channel 1 exists in seed data
+    let response = app()
+        .await
+        .oneshot(authed_post("/admin/channels/1/delete"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn channel_delete_returns_404_for_missing_channel() {
+    let response = app()
+        .await
+        .oneshot(authed_post("/admin/channels/9999/delete"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
