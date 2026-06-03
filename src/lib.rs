@@ -21,6 +21,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub type CorsCache = Arc<RwLock<HashMap<String, bool>>>;
+pub use ssrf::SsrfCache;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -29,6 +30,7 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub proxy_client: reqwest::Client,
     pub cors_cache: CorsCache,
+    pub ssrf_cache: SsrfCache,
 }
 
 async fn redirect_trailing_slash(req: Request, next: Next) -> axum::response::Response {

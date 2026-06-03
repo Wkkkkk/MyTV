@@ -1,5 +1,5 @@
 use anyhow::Result;
-use mytv::{build_router, config, db, health, AppState, CorsCache};
+use mytv::{build_router, config, db, health, AppState, CorsCache, SsrfCache};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -20,10 +20,12 @@ async fn main() -> Result<()> {
 
     let proxy_client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(10))
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(30))
         .build()?;
 
     let cors_cache: CorsCache = Arc::new(RwLock::new(HashMap::new()));
+    let ssrf_cache: SsrfCache = Arc::new(RwLock::new(HashMap::new()));
 
     let state = AppState {
         pool,
@@ -31,6 +33,7 @@ async fn main() -> Result<()> {
         http_client,
         proxy_client,
         cors_cache,
+        ssrf_cache,
     };
 
     health::start(

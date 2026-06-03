@@ -200,7 +200,7 @@ pub async fn stream_proxy(
 
     for _ in 0..5 {
         // DNS resolved at check time; a hostile server can rebind between check and connect (TOCTOU).
-        if let Err(e) = crate::ssrf::is_safe_url(&url).await {
+        if let Err(e) = crate::ssrf::is_safe_url_cached(&url, &state.ssrf_cache).await {
             tracing::warn!(url = %url, reason = %e, "stream proxy SSRF check failed");
             return StatusCode::UNPROCESSABLE_ENTITY.into_response();
         }
@@ -299,6 +299,9 @@ mod tests {
                 .build()
                 .unwrap(),
             cors_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+            ssrf_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
         }
