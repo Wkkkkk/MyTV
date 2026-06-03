@@ -6,6 +6,7 @@ pub mod health;
 mod media;
 mod model;
 mod routes;
+pub mod ssrf;
 
 use axum::{
     extract::Request,
