@@ -130,4 +130,17 @@ mod tests {
             Err(SsrfError::BlockedAddress(_))
         ));
     }
+
+    #[tokio::test]
+    async fn allows_routable_ipv4_literal() {
+        assert!(is_safe_url("http://1.1.1.1/").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn blocks_rfc1918_172_upper_bound() {
+        assert!(matches!(
+            is_safe_url("http://172.31.255.255/").await,
+            Err(SsrfError::BlockedAddress(_))
+        ));
+    }
 }
