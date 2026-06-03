@@ -164,6 +164,17 @@ pub struct StreamProxyQuery {
     pub url: String,
 }
 
+fn resolve_location(location: &str, base_url: &str) -> Option<String> {
+    if location.starts_with("http://") || location.starts_with("https://") {
+        return Some(location.to_string());
+    }
+    reqwest::Url::parse(base_url)
+        .ok()?
+        .join(location)
+        .ok()
+        .map(|u| u.to_string())
+}
+
 async fn resolve_direct_segments(state: &AppState, content: &str, base_url: &str) -> bool {
     let host_key = hls::extract_manifest_host(base_url);
     {
@@ -665,5 +676,39 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    // ── resolve_location ─────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_location_absolute_passthrough() {
+        assert_eq!(
+            resolve_location(
+                "https://cdn.example.com/new.m3u8",
+                "https://origin.example.com/old.m3u8",
+            ),
+            Some("https://cdn.example.com/new.m3u8".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_location_root_relative() {
+        assert_eq!(
+            resolve_location("/live/index.m3u8", "https://cdn.example.com/old/path.m3u8"),
+            Some("https://cdn.example.com/live/index.m3u8".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_location_relative_path() {
+        assert_eq!(
+            resolve_location("index.m3u8", "https://cdn.example.com/live/master.m3u8"),
+            Some("https://cdn.example.com/live/index.m3u8".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_location_unparseable_base_returns_none() {
+        assert_eq!(resolve_location("/path", "not-a-url"), None);
     }
 }
