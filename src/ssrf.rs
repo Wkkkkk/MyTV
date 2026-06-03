@@ -74,20 +74,21 @@ pub async fn is_safe_url_cached(url: &str, cache: &SsrfCache) -> Result<(), Ssrf
         "http" | "https" => {}
         _ => return Err(SsrfError::UnsupportedScheme),
     }
-    let host = parsed
-        .host_str()
-        .ok_or(SsrfError::UnsupportedScheme)?
-        .to_string();
+    let host = parsed.host_str().ok_or(SsrfError::UnsupportedScheme)?;
     {
         let r = cache.read().await;
-        if let Some(ts) = r.get(&host) {
+        if let Some(ts) = r.get(host) {
             if ts.elapsed() < std::time::Duration::from_secs(60) {
                 return Ok(());
             }
         }
     }
+    // Two concurrent misses may both call is_safe_url and both write; the second write is a harmless overwrite.
     is_safe_url(url).await?;
-    cache.write().await.insert(host, std::time::Instant::now());
+    cache
+        .write()
+        .await
+        .insert(host.to_string(), std::time::Instant::now());
     Ok(())
 }
 
@@ -197,6 +198,7 @@ mod tests {
             "1.1.1.1".to_string(),
             std::time::Instant::now() - std::time::Duration::from_secs(61),
         );
+        // 1.1.1.1 is a public IP literal — is_safe_url resolves it directly without DNS.
         assert!(is_safe_url_cached("http://1.1.1.1/", &cache).await.is_ok());
         let elapsed = cache.read().await.get("1.1.1.1").unwrap().elapsed();
         assert!(elapsed < std::time::Duration::from_secs(1));
