@@ -24,8 +24,17 @@ impl std::fmt::Display for SsrfError {
 
 fn is_blocked(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || (v4.octets()[0] == 100 && v4.octets()[1] >= 64 && v4.octets()[1] <= 127)
+        }
         IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_blocked(IpAddr::V4(v4));
+            }
             if v6.is_loopback() {
                 return true;
             }
@@ -206,5 +215,55 @@ mod tests {
         assert!(is_safe_url_cached("http://1.1.1.1/", &cache).await.is_ok());
         let elapsed = cache.read().await.get("1.1.1.1").unwrap().elapsed();
         assert!(elapsed < std::time::Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn blocks_unspecified_ipv4() {
+        assert!(matches!(
+            is_safe_url("http://0.0.0.0/").await,
+            Err(SsrfError::BlockedAddress(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn blocks_cgnat() {
+        assert!(matches!(
+            is_safe_url("http://100.64.0.1/").await,
+            Err(SsrfError::BlockedAddress(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn blocks_cgnat_upper_bound() {
+        assert!(matches!(
+            is_safe_url("http://100.127.255.255/").await,
+            Err(SsrfError::BlockedAddress(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn allows_below_cgnat() {
+        assert!(is_safe_url("http://100.63.255.255/").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn allows_above_cgnat() {
+        assert!(is_safe_url("http://100.128.0.1/").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn blocks_ipv4_mapped_loopback() {
+        assert!(matches!(
+            is_safe_url("http://[::ffff:127.0.0.1]/").await,
+            Err(SsrfError::BlockedAddress(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn blocks_ipv4_mapped_private() {
+        assert!(matches!(
+            is_safe_url("http://[::ffff:10.0.0.1]/").await,
+            Err(SsrfError::BlockedAddress(_))
+        ));
     }
 }
