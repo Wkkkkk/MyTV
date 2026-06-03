@@ -17,12 +17,12 @@
         hx-swap="innerHTML"
         style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
     <div class="form-row" style="margin:0;min-width:140px">
-      <label>Country</label>
-      <input type="text" name="country" placeholder="e.g. US">
+      <label for="disc-country">Country</label>
+      <input id="disc-country" type="text" name="country" placeholder="e.g. US">
     </div>
     <div class="form-row" style="margin:0;min-width:160px">
-      <label>Category / Group</label>
-      <input type="text" name="group" placeholder="e.g. News">
+      <label for="disc-group">Category / Group</label>
+      <input id="disc-group" type="text" name="group" placeholder="e.g. News">
     </div>
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Search</button>
   </form>
@@ -38,8 +38,8 @@
         hx-swap="innerHTML"
         style="display:flex;gap:10px;align-items:flex-end;margin-bottom:16px">
     <div class="form-row" style="margin:0;flex:1;min-width:200px">
-      <label>Keyword</label>
-      <input type="text" name="keyword" placeholder="search YouTube…">
+      <label for="disc-keyword">Keyword</label>
+      <input id="disc-keyword" type="text" name="keyword" placeholder="search YouTube…">
     </div>
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Search</button>
   </form>
@@ -59,8 +59,8 @@
         hx-swap="innerHTML"
         style="display:flex;gap:10px;align-items:flex-end;margin-bottom:16px">
     <div class="form-row" style="margin:0;flex:1;min-width:260px">
-      <label>Stream URL (HLS, IPTV, or YouTube)</label>
-      <input type="text" name="url" placeholder="https://…" required>
+      <label for="disc-url">Stream URL (HLS, IPTV, or YouTube)</label>
+      <input id="disc-url" type="text" name="url" placeholder="https://…" required>
     </div>
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Resolve</button>
   </form>
