@@ -247,13 +247,29 @@ pub async fn stream_proxy(
 
     let is_playlist = ct.contains("mpegurl") || url.contains(".m3u8") || url.contains(".m3u");
 
+    // RFC 7230 §6.1: collect headers listed in Connection so we can strip them too.
+    let connection_options: Vec<String> = upstream
+        .headers()
+        .get(axum::http::header::CONNECTION)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').map(|t| t.trim().to_lowercase()).collect())
+        .unwrap_or_default();
+
     let mut headers = HeaderMap::new();
     headers.insert(
         axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
         HeaderValue::from_static("*"),
     );
     for (key, val) in upstream.headers() {
-        if key == axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN {
+        // Never forward CORS header (we own it) or hop-by-hop headers (RFC 7230 §6.1).
+        if key == axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN
+            || key == axum::http::header::CONNECTION
+            || key == axum::http::header::TRANSFER_ENCODING
+            || key == axum::http::header::TE
+            || key == axum::http::header::TRAILER
+            || key == axum::http::header::UPGRADE
+            || connection_options.iter().any(|o| o == key.as_str())
+        {
             continue;
         }
         headers.append(key.clone(), val.clone());
