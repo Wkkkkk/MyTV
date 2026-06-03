@@ -666,3 +666,44 @@ async fn source_toggle_returns_404_for_missing_source() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+// Channel edit form
+
+#[tokio::test]
+async fn channel_edit_form_returns_200() {
+    // Channel 1 exists in seed
+    let response = app()
+        .await
+        .oneshot(authed("/admin/channels/1/edit"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn channel_edit_form_returns_404_for_missing_channel() {
+    let response = app()
+        .await
+        .oneshot(authed("/admin/channels/9999/edit"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+// Discover page
+
+#[tokio::test]
+async fn admin_discover_page_returns_200() {
+    let response = app()
+        .await
+        .oneshot(authed("/admin/discover"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn admin_discover_page_requires_auth() {
+    let response = app().await.oneshot(req("/admin/discover")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
