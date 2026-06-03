@@ -266,4 +266,20 @@ mod tests {
             Err(SsrfError::BlockedAddress(_))
         ));
     }
+
+    #[tokio::test]
+    async fn blocks_ipv4_mapped_cgnat() {
+        assert!(matches!(
+            is_safe_url("http://[::ffff:100.64.0.1]/").await,
+            Err(SsrfError::BlockedAddress(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn blocks_ipv4_mapped_unspecified() {
+        assert!(matches!(
+            is_safe_url("http://[::ffff:0.0.0.0]/").await,
+            Err(SsrfError::BlockedAddress(_))
+        ));
+    }
 }
