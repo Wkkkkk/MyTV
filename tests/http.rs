@@ -808,7 +808,12 @@ async fn stream_proxy_follows_relative_redirect() {
 
         // Second connection: the resolved redirect target returns HLS content.
         let (mut conn, _) = listener.accept().await.unwrap();
-        let _ = conn.read(&mut buf).await;
+        let n = conn.read(&mut buf).await.unwrap();
+        let request = String::from_utf8_lossy(&buf[..n]);
+        assert!(
+            request.contains("/redirected.m3u8"),
+            "stream_proxy must request the resolved path, got: {request}"
+        );
         conn.write_all(
             b"HTTP/1.1 200 OK\r\n\
               Content-Type: application/vnd.apple.mpegurl\r\n\
