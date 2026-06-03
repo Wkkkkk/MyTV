@@ -196,7 +196,7 @@ pub async fn stream_proxy(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    let mut url = q.url.clone();
+    let mut url = q.url;
     let mut upstream = None;
 
     for _ in 0..5 {
@@ -232,7 +232,7 @@ pub async fn stream_proxy(
         break;
     }
 
-    let upstream = match upstream {
+    let mut upstream = match upstream {
         Some(r) => r,
         None => return StatusCode::BAD_GATEWAY.into_response(),
     };
@@ -243,8 +243,7 @@ pub async fn stream_proxy(
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
+        .unwrap_or("");
 
     let is_playlist = ct.contains("mpegurl") || url.contains(".m3u8") || url.contains(".m3u");
 
@@ -257,14 +256,13 @@ pub async fn stream_proxy(
         if key == axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN {
             continue;
         }
-        headers.insert(key.clone(), val.clone());
+        headers.append(key.clone(), val.clone());
     }
 
     if is_playlist {
         headers.remove(axum::http::header::CONTENT_LENGTH);
         const MAX_BODY: usize = 20 * 1024 * 1024;
         let mut collected: Vec<u8> = Vec::new();
-        let mut upstream = upstream;
         loop {
             match upstream.chunk().await {
                 Ok(Some(chunk)) => {
