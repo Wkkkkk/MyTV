@@ -190,6 +190,7 @@ async fn resolve_direct_segments(state: &AppState, content: &str, base_url: &str
 pub async fn stream_proxy(
     State(state): State<AppState>,
     Query(q): Query<StreamProxyQuery>,
+    request_headers: HeaderMap,
 ) -> Response {
     if !q.url.starts_with("http://") && !q.url.starts_with("https://") {
         return StatusCode::BAD_REQUEST.into_response();
@@ -204,7 +205,11 @@ pub async fn stream_proxy(
             tracing::warn!(url = %url, reason = %e, "stream proxy SSRF check failed");
             return StatusCode::UNPROCESSABLE_ENTITY.into_response();
         }
-        let resp = match state.proxy_client.get(&url).send().await {
+        let mut req = state.proxy_client.get(&url);
+        if let Some(range) = request_headers.get(axum::http::header::RANGE) {
+            req = req.header(axum::http::header::RANGE, range);
+        }
+        let resp = match req.send().await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(url = %url, error = %e, "stream proxy fetch failed");
@@ -232,6 +237,8 @@ pub async fn stream_proxy(
         None => return StatusCode::BAD_GATEWAY.into_response(),
     };
 
+    let status = upstream.status();
+
     let ct = upstream
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
@@ -242,9 +249,19 @@ pub async fn stream_proxy(
     let is_playlist = ct.contains("mpegurl") || url.contains(".m3u8") || url.contains(".m3u");
 
     let mut headers = HeaderMap::new();
-    headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    for (key, val) in upstream.headers() {
+        if key == axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN {
+            continue;
+        }
+        headers.insert(key.clone(), val.clone());
+    }
 
     if is_playlist {
+        headers.remove(axum::http::header::CONTENT_LENGTH);
         const MAX_BODY: usize = 20 * 1024 * 1024;
         let mut collected: Vec<u8> = Vec::new();
         let mut upstream = upstream;
@@ -272,12 +289,10 @@ pub async fn stream_proxy(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/vnd.apple.mpegurl"),
         );
-        (headers, rewritten).into_response()
+        (status, headers, rewritten).into_response()
     } else {
-        if let Ok(val) = HeaderValue::from_str(&ct) {
-            headers.insert(axum::http::header::CONTENT_TYPE, val);
-        }
         (
+            status,
             headers,
             axum::body::Body::from_stream(upstream.bytes_stream()),
         )
