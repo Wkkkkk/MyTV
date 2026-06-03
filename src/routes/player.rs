@@ -227,7 +227,7 @@ pub async fn stream_proxy(
         break;
     }
 
-    let mut upstream = match upstream {
+    let upstream = match upstream {
         Some(r) => r,
         None => return StatusCode::BAD_GATEWAY.into_response(),
     };
@@ -241,30 +241,30 @@ pub async fn stream_proxy(
 
     let is_playlist = ct.contains("mpegurl") || url.contains(".m3u8") || url.contains(".m3u");
 
-    const MAX_BODY: usize = 20 * 1024 * 1024;
-    let mut collected: Vec<u8> = Vec::new();
-    loop {
-        match upstream.chunk().await {
-            Ok(Some(chunk)) => {
-                if collected.len() + chunk.len() > MAX_BODY {
-                    tracing::warn!(url = %url, "stream proxy response exceeds 20 MB cap");
-                    return StatusCode::BAD_GATEWAY.into_response();
-                }
-                collected.extend_from_slice(&chunk);
-            }
-            Ok(None) => break,
-            Err(e) => {
-                tracing::warn!(url = %url, error = %e, "stream proxy read failed");
-                return StatusCode::BAD_GATEWAY.into_response();
-            }
-        }
-    }
-    let body_bytes = Bytes::from(collected);
-
     let mut headers = HeaderMap::new();
     headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
 
     if is_playlist {
+        const MAX_BODY: usize = 20 * 1024 * 1024;
+        let mut collected: Vec<u8> = Vec::new();
+        let mut upstream = upstream;
+        loop {
+            match upstream.chunk().await {
+                Ok(Some(chunk)) => {
+                    if collected.len() + chunk.len() > MAX_BODY {
+                        tracing::warn!(url = %url, "stream proxy response exceeds 20 MB cap");
+                        return StatusCode::BAD_GATEWAY.into_response();
+                    }
+                    collected.extend_from_slice(&chunk);
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    tracing::warn!(url = %url, error = %e, "stream proxy read failed");
+                    return StatusCode::BAD_GATEWAY.into_response();
+                }
+            }
+        }
+        let body_bytes = Bytes::from(collected);
         let text = String::from_utf8_lossy(&body_bytes);
         let direct = resolve_direct_segments(&state, &text, &url).await;
         let rewritten = hls::rewrite_hls_urls(&text, &url, direct);
@@ -277,7 +277,11 @@ pub async fn stream_proxy(
         if let Ok(val) = HeaderValue::from_str(&ct) {
             headers.insert(axum::http::header::CONTENT_TYPE, val);
         }
-        (headers, body_bytes).into_response()
+        (
+            headers,
+            axum::body::Body::from_stream(upstream.bytes_stream()),
+        )
+            .into_response()
     }
 }
 
