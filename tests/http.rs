@@ -400,3 +400,35 @@ async fn test_playlist_item_test_returns_row_partial() {
         "response should be the playlist row partial"
     );
 }
+
+#[tokio::test]
+async fn stream_proxy_blocks_loopback() {
+    let response = app()
+        .await
+        .oneshot(req("/stream-proxy?url=http://127.0.0.1/foo"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn stream_proxy_blocks_link_local_metadata() {
+    let response = app()
+        .await
+        .oneshot(req(
+            "/stream-proxy?url=http://169.254.169.254/latest/meta-data/",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn stream_proxy_blocks_private_rfc1918() {
+    let response = app()
+        .await
+        .oneshot(req("/stream-proxy?url=http://10.0.0.1/foo"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}

@@ -1,4 +1,5 @@
 use axum::{
+    body::Bytes,
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Json, Response},
@@ -194,12 +195,40 @@ pub async fn stream_proxy(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    let upstream = match state.http_client.get(&q.url).send().await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(url = %q.url, error = %e, "stream proxy fetch failed");
-            return StatusCode::BAD_GATEWAY.into_response();
+    let mut url = q.url.clone();
+    let mut upstream = None;
+
+    for _ in 0..5 {
+        if let Err(e) = crate::ssrf::is_safe_url(&url).await {
+            tracing::warn!(url = %url, reason = %e, "stream proxy SSRF check failed");
+            return StatusCode::UNPROCESSABLE_ENTITY.into_response();
         }
+        let resp = match state.proxy_client.get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(url = %url, error = %e, "stream proxy fetch failed");
+                return StatusCode::BAD_GATEWAY.into_response();
+            }
+        };
+        if resp.status().is_redirection() {
+            let location = match resp
+                .headers()
+                .get(axum::http::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+            {
+                Some(loc) => loc.to_string(),
+                None => return StatusCode::BAD_GATEWAY.into_response(),
+            };
+            url = location;
+            continue;
+        }
+        upstream = Some(resp);
+        break;
+    }
+
+    let mut upstream = match upstream {
+        Some(r) => r,
+        None => return StatusCode::BAD_GATEWAY.into_response(),
     };
 
     let ct = upstream
@@ -209,23 +238,35 @@ pub async fn stream_proxy(
         .unwrap_or("")
         .to_string();
 
-    let is_playlist = ct.contains("mpegurl") || q.url.contains(".m3u8") || q.url.contains(".m3u");
+    let is_playlist = ct.contains("mpegurl") || url.contains(".m3u8") || url.contains(".m3u");
 
-    let body_bytes = match upstream.bytes().await {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::warn!(url = %q.url, error = %e, "stream proxy read failed");
-            return StatusCode::BAD_GATEWAY.into_response();
+    const MAX_BODY: usize = 20 * 1024 * 1024;
+    let mut collected: Vec<u8> = Vec::new();
+    loop {
+        match upstream.chunk().await {
+            Ok(Some(chunk)) => {
+                if collected.len() + chunk.len() > MAX_BODY {
+                    tracing::warn!(url = %url, "stream proxy response exceeds 20 MB cap");
+                    return StatusCode::BAD_GATEWAY.into_response();
+                }
+                collected.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(e) => {
+                tracing::warn!(url = %url, error = %e, "stream proxy read failed");
+                return StatusCode::BAD_GATEWAY.into_response();
+            }
         }
-    };
+    }
+    let body_bytes = Bytes::from(collected);
 
     let mut headers = HeaderMap::new();
     headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
 
     if is_playlist {
         let text = String::from_utf8_lossy(&body_bytes);
-        let direct = resolve_direct_segments(&state, &text, &q.url).await;
-        let rewritten = hls::rewrite_hls_urls(&text, &q.url, direct);
+        let direct = resolve_direct_segments(&state, &text, &url).await;
+        let rewritten = hls::rewrite_hls_urls(&text, &url, direct);
         headers.insert(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/vnd.apple.mpegurl"),
