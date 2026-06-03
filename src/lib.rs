@@ -27,6 +27,7 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub config: Arc<config::Config>,
     pub http_client: reqwest::Client,
+    pub proxy_client: reqwest::Client,
     pub cors_cache: CorsCache,
 }
 

@@ -252,6 +252,10 @@ mod tests {
             pool,
             config,
             http_client: reqwest::Client::new(),
+            proxy_client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap(),
             cors_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),

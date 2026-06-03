@@ -18,12 +18,18 @@ async fn main() -> Result<()> {
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
 
+    let proxy_client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+
     let cors_cache: CorsCache = Arc::new(RwLock::new(HashMap::new()));
 
     let state = AppState {
         pool,
         config: config.clone(),
         http_client,
+        proxy_client,
         cors_cache,
     };
 

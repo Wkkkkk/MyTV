@@ -30,6 +30,11 @@ async fn app() -> axum::Router {
             port: 0,
         }),
         http_client: test_client(),
+        proxy_client: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap(),
         cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
     build_router(state)
@@ -86,6 +91,11 @@ async fn app_with_cors(host: &str, direct: bool) -> axum::Router {
             port: 0,
         }),
         http_client: test_client(),
+        proxy_client: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap(),
         cors_cache,
     };
     build_router(state)
