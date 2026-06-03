@@ -153,6 +153,7 @@ pub async fn find_segment_with_descent(
     }
     let variant = find_first_variant_url(content, base_url)?;
     if crate::ssrf::is_safe_url(&variant).await.is_err() {
+        tracing::warn!(url = %variant, "hls variant fetch blocked by SSRF check");
         return None;
     }
     let body = fetch_text(client, &variant).await?;
@@ -197,6 +198,7 @@ pub fn has_cors_wildcard(headers: &reqwest::header::HeaderMap) -> bool {
 /// Returns false on any network or timeout error (proxy is the safe default).
 pub async fn probe_cors(client: &reqwest::Client, url: &str) -> bool {
     if crate::ssrf::is_safe_url(url).await.is_err() {
+        tracing::warn!(url = %url, "CORS probe blocked by SSRF check");
         return false;
     }
     match client
@@ -423,13 +425,28 @@ mod tests {
 
     #[tokio::test]
     async fn find_segment_with_descent_blocks_variant_to_loopback() {
+        // Bind a local listener so that if the SSRF guard is absent, fetch_text
+        // would connect and return None for a non-HLS response. With the guard,
+        // None is returned before any connection attempt.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let variant_url = format!("http://127.0.0.1:{}/variant.m3u8", port);
+        let master = format!(
+            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\n{}\n",
+            variant_url
+        );
         let client = reqwest::Client::new();
-        // Master playlist whose only variant line points to a loopback address.
-        // Without the SSRF guard, find_segment_with_descent would fetch http://127.0.0.1/variant.m3u8.
-        let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nhttp://127.0.0.1/variant.m3u8\n";
         let result =
-            find_segment_with_descent(&client, master, "https://example.com/master.m3u8").await;
+            find_segment_with_descent(&client, &master, "https://example.com/master.m3u8").await;
+        // Guard must fire before connecting — listener should receive no connection.
         assert_eq!(result, None);
+        // If we can accept a connection immediately, the guard did NOT fire (test should fail).
+        let accept_result =
+            tokio::time::timeout(std::time::Duration::from_millis(50), listener.accept()).await;
+        assert!(
+            accept_result.is_err(),
+            "SSRF guard did not fire — listener received a connection from fetch_text"
+        );
     }
 
     #[tokio::test]
