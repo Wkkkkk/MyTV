@@ -103,6 +103,15 @@ pub(super) async fn build_guide_data(
             acc
         });
 
+    let all_playlist_items: std::collections::HashMap<i64, Vec<playlist_item::PlaylistItem>> =
+        playlist_item::list_all(pool).await?.into_iter().fold(
+            std::collections::HashMap::new(),
+            |mut acc, item| {
+                acc.entry(item.channel_id).or_default().push(item);
+                acc
+            },
+        );
+
     let mut rows = Vec::new();
     for ch in &channels {
         let (entries, budget_url) = match ch.channel_type() {
@@ -111,7 +120,7 @@ pub(super) async fn build_guide_data(
                 first_active_urls.get(&ch.id).cloned(),
             ),
             ChannelType::VodLoop => {
-                let items = playlist_item::list_for_channel(pool, ch.id).await?;
+                let items = all_playlist_items.get(&ch.id).cloned().unwrap_or_default();
                 let entries = match ch.loop_anchor {
                     Some(anchor) => epg::vod_schedule(
                         ch.id,
