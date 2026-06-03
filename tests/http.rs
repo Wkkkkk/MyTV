@@ -574,3 +574,95 @@ async fn channel_delete_returns_404_for_missing_channel() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+// Source create
+
+#[tokio::test]
+async fn source_create_redirects_on_success() {
+    // Channel 1 exists in seed data
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/channels/1/sources",
+            "kind=hls&url=https%3A%2F%2Fexample.com%2Ftest.m3u8&priority=5",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get("location").unwrap(),
+        "/admin/channels/1"
+    );
+}
+
+#[tokio::test]
+async fn source_create_rejects_invalid_kind() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/channels/1/sources",
+            "kind=rtmp&url=https%3A%2F%2Fexample.com%2Fstream&priority=1",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn source_create_rejects_empty_url() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/channels/1/sources",
+            "kind=hls&url=&priority=1",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+// Source delete
+
+#[tokio::test]
+async fn source_delete_redirects_on_success() {
+    // Source 1 exists in seed data
+    let response = app()
+        .await
+        .oneshot(authed_post("/admin/sources/1/delete"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn source_delete_returns_404_for_missing_source() {
+    let response = app()
+        .await
+        .oneshot(authed_post("/admin/sources/9999/delete"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+// Source toggle
+
+#[tokio::test]
+async fn source_toggle_redirects_on_success() {
+    // Source 1 exists in seed data
+    let response = app()
+        .await
+        .oneshot(authed_post("/admin/sources/1/toggle"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn source_toggle_returns_404_for_missing_source() {
+    let response = app()
+        .await
+        .oneshot(authed_post("/admin/sources/9999/toggle"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
