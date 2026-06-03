@@ -86,6 +86,38 @@ async fn body_text(response: axum::response::Response) -> String {
     String::from_utf8_lossy(&bytes).to_string()
 }
 
+async fn app_with_ssrf_bypass(host: &str) -> axum::Router {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    sqlx::query(include_str!("fixtures/seed.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let ssrf_cache = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+    ssrf_cache
+        .write()
+        .await
+        .insert(host.to_string(), std::time::Instant::now());
+    let state = AppState {
+        pool,
+        config: Arc::new(Config {
+            database_url: "sqlite::memory:".to_string(),
+            admin_password: "test".to_string(),
+            youtube_api_key: None,
+            port: 0,
+        }),
+        http_client: test_client(),
+        proxy_client: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_millis(500))
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap(),
+        cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        ssrf_cache,
+    };
+    build_router(state)
+}
+
 async fn app_with_cors(host: &str, direct: bool) -> axum::Router {
     let pool = db::connect("sqlite::memory:").await.unwrap();
     sqlx::query(include_str!("fixtures/seed.sql"))
@@ -457,6 +489,49 @@ async fn stream_proxy_rejects_non_http_scheme() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
+#[tokio::test]
+async fn stream_proxy_strips_hop_by_hop_headers() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Upstream that includes hop-by-hop headers in its response.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 512];
+        let _ = conn.read(&mut buf).await;
+        conn.write_all(
+            b"HTTP/1.1 200 OK\r\n\
+              Content-Type: application/octet-stream\r\n\
+              Transfer-Encoding: chunked\r\n\
+              Connection: keep-alive\r\n\
+              \r\n\
+              5\r\nhello\r\n0\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    });
+
+    // Pre-seed ssrf_cache so 127.0.0.1 bypasses the SSRF block.
+    let app = app_with_ssrf_bypass("127.0.0.1").await;
+    let encoded = format!("http%3A%2F%2F127.0.0.1%3A{}%2F", port);
+    let response = app
+        .oneshot(req(&format!("/stream-proxy?url={}", encoded)))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers().get("transfer-encoding").is_none(),
+        "Transfer-Encoding must be stripped from proxy response"
+    );
+    assert!(
+        response.headers().get("connection").is_none(),
+        "Connection must be stripped from proxy response"
+    );
+}
+
 // ── Admin mutations ──────────────────────────────────────────────────────────
 
 // Channel create
@@ -706,4 +781,58 @@ async fn admin_discover_page_returns_200() {
 async fn admin_discover_page_requires_auth() {
     let response = app().await.oneshot(req("/admin/discover")).await.unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn stream_proxy_follows_relative_redirect() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        let mut buf = [0u8; 512];
+
+        // First connection: 302 with a relative Location header.
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let _ = conn.read(&mut buf).await;
+        conn.write_all(
+            b"HTTP/1.1 302 Found\r\n\
+              Location: /redirected.m3u8\r\n\
+              Content-Length: 0\r\n\
+              \r\n",
+        )
+        .await
+        .unwrap();
+        drop(conn);
+
+        // Second connection: the resolved redirect target returns HLS content.
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let _ = conn.read(&mut buf).await;
+        conn.write_all(
+            b"HTTP/1.1 200 OK\r\n\
+              Content-Type: application/vnd.apple.mpegurl\r\n\
+              Content-Length: 7\r\n\
+              \r\n\
+              #EXTM3U",
+        )
+        .await
+        .unwrap();
+    });
+
+    // app_with_ssrf_bypass pre-seeds 127.0.0.1 in the ssrf_cache so the SSRF
+    // check passes for localhost (same pattern as stream_proxy_strips_hop_by_hop_headers).
+    let app = app_with_ssrf_bypass("127.0.0.1").await;
+    let url_param = format!("http%3A%2F%2F127.0.0.1%3A{}%2Foriginal.m3u8", port);
+    let response = app
+        .oneshot(req(&format!("/stream-proxy?url={}", url_param)))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "stream_proxy must follow a relative Location redirect (got {} instead)",
+        response.status()
+    );
 }

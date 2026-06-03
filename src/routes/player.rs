@@ -164,7 +164,6 @@ pub struct StreamProxyQuery {
     pub url: String,
 }
 
-#[allow(dead_code)]
 fn resolve_location(location: &str, base_url: &str) -> Option<String> {
     if location.starts_with("http://") || location.starts_with("https://") {
         return Some(location.to_string());
@@ -237,7 +236,10 @@ pub async fn stream_proxy(
                 Some(loc) => loc.to_string(),
                 None => return StatusCode::BAD_GATEWAY.into_response(),
             };
-            url = location;
+            url = match resolve_location(&location, &url) {
+                Some(resolved) => resolved,
+                None => return StatusCode::BAD_GATEWAY.into_response(),
+            };
             continue;
         }
         upstream = Some(resp);
