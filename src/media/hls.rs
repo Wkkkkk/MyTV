@@ -152,6 +152,9 @@ pub async fn find_segment_with_descent(
         return Some(seg);
     }
     let variant = find_first_variant_url(content, base_url)?;
+    if crate::ssrf::is_safe_url(&variant).await.is_err() {
+        return None;
+    }
     let body = fetch_text(client, &variant).await?;
     find_first_segment_url(&body, &variant)
 }
@@ -193,6 +196,9 @@ pub fn has_cors_wildcard(headers: &reqwest::header::HeaderMap) -> bool {
 /// HEAD-requests `url` and returns true if the response includes `Access-Control-Allow-Origin: *`.
 /// Returns false on any network or timeout error (proxy is the safe default).
 pub async fn probe_cors(client: &reqwest::Client, url: &str) -> bool {
+    if crate::ssrf::is_safe_url(url).await.is_err() {
+        return false;
+    }
     match client
         .head(url)
         .timeout(std::time::Duration::from_secs(5))
@@ -413,5 +419,27 @@ mod tests {
         let media = "#EXTM3U\n#EXTINF:6,\nhttps://cdn.com/seg1.ts\n";
         let seg = find_segment_with_descent(&client, media, "https://h.com/v.m3u8").await;
         assert_eq!(seg.as_deref(), Some("https://cdn.com/seg1.ts"));
+    }
+
+    #[tokio::test]
+    async fn find_segment_with_descent_blocks_variant_to_loopback() {
+        let client = reqwest::Client::new();
+        // Master playlist whose only variant line points to a loopback address.
+        // Without the SSRF guard, find_segment_with_descent would fetch http://127.0.0.1/variant.m3u8.
+        let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nhttp://127.0.0.1/variant.m3u8\n";
+        let result =
+            find_segment_with_descent(&client, master, "https://example.com/master.m3u8").await;
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn probe_cors_blocks_loopback() {
+        let client = reqwest::Client::new();
+        // Without the SSRF guard, probe_cors would HEAD-request http://127.0.0.1/seg.ts.
+        let result = probe_cors(&client, "http://127.0.0.1/seg.ts").await;
+        assert!(
+            !result,
+            "probe_cors must return false (proxy default) for loopback URLs"
+        );
     }
 }
