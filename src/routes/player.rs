@@ -164,6 +164,7 @@ pub struct StreamProxyQuery {
     pub url: String,
 }
 
+#[allow(dead_code)]
 fn resolve_location(location: &str, base_url: &str) -> Option<String> {
     if location.starts_with("http://") || location.starts_with("https://") {
         return Some(location.to_string());
@@ -710,5 +711,16 @@ mod tests {
     #[test]
     fn resolve_location_unparseable_base_returns_none() {
         assert_eq!(resolve_location("/path", "not-a-url"), None);
+    }
+
+    #[test]
+    fn resolve_location_protocol_relative() {
+        assert_eq!(
+            resolve_location(
+                "//cdn.example.com/stream.m3u8",
+                "https://origin.example.com/master.m3u8",
+            ),
+            Some("https://cdn.example.com/stream.m3u8".to_string())
+        );
     }
 }
