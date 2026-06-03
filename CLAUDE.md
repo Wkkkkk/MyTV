@@ -40,6 +40,8 @@ src/
   db.rs           # db::connect(), runs migrations
   health.rs       # background health checker (spawned in main)
   epg.rs          # EPG time-window calculations
+  budget.rs       # CORS budget badge computation (⚡/☁) for guide display
+  ssrf.rs         # SSRF URL validation and 60 s hostname cache
   model/          # Channel, Source, PlaylistItem structs + DB queries
   routes/
     player.rs     # /channel/:id/tune and /channel/:id/next
@@ -47,7 +49,7 @@ src/
     health.rs     # /health
     admin/        # /admin/** — channel/source/playlist CRUD, discovery
   media/          # yt-dlp resolution, HLS stream proxy
-migrations/       # 001_initial.sql, 002_source_health.sql
+migrations/       # 001_initial.sql, 002_source_health.sql, 003_indexes.sql
 templates/        # Askama .html files mirroring routes structure
 tests/
   http.rs         # integration tests (tower::ServiceExt::oneshot)
