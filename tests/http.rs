@@ -70,6 +70,16 @@ fn authed_post(uri: &str) -> Request<Body> {
         .unwrap()
 }
 
+fn authed_form_post(uri: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("Authorization", "Basic dXNlcjp0ZXN0")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
 async fn body_text(response: axum::response::Response) -> String {
     use http_body_util::BodyExt;
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
@@ -445,4 +455,57 @@ async fn stream_proxy_rejects_non_http_scheme() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+// ── Admin mutations ──────────────────────────────────────────────────────────
+
+// Channel create
+
+#[tokio::test]
+async fn channel_create_redirects_on_success() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/channels",
+            "name=Test+Channel&category=test&channel_type=live&sort_order=0&logo_url=&loop_anchor=",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get("location").unwrap(),
+        "/admin/channels"
+    );
+}
+
+#[tokio::test]
+async fn channel_create_rejects_invalid_type() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/channels",
+            "name=Test&category=test&channel_type=invalid&sort_order=0&logo_url=&loop_anchor=",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn channel_create_requires_auth() {
+    let response = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/channels")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "name=Test&category=test&channel_type=live&sort_order=0&logo_url=&loop_anchor=",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
