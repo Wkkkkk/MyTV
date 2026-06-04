@@ -233,10 +233,10 @@
           if (hls) { hls.stopLoad(); hls.detachMedia(); }
           if (dash) { dash.reset(); dash = null; }
           dash = dashjs.MediaPlayer().create();
-          dash.on(dashjs.MediaPlayer.events.ERROR, function() {
+          dash.on(dashjs.MediaPlayer.events.ERROR, function(e) {
             if (dashErrorFired || !currentChannelId) return;
             dashErrorFired = true;
-            if (typeof debugLog === 'function') debugLog('warn', 'DASH error, trying next source');
+            if (typeof debugLog === 'function') debugLog('warn', 'DASH error: ' + (e && e.error ? e.error.code || e.error : 'unknown') + ', trying next source');
             var nextUrl = '/channel/' + currentChannelId + '/next';
             if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
             fetch(nextUrl)
@@ -251,8 +251,10 @@
             dash.on(dashjs.MediaPlayer.events.MANIFEST_LOADED, function onManifest() {
               dash.off(dashjs.MediaPlayer.events.MANIFEST_LOADED, onManifest);
               video.currentTime = offset;
+              video.play().catch(function(){});
             });
           }
+          // autoPlay=true: dash.js calls video.play() internally after manifest load
           dash.initialize(video, url, true);
         } else {
           if (dash) { dash.reset(); dash = null; }
