@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 
 use crate::{
-    media::{hls, resolver},
+    media::{hls, mpd, resolver},
     model::{
         channel::{self, ChannelType},
         playlist_item, source,
@@ -253,7 +253,9 @@ pub async fn stream_proxy(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    let is_playlist = ct.contains("mpegurl") || url.contains(".m3u8") || url.contains(".m3u");
+    let is_dash = ct.contains("dash+xml") || url.contains(".mpd");
+    let is_playlist =
+        is_dash || ct.contains("mpegurl") || url.contains(".m3u8") || url.contains(".m3u");
 
     // RFC 7230 §6.1: collect headers listed in Connection so we can strip them too.
     let connection_options: Vec<String> = upstream
@@ -310,10 +312,20 @@ pub async fn stream_proxy(
             .fetch_add(body_bytes.len() as u64, Ordering::Relaxed);
         let text = String::from_utf8_lossy(&body_bytes);
         let direct = resolve_direct_segments(&state, &url).await;
-        let rewritten = hls::rewrite_hls_urls(&text, &url, direct);
+        let (rewritten, content_type) = if is_dash {
+            (
+                mpd::rewrite_mpd_urls(&text, &url, direct),
+                "application/dash+xml",
+            )
+        } else {
+            (
+                hls::rewrite_hls_urls(&text, &url, direct),
+                "application/vnd.apple.mpegurl",
+            )
+        };
         headers.insert(
             axum::http::header::CONTENT_TYPE,
-            HeaderValue::from_static("application/vnd.apple.mpegurl"),
+            HeaderValue::from_static(content_type),
         );
         (status, headers, rewritten).into_response()
     } else {
