@@ -24,3 +24,10 @@ m3u8-rs = "6"
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
+criterion = "0.5"
+
+[[bench]]
+name = "hot_paths"
+harness = false
+# Excluded from `cargo test` so CI doesn't compile or smoke-run benches.
+test = false
