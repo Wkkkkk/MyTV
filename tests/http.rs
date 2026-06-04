@@ -948,3 +948,34 @@ async fn test_metrics_counts_proxied_bytes_and_resets_gauge() {
     assert_eq!(metrics["proxy"]["bytes_proxied"], 10);
     assert_eq!(metrics["proxy"]["active_streams"], 0);
 }
+
+#[tokio::test]
+#[ignore = "requires network access — run manually"]
+async fn test_stream_proxy_rewrites_dash_bbb_manifest() {
+    use http_body_util::BodyExt;
+    let app = app().await;
+    let encoded_url = "https%3A%2F%2Fdash.akamaized.net%2Fakamai%2Fbbb_30fps%2Fbbb_30fps.mpd";
+    let response = app
+        .oneshot(req(&format!("/stream-proxy?url={encoded_url}")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let ct = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        ct.contains("dash+xml"),
+        "expected dash+xml content-type, got: {ct}"
+    );
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body = std::str::from_utf8(&bytes).unwrap();
+    // BaseURL "./" resolved to absolute CDN path
+    assert!(
+        body.contains("https://dash.akamaized.net/akamai/bbb_30fps/"),
+        "expected resolved absolute BaseURL in body"
+    );
+    // Valid DASH XML
+    assert!(body.contains("<MPD"), "expected MPD root element");
+}
