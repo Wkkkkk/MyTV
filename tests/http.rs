@@ -43,6 +43,34 @@ async fn app() -> axum::Router {
     build_router(state)
 }
 
+async fn app_for_network() -> axum::Router {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    sqlx::query(include_str!("fixtures/seed.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let state = AppState {
+        pool,
+        config: Arc::new(Config {
+            database_url: "sqlite::memory:".to_string(),
+            admin_password: "test".to_string(),
+            youtube_api_key: None,
+            port: 0,
+        }),
+        http_client: test_client(),
+        proxy_client: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap(),
+        cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        metrics: Arc::new(metrics::Metrics::new()),
+    };
+    build_router(state)
+}
+
 fn req(uri: &str) -> Request<Body> {
     Request::builder().uri(uri).body(Body::empty()).unwrap()
 }
@@ -953,7 +981,7 @@ async fn test_metrics_counts_proxied_bytes_and_resets_gauge() {
 #[ignore = "requires network access — run manually"]
 async fn test_stream_proxy_rewrites_dash_bbb_manifest() {
     use http_body_util::BodyExt;
-    let app = app().await;
+    let app = app_for_network().await;
     let encoded_url = "https%3A%2F%2Fdash.akamaized.net%2Fakamai%2Fbbb_30fps%2Fbbb_30fps.mpd";
     let response = app
         .oneshot(req(&format!("/stream-proxy?url={encoded_url}")))
