@@ -102,8 +102,8 @@ Each leaf: *what to measure / tool / hypothesis*.
 | yt-dlp children | Python interpreter per resolution | **uncapped concurrency** | **High — #1 OOM risk** | `ps` RSS of yt-dlp during resolve; count max concurrent |
 | SQLite pool | connections × page cache | pool default (check `db.rs`) | Low | idle RSS delta vs pool size |
 | SSRF cache | hostname → Instant | unbounded map, entries never evicted (only re-validated) | Low (personal-scale hostname set) | `/admin/metrics` `caches.ssrf_entries` over time |
-| CORS cache | host → bool | unbounded, same profile | Low | `/admin/metrics` `caches.cors_entries` |
-| Health checker | probe bodies (`fetch_text`) | full text per probe, sequential | Low–Medium (huge upstream manifest) | RSS during a check cycle |
+| CORS cache | origin (`scheme://host`) → bool | unbounded, same profile | Low | `/admin/metrics` `caches.cors_entries` |
+| Health checker | health probe reads a single chunk (`do_http_check`); CORS probe (`fetch_text`) buffers the full manifest | one manifest per CORS probe, sequential | Low–Medium (huge upstream manifest) | RSS during a check cycle |
 | Askama renders | per-request guide HTML string | channels × slots × template size | Low | response Content-Length as proxy |
 | Idle baseline | tokio runtime + binary + pool | — | reference | `/admin/metrics` `rss_bytes` after boot, no traffic |
 
