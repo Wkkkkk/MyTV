@@ -6,7 +6,7 @@ use crate::{
     epg,
     model::{
         channel::{self, Channel, ChannelType},
-        playlist_item,
+        playlist_item, source,
     },
 };
 
@@ -70,19 +70,8 @@ pub(super) async fn build_guide_data(
             .collect()
     };
 
-    let all_source_ids: std::collections::HashSet<i64> =
-        sqlx::query_scalar::<_, i64>("SELECT DISTINCT channel_id FROM sources")
-            .fetch_all(pool)
-            .await?
-            .into_iter()
-            .collect();
-
-    let active_source_ids: std::collections::HashSet<i64> =
-        sqlx::query_scalar::<_, i64>("SELECT DISTINCT channel_id FROM sources WHERE is_active = 1")
-            .fetch_all(pool)
-            .await?
-            .into_iter()
-            .collect();
+    let all_source_ids = source::channel_ids_with_any_sources(pool).await?;
+    let active_source_ids = source::channel_ids_with_active_sources(pool).await?;
 
     #[derive(sqlx::FromRow)]
     struct SourceUrlRow {

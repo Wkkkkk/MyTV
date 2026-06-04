@@ -195,6 +195,28 @@ pub async fn update_health(
     Ok(())
 }
 
+/// Returns the set of channel IDs that have at least one source (active or not).
+pub async fn channel_ids_with_any_sources(
+    pool: &SqlitePool,
+) -> Result<std::collections::HashSet<i64>> {
+    sqlx::query_scalar::<_, i64>("SELECT DISTINCT channel_id FROM sources")
+        .fetch_all(pool)
+        .await
+        .map(|v| v.into_iter().collect())
+        .map_err(Into::into)
+}
+
+/// Returns the set of channel IDs that have at least one active source.
+pub async fn channel_ids_with_active_sources(
+    pool: &SqlitePool,
+) -> Result<std::collections::HashSet<i64>> {
+    sqlx::query_scalar::<_, i64>("SELECT DISTINCT channel_id FROM sources WHERE is_active = 1")
+        .fetch_all(pool)
+        .await
+        .map(|v| v.into_iter().collect())
+        .map_err(Into::into)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
