@@ -45,12 +45,17 @@ pub async fn fetch_hls_duration(client: &reqwest::Client, url: &str) -> Result<i
 /// Rewrites all non-comment URLs in an HLS manifest to route through /stream-proxy.
 /// When direct_segments is true, segment URLs (.ts, etc) are written as absolute URLs,
 /// but playlist URLs (.m3u8) still route through /stream-proxy.
+/// Also rewrites URI= attributes inside #EXT-X-MEDIA, #EXT-X-MAP, #EXT-X-I-FRAME-STREAM-INF,
+/// and #EXT-X-SESSION-DATA tags, which carry sub-playlist or segment URIs in comment lines.
 pub fn rewrite_hls_urls(content: &str, base_url: &str, direct_segments: bool) -> String {
     content
         .lines()
         .map(|line| {
-            if line.starts_with('#') || line.is_empty() {
+            if line.is_empty() {
                 return line.to_string();
+            }
+            if line.starts_with('#') {
+                return rewrite_tag_uri(line, base_url, direct_segments);
             }
             let abs = resolve_uri(line, base_url);
             let lower = abs.to_lowercase();
@@ -63,6 +68,41 @@ pub fn rewrite_hls_urls(content: &str, base_url: &str, direct_segments: bool) ->
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Rewrites the `URI="..."` attribute in HLS tags that carry sub-playlist or segment URIs.
+/// All other comment lines are returned unchanged.
+fn rewrite_tag_uri(line: &str, base_url: &str, direct_segments: bool) -> String {
+    if !line.starts_with("#EXT-X-MEDIA:")
+        && !line.starts_with("#EXT-X-MAP:")
+        && !line.starts_with("#EXT-X-I-FRAME-STREAM-INF:")
+        && !line.starts_with("#EXT-X-SESSION-DATA:")
+    {
+        return line.to_string();
+    }
+    let marker = "URI=\"";
+    let Some(u_start) = line.find(marker) else {
+        return line.to_string();
+    };
+    let val_start = u_start + marker.len();
+    let Some(val_len) = line[val_start..].find('"') else {
+        return line.to_string();
+    };
+    let uri = &line[val_start..val_start + val_len];
+    let abs = resolve_uri(uri, base_url);
+    let lower = abs.to_lowercase();
+    let path = lower.split('?').next().unwrap_or(&lower);
+    let replacement = if direct_segments && !path.ends_with(".m3u8") && !path.ends_with(".m3u") {
+        abs
+    } else {
+        format!("/stream-proxy?url={}", pct_encode(&abs))
+    };
+    format!(
+        "{}{}{}",
+        &line[..val_start],
+        replacement,
+        &line[val_start + val_len..]
+    )
 }
 
 /// Percent-encodes all non-unreserved characters (RFC 3986).
@@ -458,5 +498,67 @@ mod tests {
             !result,
             "probe_cors must return false (proxy default) for loopback URLs"
         );
+    }
+
+    // ── #EXT-X-MEDIA / #EXT-X-MAP URI= rewriting ────────────────────────────
+
+    #[test]
+    fn test_rewrite_hls_urls_ext_x_media_uri_relative() {
+        let manifest = "#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"aac\",NAME=\"English\",DEFAULT=YES,URI=\"media/audio.m3u8\"\n";
+        let result = rewrite_hls_urls(manifest, "https://cdn.example.com/live/master.m3u8", false);
+        assert!(
+            result.contains(
+                "/stream-proxy?url=https%3A%2F%2Fcdn.example.com%2Flive%2Fmedia%2Faudio.m3u8"
+            ),
+            "got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_rewrite_hls_urls_ext_x_media_uri_longtail_pattern() {
+        // Regression test: elephants_dream stream with separate audio renditions
+        let manifest = "#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"aac\",LANGUAGE=\"en\",NAME=\"English\",DEFAULT=YES,AUTOSELECT=YES,URI=\"media/b160000-english.m3u8\"\n";
+        let base =
+            "https://playertest.longtailvideo.com/adaptive/elephants_dream_v4/redundant.m3u8";
+        let result = rewrite_hls_urls(manifest, base, false);
+        assert!(
+            result.contains("/stream-proxy?url=https%3A%2F%2Fplayertest.longtailvideo.com%2Fadaptive%2Felephants_dream_v4%2Fmedia%2Fb160000-english.m3u8"),
+            "got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_rewrite_hls_urls_ext_x_map_uri() {
+        let manifest = "#EXTM3U\n#EXT-X-MAP:URI=\"init-0.mp4\"\n";
+        let result = rewrite_hls_urls(
+            manifest,
+            "https://cdn.example.com/live/playlist.m3u8",
+            false,
+        );
+        assert!(
+            result.contains("/stream-proxy?url=https%3A%2F%2Fcdn.example.com%2Flive%2Finit-0.mp4"),
+            "got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_rewrite_hls_urls_ext_x_map_uri_direct_mode() {
+        // With direct_segments=true, non-.m3u8 MAP URIs (init segments) go direct
+        let manifest = "#EXTM3U\n#EXT-X-MAP:URI=\"init-0.mp4\"\n";
+        let result = rewrite_hls_urls(manifest, "https://cdn.example.com/live/playlist.m3u8", true);
+        assert!(
+            result.contains("https://cdn.example.com/live/init-0.mp4"),
+            "got: {result}"
+        );
+        assert!(!result.contains("/stream-proxy"), "got: {result}");
+    }
+
+    #[test]
+    fn test_rewrite_hls_urls_other_comments_unchanged() {
+        // Non-URI tags must still pass through verbatim
+        let manifest =
+            "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-PROGRAM-DATE-TIME:2024-01-01T00:00:00Z\n";
+        let result = rewrite_hls_urls(manifest, "https://cdn.example.com/live/index.m3u8", false);
+        assert_eq!(result, manifest.trim_end_matches('\n'));
     }
 }
