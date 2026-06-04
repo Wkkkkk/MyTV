@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::routes::admin::AdminPlaylistItemRow;
 use crate::routes::{internal_error, render};
 use crate::{
-    media::{hls, resolver},
+    media,
     model::{playlist_item, playlist_item::NewPlaylistItem},
     AppState,
 };
@@ -39,19 +39,12 @@ pub async fn playlist_item_create(
     let url = form.url.trim().to_string();
     let mut duration_secs: i64 = form.duration_secs.trim().parse().unwrap_or(0);
     if duration_secs <= 0 {
-        if resolver::needs_resolution(&url) {
-            duration_secs = resolver::fetch_duration_secs(&url).await.map_err(|e| {
+        duration_secs = media::fetch_duration(&state.http_client, &url)
+            .await
+            .map_err(|e| {
                 tracing::warn!(url = %url, error = %e, "failed to auto-fetch duration");
                 StatusCode::UNPROCESSABLE_ENTITY
             })?;
-        } else {
-            duration_secs = hls::fetch_hls_duration(&state.http_client, &url)
-                .await
-                .map_err(|e| {
-                    tracing::warn!(url = %url, error = %e, "failed to fetch HLS duration");
-                    StatusCode::UNPROCESSABLE_ENTITY
-                })?;
-        }
     }
 
     let existing = playlist_item::list_for_channel(&state.pool, channel_id)
