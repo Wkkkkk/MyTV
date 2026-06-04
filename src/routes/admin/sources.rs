@@ -93,7 +93,7 @@ pub async fn source_test(
         .map_err(internal_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    crate::health::check_source(&state.pool, &state.http_client, &state.cors_cache, &src).await;
+    crate::health::probe_source(&state.pool, &state.http_client, &state.cors_cache, &src).await;
 
     let updated = source::get(&state.pool, source_id)
         .await

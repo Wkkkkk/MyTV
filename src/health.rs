@@ -75,6 +75,36 @@ async fn probe_all_playlist_cors(
     }
 }
 
+/// Probes a source's health and updates stats without touching `is_active`.
+/// Used by the admin Test button — respects the admin's manual enable/disable choice.
+pub async fn probe_source(
+    pool: &SqlitePool,
+    client: &reqwest::Client,
+    cors_cache: &CorsCache,
+    src: &Source,
+) {
+    let (ok, reason) = do_http_check(client, src).await;
+    let new_failures = if ok { 0 } else { src.consecutive_failures + 1 };
+
+    if let Err(e) = source::update_health(
+        pool,
+        src.id,
+        if ok { "ok" } else { "error" },
+        reason.as_deref(),
+        new_failures,
+        None, // never change is_active
+    )
+    .await
+    {
+        tracing::error!("health: failed to update source {}: {e}", src.id);
+        return;
+    }
+
+    if ok {
+        probe_and_cache_cors(client, cors_cache, &src.url).await;
+    }
+}
+
 pub async fn check_source(
     pool: &SqlitePool,
     client: &reqwest::Client,
@@ -281,5 +311,77 @@ mod tests {
         let result = probe_and_cache_cors(&client, &cache, "https://youtube.com/watch?v=abc").await;
         assert_eq!(result, None);
         assert!(cache.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn probe_source_does_not_reenable_disabled_source() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // A real server returning HTTP 200 — simulates a healthy but admin-disabled source.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 512];
+            let _ = conn.read(&mut buf).await;
+            conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+
+        let pool = crate::db::connect("sqlite::memory:").await.unwrap();
+        let ch = crate::model::channel::create(
+            &pool,
+            crate::model::channel::NewChannel {
+                name: "test".to_string(),
+                category: "test".to_string(),
+                logo_url: None,
+                channel_type: crate::model::channel::ChannelType::Live,
+                sort_order: 0,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap();
+        let src = crate::model::source::create(
+            &pool,
+            crate::model::source::NewSource {
+                channel_id: ch.id,
+                kind: crate::model::source::SourceKind::Hls,
+                url: format!("http://127.0.0.1:{}/stream.m3u8", port),
+                priority: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Admin manually disables the source.
+        crate::model::source::set_active(&pool, src.id, false)
+            .await
+            .unwrap();
+        let src = crate::model::source::get(&pool, src.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!src.is_active, "source must start disabled");
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let cors_cache: crate::CorsCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+
+        // probe_source is the manual Test-button path — must never change is_active.
+        probe_source(&pool, &client, &cors_cache, &src).await;
+
+        let updated = crate::model::source::get(&pool, src.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            !updated.is_active,
+            "probe_source must not re-enable a manually disabled source"
+        );
     }
 }
