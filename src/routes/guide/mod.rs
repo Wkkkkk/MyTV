@@ -17,35 +17,44 @@ use layout::TimeLabel;
 
 // ── template structs ───────────────────────────────────────────────────────
 
-#[derive(Template)]
-#[template(path = "guide.html")]
-struct GuidePageTemplate {
-    categories: Vec<String>,
-    active_category: String,
-    offset_hours: i64,
-    offset_prev: i64,
-    offset_next: i64,
-    window_label: String,
-    labels: Vec<TimeLabel>,
-    now_pct: Option<f64>,
-    rows: Vec<ChannelRow>,
-    channels_json: String,
+macro_rules! define_guide_template {
+    ($name:ident, $path:literal) => {
+        #[derive(Template)]
+        #[template(path = $path)]
+        struct $name {
+            categories: Vec<String>,
+            active_category: String,
+            offset_hours: i64,
+            offset_prev: i64,
+            offset_next: i64,
+            window_label: String,
+            labels: Vec<TimeLabel>,
+            now_pct: Option<f64>,
+            rows: Vec<ChannelRow>,
+            channels_json: String,
+        }
+
+        impl From<GuideData> for $name {
+            fn from(d: GuideData) -> Self {
+                Self {
+                    categories: d.categories,
+                    active_category: d.active_category,
+                    offset_hours: d.offset_hours,
+                    offset_prev: d.offset_prev,
+                    offset_next: d.offset_next,
+                    window_label: d.window_label,
+                    labels: d.labels,
+                    now_pct: d.now_pct,
+                    rows: d.rows,
+                    channels_json: d.channels_json,
+                }
+            }
+        }
+    };
 }
 
-#[derive(Template)]
-#[template(path = "partials/epg_content.html")]
-struct EpgContentTemplate {
-    categories: Vec<String>,
-    active_category: String,
-    offset_hours: i64,
-    offset_prev: i64,
-    offset_next: i64,
-    window_label: String,
-    labels: Vec<TimeLabel>,
-    now_pct: Option<f64>,
-    rows: Vec<ChannelRow>,
-    channels_json: String,
-}
+define_guide_template!(GuidePageTemplate, "guide.html");
+define_guide_template!(EpgContentTemplate, "partials/epg_content.html");
 
 // ── query params ───────────────────────────────────────────────────────────
 
@@ -59,25 +68,6 @@ fn parse_query(params: GuideQuery) -> (String, i64) {
     let category = params.category.unwrap_or_else(|| "all".to_string());
     let offset_hours = params.offset.unwrap_or(-2).clamp(-48, 48);
     (category, offset_hours)
-}
-
-/// Builds a guide template of type `$t` from a `GuideData`, moving every field across.
-macro_rules! guide_template {
-    ($t:ident, $d:expr) => {{
-        let d = $d;
-        $t {
-            categories: d.categories,
-            active_category: d.active_category,
-            offset_hours: d.offset_hours,
-            offset_prev: d.offset_prev,
-            offset_next: d.offset_next,
-            window_label: d.window_label,
-            labels: d.labels,
-            now_pct: d.now_pct,
-            rows: d.rows,
-            channels_json: d.channels_json,
-        }
-    }};
 }
 
 async fn load_data(state: &AppState, params: GuideQuery) -> Result<GuideData, StatusCode> {
@@ -105,7 +95,7 @@ pub async fn guide_page(
     Query(params): Query<GuideQuery>,
 ) -> Result<Html<String>, StatusCode> {
     let data = load_data(&state, params).await?;
-    render_or_500(guide_template!(GuidePageTemplate, data))
+    render_or_500(GuidePageTemplate::from(data))
 }
 
 pub async fn guide_partial(
@@ -113,5 +103,5 @@ pub async fn guide_partial(
     Query(params): Query<GuideQuery>,
 ) -> Result<Html<String>, StatusCode> {
     let data = load_data(&state, params).await?;
-    render_or_500(guide_template!(EpgContentTemplate, data))
+    render_or_500(EpgContentTemplate::from(data))
 }
