@@ -121,22 +121,26 @@ Each leaf: *what to measure / tool / hypothesis*.
 
 Fill local from `cargo bench` + scripts against a release build with seed data. Fill live after the metrics endpoint is deployed. Re-record after any perf-relevant change.
 
-| # | Metric | How | Local (2026-06-04) | Live (date: ) |
+| # | Metric | How | Local (2026-06-04) | Live (2026-06-04) |
 |---|---|---|---|---|
-| 1 | Idle RSS | `/admin/metrics` `rss_bytes` after boot | — (None on macOS) | — |
-| 2 | Guide p50 / p99 @ 5 conns, 30s | `load-guide.sh` | 1.00 ms / 1.69 ms [^curl] | — |
-| 3 | Guide partial p50 / p99 | `load-guide.sh` | 0.92 ms / 1.81 ms [^curl] | — |
-| 4 | Tune (live ch) mean ± σ | `tune-bench.sh 1` | 0.80 ms ± 0.14 ms [^curl] | — |
-| 5 | Tune (VOD ch) mean ± σ | `tune-bench.sh 4` | 0.91 ms ± 0.21 ms [^curl] | — |
+| 1 | Idle RSS | `/admin/metrics` `rss_bytes` after boot | — (None on macOS) | — (pending) |
+| 2 | Guide p50 / p99 @ 5 conns, 30s | `load-guide.sh` | 1.00 ms / 1.69 ms [^curl] | 65 ms / 123 ms [^live] |
+| 3 | Guide partial p50 / p99 | `load-guide.sh` | 0.92 ms / 1.81 ms [^curl] | 54 ms / 84 ms [^live] |
+| 4 | Tune (live ch) mean ± σ | `tune-bench.sh 1` | 0.80 ms ± 0.14 ms [^curl] | 52.2 ms ± 2.6 ms [^tune503] |
+| 5 | Tune (VOD ch) mean ± σ | `tune-bench.sh 4` | 0.91 ms ± 0.21 ms [^curl] | 52.2 ms ± 2.2 ms [^live] |
 | 6 | `epg::vod_schedule` 200 items / 4h | `cargo bench` | 850 ns | n/a |
 | 7 | `rewrite_hls_urls` 2000 segments | `cargo bench` | 2.72 ms | n/a |
 | 8 | `parse_m3u` 10k channels | `cargo bench` | 3.78 ms | n/a |
 | 9 | `budget::status_for_url` cache hit | `cargo bench` | 62.4 ns | n/a |
-| 10 | Cold start (stop → first /health 200) | curl timing | n/a | — |
-| 11 | Proxy manifest overhead (proxied − direct TTFB) | curl timing vs real upstream | n/a | — |
-| 12 | yt-dlp resolve wall time + peak child RSS | `time yt-dlp -g` + `ps` | — [^ytdlp] | — |
+| 10 | Cold start (stop → first /health 200) | curl timing | n/a | 1.80 s (warm: ~65 ms) |
+| 11 | Proxy manifest overhead (proxied − direct TTFB) | curl timing vs real upstream | n/a | ≈ +80 ms (280 vs 201 ms median, n=7) |
+| 12 | yt-dlp resolve wall time + peak child RSS | `time yt-dlp -g` + `ps` | — [^ytdlp] | — (no yt-dlp-backed channels configured) |
 
 Local numbers from macOS arm64, release build; tune/guide latencies measured via `curl -w time_total` (25 sequential runs) against localhost with seed data — `oha`/`hyperfine` were not available, so p99 is the sample maximum and "mean ± σ" uses curl process overhead (~1–2 ms round-trip to localhost rather than the ~5–10 ms noted for hyperfine); bench rows 6–9 use criterion slope point estimates from `target/criterion/*/new/estimates.json`; RSS is Linux-only and not measurable locally.
 
+Live numbers measured 2026-06-04 from a client in Stockholm against the AMS instance over the public internet — they include ~50 ms client↔server RTT, which dominates every row (app-side compute is sub-millisecond per the Local column).
+
 [^curl]: `oha`/`hyperfine` not installed; measured with 25 sequential `curl -w %{time_total}` calls; p99 is sample max (n=24 after dropping first warmup); values include curl process overhead.
 [^ytdlp]: `yt-dlp -g` returned HTTP 400 from YouTube (no valid session locally); wall time and RSS not measured.
+[^live]: 20–25 sequential `curl -w %{time_total}` samples against kunstv.fly.dev; p99 is sample max.
+[^tune503]: both live channels' upstream sources were down (auto-disabled) at measurement time, so this row records the 503 failure path, not a successful tune.
