@@ -322,6 +322,7 @@ pub async fn stream_proxy(
         let guard = crate::metrics::ActiveStreamGuard::new(state.metrics.clone());
         let metrics = state.metrics.clone();
         let counted = upstream.bytes_stream().inspect(move |chunk| {
+            // Referencing guard makes the move-closure capture it for the stream's lifetime.
             let _hold = &guard;
             if let Ok(c) = chunk {
                 metrics
