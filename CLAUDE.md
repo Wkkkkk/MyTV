@@ -42,15 +42,20 @@ src/
   epg.rs          # EPG time-window calculations
   budget.rs       # CORS budget badge computation (⚡/☁) for guide display
   ssrf.rs         # SSRF URL validation and 60 s hostname cache
+  metrics.rs      # latency histograms, proxy counters, track_metrics middleware
   model/          # Channel, Source, PlaylistItem structs + DB queries
   routes/
-    player.rs     # /channel/:id/tune and /channel/:id/next
-    guide.rs      # /guide, /guide/partial
+    player.rs     # /channel/:id/tune, /channel/:id/next, /stream-proxy
+    guide/        # /guide, /guide/partial — layout, badges, data aggregation
     health.rs     # /health
-    admin/        # /admin/** — channel/source/playlist CRUD, discovery
-  media/          # yt-dlp resolution, HLS stream proxy
+    admin/        # /admin/** — channel/source/playlist CRUD, discovery, /admin/metrics
+  media/          # yt-dlp resolution, HLS manifest helpers, M3U parsing
+benches/
+  hot_paths.rs    # criterion benches (epg, hls rewrite, m3u parse, budget)
+scripts/perf/     # load-test scripts + profiling recipes
 migrations/       # 001_initial.sql, 002_source_health.sql, 003_indexes.sql
 templates/        # Askama .html files mirroring routes structure
+docs/performance/ # FRAMEWORK.md — perf mind map + baseline table
 tests/
   http.rs         # integration tests (tower::ServiceExt::oneshot)
   fixtures/
