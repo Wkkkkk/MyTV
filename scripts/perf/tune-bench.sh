@@ -6,4 +6,4 @@ command -v hyperfine >/dev/null || { echo "hyperfine not found: brew install hyp
 CHANNEL_ID="${1:-1}"
 BASE_URL="${2:-http://localhost:3000}"
 
-hyperfine --warmup 3 --runs 20 "curl -sf $BASE_URL/channel/$CHANNEL_ID/tune"
+hyperfine --warmup 3 --runs 20 "curl -sf '${BASE_URL}/channel/${CHANNEL_ID}/tune'"

@@ -8,7 +8,7 @@ Companion tooling for `docs/performance/FRAMEWORK.md`. All load tests run agains
 brew install oha hyperfine        # load generator + CLI benchmarker
 
 # Seeded local server on :3000:
-DATABASE_URL=sqlite:perf.db?mode=rwc cargo run --release   # creates db + runs migrations, then Ctrl-C
+DATABASE_URL=sqlite:perf.db cargo run --release   # creates db + runs migrations, then Ctrl-C
 sqlite3 perf.db < tests/fixtures/seed.sql
 DATABASE_URL=sqlite:perf.db cargo run --release
 ```
@@ -26,9 +26,9 @@ Note: seed channel 1 = live OK, 3 = has fallback, 4 = VOD with items (see CLAUDE
 | Local route histograms | `curl -u user:admin http://localhost:3000/admin/metrics` |
 | Cold start | `fly machine stop <id> --app kunstv`, then `curl -w '@-' -o /dev/null -s https://kunstv.fly.dev/health <<< 'total=%{time_total}\n'` |
 | Proxy manifest overhead | time the same manifest URL direct vs through `/stream-proxy?url=<pct-encoded>` — run each a few times, compare medians. Keep rates low; these are third-party upstreams. |
-| CPU flamegraph | `cargo install flamegraph`, then `sudo cargo flamegraph --release -- ` while driving load with oha (macOS needs sudo for dtrace) |
+| CPU flamegraph | `cargo install flamegraph`, then `cargo flamegraph --root --release` while driving load with oha (`--root` runs dtrace via sudo on macOS) |
 | Heap deep-dive (macOS) | Instruments → Allocations against `target/release/mytv` |
-| yt-dlp cost in isolation | `time yt-dlp -g '<youtube-url>'` and watch `ps -o rss= -p <pid>` |
+| yt-dlp cost in isolation | `time yt-dlp -g '<youtube-url>'`; in a separate terminal, watch `ps -o rss= -p <pid>` |
 | Fly-side view | `fly machine status --app kunstv`, Fly dashboard → Metrics (RSS, CPU steal) |
 
 ## Why no offline proxy load test?
