@@ -1,0 +1,247 @@
+use quick_xml::events::{BytesStart, BytesText, Event};
+use quick_xml::{Reader, Writer};
+use std::io::Cursor;
+
+/// Rewrites a DASH MPD manifest:
+/// - Relative <BaseURL> text → resolved to absolute (always, even when direct=true)
+/// - Absolute <BaseURL> text → left unchanged
+/// - Absolute <SegmentTemplate media/initialization> attrs → wrapped in /stream-proxy (unless direct=true)
+/// - Absolute <SegmentURL media> attrs → wrapped in /stream-proxy (unless direct=true)
+/// - Relative segment URLs → left unchanged (resolve against BaseURL on CDN)
+pub fn rewrite_mpd_urls(xml: &str, base_url: &str, direct: bool) -> String {
+    let mut reader = Reader::from_str(xml);
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+    let mut in_base_url = false;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => match e.local_name().as_ref() {
+                b"BaseURL" => {
+                    in_base_url = true;
+                    writer.write_event(Event::Start(e)).unwrap();
+                }
+                b"SegmentTemplate" if !direct => {
+                    let rewritten = rewrite_url_attrs(e, &[b"media", b"initialization"]);
+                    writer.write_event(Event::Start(rewritten)).unwrap();
+                }
+                _ => {
+                    writer.write_event(Event::Start(e)).unwrap();
+                }
+            },
+            Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"SegmentTemplate" if !direct => {
+                    let rewritten = rewrite_url_attrs(e, &[b"media", b"initialization"]);
+                    writer.write_event(Event::Empty(rewritten)).unwrap();
+                }
+                b"SegmentURL" if !direct => {
+                    let rewritten = rewrite_url_attrs(e, &[b"media"]);
+                    writer.write_event(Event::Empty(rewritten)).unwrap();
+                }
+                _ => {
+                    writer.write_event(Event::Empty(e)).unwrap();
+                }
+            },
+            Ok(Event::Text(e)) => {
+                if in_base_url {
+                    let text = e.decode().unwrap_or_default();
+                    let trimmed = text.trim();
+                    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                        // Absolute BaseURL — leave unchanged
+                        writer.write_event(Event::Text(e)).unwrap();
+                    } else {
+                        // Relative BaseURL — resolve to absolute
+                        let resolved = resolve_relative_url(trimmed, base_url);
+                        writer
+                            .write_event(Event::Text(BytesText::new(&resolved)))
+                            .unwrap();
+                    }
+                } else {
+                    writer.write_event(Event::Text(e)).unwrap();
+                }
+            }
+            Ok(Event::End(e)) => {
+                if e.local_name().as_ref() == b"BaseURL" {
+                    in_base_url = false;
+                }
+                writer.write_event(Event::End(e)).unwrap();
+            }
+            Ok(Event::Eof) => break,
+            Ok(e) => {
+                writer.write_event(e).unwrap();
+            }
+            Err(_) => break,
+        }
+    }
+
+    String::from_utf8(writer.into_inner().into_inner()).unwrap_or_else(|_| xml.to_string())
+}
+
+/// Like `pct_encode` but preserves `$` so DASH template variables
+/// (`$Number$`, `$RepresentationID$`, etc.) survive proxy URL wrapping.
+fn pct_encode_template(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'$' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{:02X}", b),
+        })
+        .collect()
+}
+
+/// Resolves a URL against a base URL.
+/// Absolute URLs are returned unchanged.
+/// Relative URLs (including `./`) are combined with the base URL's directory.
+fn resolve_relative_url(url: &str, base_url: &str) -> String {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        return url.to_string();
+    }
+    if url.starts_with('/') {
+        let after_scheme = base_url.find("://").map(|i| i + 3).unwrap_or(0);
+        let host_len = base_url[after_scheme..]
+            .find('/')
+            .unwrap_or(base_url[after_scheme..].len());
+        let origin = &base_url[..after_scheme + host_len];
+        return format!("{}{}", origin, url);
+    }
+    let base_dir = base_url
+        .rsplit_once('/')
+        .map(|(b, _)| b)
+        .unwrap_or(base_url);
+    let stripped = url.trim_start_matches("./");
+    if stripped.is_empty() {
+        format!("{}/", base_dir)
+    } else {
+        format!("{}/{}", base_dir, stripped)
+    }
+}
+
+/// Rewrites named URL attributes on a start/empty element.
+/// Absolute HTTP(S) URLs are wrapped in `/stream-proxy?url=…` using
+/// `pct_encode_template` (which preserves `$` for DASH template variables).
+/// Relative URLs and non-URL attributes are passed through unchanged.
+fn rewrite_url_attrs(e: BytesStart<'_>, url_attr_names: &[&[u8]]) -> BytesStart<'static> {
+    let name = std::str::from_utf8(e.name().as_ref())
+        .unwrap_or_default()
+        .to_owned();
+    let mut new = BytesStart::new(name);
+    for attr in e.attributes().flatten() {
+        let key = attr.key.as_ref().to_owned();
+        let val = attr
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+            .unwrap_or_default()
+            .into_owned();
+        let new_val = if url_attr_names.contains(&key.as_slice())
+            && (val.starts_with("http://") || val.starts_with("https://"))
+        {
+            format!("/stream-proxy?url={}", pct_encode_template(&val))
+        } else {
+            val
+        };
+        new.push_attribute((key.as_slice(), new_val.as_bytes()));
+    }
+    new
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_base_url_resolved_to_absolute() {
+        let xml = r#"<?xml version="1.0"?><MPD><BaseURL>./</BaseURL></MPD>"#;
+        let out = rewrite_mpd_urls(xml, "https://origin.example.com/path/stream.mpd", false);
+        assert!(
+            out.contains("<BaseURL>https://origin.example.com/path/</BaseURL>"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn absolute_base_url_left_unchanged() {
+        let xml = r#"<?xml version="1.0"?><MPD><BaseURL>https://cdn.example.com/</BaseURL></MPD>"#;
+        let out = rewrite_mpd_urls(xml, "https://origin.example.com/stream.mpd", false);
+        assert!(
+            out.contains("<BaseURL>https://cdn.example.com/</BaseURL>"),
+            "got: {out}"
+        );
+        assert!(
+            !out.contains("/stream-proxy"),
+            "absolute BaseURL must not be proxied"
+        );
+    }
+
+    #[test]
+    fn rewrite_segment_template_media_absolute() {
+        let xml = r#"<?xml version="1.0"?><MPD><SegmentTemplate media="https://cdn.example.com/video/$RepresentationID$/seg-$Number$.m4s" initialization="https://cdn.example.com/video/$RepresentationID$/init.mp4"/></MPD>"#;
+        let out = rewrite_mpd_urls(xml, "https://origin.example.com/stream.mpd", false);
+        assert!(
+            out.contains("media=\"/stream-proxy?url=https%3A%2F%2Fcdn.example.com%2Fvideo%2F$RepresentationID$%2Fseg-$Number$.m4s\""),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("initialization=\"/stream-proxy?url=https%3A%2F%2Fcdn.example.com%2Fvideo%2F$RepresentationID$%2Finit.mp4\""),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn relative_segment_template_left_unchanged() {
+        let xml = r#"<?xml version="1.0"?><MPD><SegmentTemplate media="video/$RepresentationID$/seg-$Number$.m4s"/></MPD>"#;
+        let out = rewrite_mpd_urls(xml, "https://origin.example.com/stream.mpd", false);
+        assert!(
+            out.contains(r#"media="video/$RepresentationID$/seg-$Number$.m4s""#),
+            "got: {out}"
+        );
+        assert!(
+            !out.contains("/stream-proxy"),
+            "relative template must not be proxied"
+        );
+    }
+
+    #[test]
+    fn rewrite_segment_url_media_absolute() {
+        let xml = r#"<?xml version="1.0"?><MPD><SegmentList><SegmentURL media="https://cdn.example.com/video/seg-1.m4s"/></SegmentList></MPD>"#;
+        let out = rewrite_mpd_urls(xml, "https://origin.example.com/stream.mpd", false);
+        assert!(
+            out.contains(
+                "media=\"/stream-proxy?url=https%3A%2F%2Fcdn.example.com%2Fvideo%2Fseg-1.m4s\""
+            ),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn direct_mode_does_not_proxy_segments_but_still_resolves_base_url() {
+        let xml = r#"<?xml version="1.0"?><MPD><BaseURL>./</BaseURL><SegmentTemplate media="https://cdn.example.com/seg-$Number$.m4s"/></MPD>"#;
+        let out = rewrite_mpd_urls(xml, "https://origin.example.com/path/stream.mpd", true);
+        assert!(
+            out.contains("<BaseURL>https://origin.example.com/path/</BaseURL>"),
+            "got: {out}"
+        );
+        assert!(
+            !out.contains("/stream-proxy"),
+            "direct mode must not proxy segment URLs"
+        );
+    }
+
+    #[test]
+    fn bbb_fixture_resolves_relative_base_url() {
+        let xml = include_str!("../../tests/fixtures/bbb_30fps.mpd");
+        let out = rewrite_mpd_urls(
+            xml,
+            "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd",
+            false,
+        );
+        assert!(
+            out.contains("<BaseURL>https://dash.akamaized.net/akamai/bbb_30fps/</BaseURL>"),
+            "got BaseURL section: {}",
+            &out[..out.find("</BaseURL>").unwrap_or(200) + 10]
+        );
+        assert!(
+            !out.contains("/stream-proxy?url="),
+            "relative templates must not be proxied"
+        );
+        assert!(out.contains("<MPD"));
+    }
+}

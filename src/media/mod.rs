@@ -1,5 +1,6 @@
 pub mod hls;
 pub mod m3u;
+pub mod mpd;
 pub mod resolver;
 
 /// Fetches the duration (seconds) for a VOD URL.
