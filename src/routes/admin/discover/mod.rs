@@ -120,6 +120,15 @@ pub struct AddForm {
     pub new_channel_type: Option<String>,
 }
 
+// ── helpers ───────────────────────────────────────────────────────────────
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 // ── handlers ──────────────────────────────────────────────────────────────
 
 pub async fn discover_page(State(state): State<AppState>) -> Result<Html<String>, StatusCode> {
@@ -261,7 +270,7 @@ pub async fn discover_youtube_search(
                 tracing::error!("YouTube API error: {e}");
                 return Html(format!(
                     "<p class=\"empty-state\" style=\"color:#f77\">YouTube search failed: {}.</p>",
-                    e
+                    html_escape(&e.to_string())
                 ));
             }
         };
