@@ -18,10 +18,12 @@ flowchart LR
     pub --> r5["GET /channel/:id/tune"]
     pub --> r6["GET /channel/:id/next"]
     pub --> r7["GET /stream-proxy"]
+    pub --> r8["GET /favicon.svg\nGET /manifest.json\nGET /favicon.ico"]
 
+    adm --> a0["GET /admin"]
     adm --> a1["GET+POST /admin/channels\nGET /admin/channels/new\nGET+POST /admin/channels/:id\nGET /admin/channels/:id/edit\nPOST /admin/channels/:id/delete"]
     adm --> a2["POST /admin/channels/:id/sources\nPOST /admin/sources/:id/delete\nPOST /admin/sources/:id/toggle\nPOST /admin/sources/:id/test"]
-    adm --> a3["POST /admin/channels/:id/playlist\nPOST /admin/playlist/:id/delete"]
+    adm --> a3["POST /admin/channels/:id/playlist\nPOST /admin/playlist/:id/delete\nPOST /admin/playlist/:id/test"]
     adm --> a4["GET /admin/discover\nPOST /admin/discover/add-form\nPOST /admin/discover/add\nPOST /admin/discover/m3u/search\nPOST /admin/discover/youtube/search\nPOST /admin/discover/manual/resolve"]
 ```
 

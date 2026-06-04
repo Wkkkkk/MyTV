@@ -6,7 +6,7 @@ A background Tokio task checks every source URL every 15 minutes and auto-disabl
 
 ```mermaid
 flowchart TD
-    start(["health::start(pool, client)"]) --> spawn[Spawn detached Tokio task]
+    start(["health::start(HealthClients)"]) --> spawn[Spawn detached Tokio task]
     spawn --> t1[Consume first tick\nno check at startup]
     t1 --> wait["Wait 15 min\nMissedTickBehavior::Skip"]
     wait --> fetch["list_all sources"]
@@ -24,8 +24,10 @@ flowchart TD
     reenable --> db
     inc --> db
     disable --> db
-    db --> loop
-    loop -->|all done| wait
+    db -->|ok| cors["probe_and_cache_cors\n(skip if not ok)"]
+    cors --> loop
+    loop -->|all done| playlist["probe_all_playlist_cors\ndedupe by CDN host"]
+    playlist --> wait
 ```
 
 ## Source State Machine
@@ -42,7 +44,13 @@ stateDiagram-v2
 
 ## Notes
 
+**`health::start` takes `HealthClients`.** The struct bundles `pool`, `http_client`, and `cors_cache` so the checker can update both source health and the CORS badge cache in one pass.
+
 **Auto-re-enable.** When a disabled source passes a health check, `process_result` returns `HealthAction::Reenable` and `update_health` sets `is_active = 1`. The source returns to active rotation immediately on the next check cycle — no cooldown period. The `HealthAction` enum (private to `health.rs`) makes the three outcomes — `Disable`, `Reenable`, `None` — mutually exclusive.
+
+**CORS probing.** After a source HTTP check succeeds, `probe_and_cache_cors` sends a CORS preflight to the CDN and caches the result (keyed by host) in the shared `CorsCache`. After all sources are checked, `probe_all_playlist_cors` does the same for VOD playlist item URLs, deduping by CDN host so each CDN is probed at most once per cycle. Non-HTTPS and resolution-needed (YouTube/Twitch) URLs are skipped.
+
+**`probe_source` vs `check_source`.** The admin Test button calls `probe_source`, which runs the same HTTP check and updates `last_status`/`consecutive_failures` but passes `is_active = None` to `update_health` — it never changes whether a source is enabled. `check_source` (used by the background loop) is the only path that can auto-disable or auto-re-enable sources.
 
 **Why `MissedTickBehavior::Skip`?** If a full check round (many sources all timing out at 5s each) takes longer than 15 minutes, any missed ticks are dropped rather than queued. This prevents a backlog of back-to-back check rounds after a slow cycle.
 
