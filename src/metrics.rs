@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
-/// Upper bounds in ms for latency buckets; a sixth bucket catches everything above.
-pub const BUCKET_BOUNDS_MS: [u64; 5] = [1, 10, 50, 250, 1000];
+/// Upper bounds in µs for latency buckets (1ms, 10ms, 50ms, 250ms, 1s); a sixth bucket catches everything above.
+pub const BUCKET_BOUNDS_MICROS: [u64; 5] = [1_000, 10_000, 50_000, 250_000, 1_000_000];
 
 #[derive(Default)]
 struct RouteStats {
@@ -42,16 +42,17 @@ impl Metrics {
             Some(s) => s,
             None => {
                 let mut routes = self.routes.write().unwrap();
+                // or_default() makes concurrent first-inserts converge on one Arc, so the
+                // read-then-write upgrade can't lose recordings.
                 routes.entry(route.to_string()).or_default().clone()
             }
         };
         stats.count.fetch_add(1, Ordering::Relaxed);
         stats.total_micros.fetch_add(micros, Ordering::Relaxed);
-        let ms = micros / 1000;
-        let idx = BUCKET_BOUNDS_MS
+        let idx = BUCKET_BOUNDS_MICROS
             .iter()
-            .position(|&bound| ms <= bound)
-            .unwrap_or(BUCKET_BOUNDS_MS.len());
+            .position(|&bound| micros <= bound)
+            .unwrap_or(BUCKET_BOUNDS_MICROS.len());
         stats.buckets[idx].fetch_add(1, Ordering::Relaxed);
     }
 
@@ -110,13 +111,26 @@ mod tests {
     fn record_places_latency_in_correct_buckets() {
         let m = Metrics::new();
         m.record("/guide", 500); // 0.5ms → bucket 0
+        m.record("/guide", 1_500); // 1.5ms → bucket 1
         m.record("/guide", 30_000); // 30ms → bucket 2
         m.record("/guide", 2_000_000); // 2s → overflow bucket 5
         let snap = m.route_snapshots();
         let g = &snap["/guide"];
-        assert_eq!(g.count, 3);
-        assert_eq!(g.buckets, [1, 0, 1, 0, 0, 1]);
-        assert_eq!(g.total_micros, 2_030_500);
+        assert_eq!(g.count, 4);
+        assert_eq!(g.buckets, [1, 1, 1, 0, 0, 1]);
+        assert_eq!(g.total_micros, 2_032_000);
+    }
+
+    #[test]
+    fn record_bucket_boundaries_are_inclusive() {
+        let m = Metrics::new();
+        m.record("/x", 0); // → bucket 0
+        m.record("/x", 1_000); // exactly 1ms → bucket 0
+        m.record("/x", 100_000); // 100ms → bucket 3
+        m.record("/x", 1_000_000); // exactly 1s → bucket 4
+        m.record("/x", 1_000_001); // just over 1s → bucket 5
+        let snap = m.route_snapshots();
+        assert_eq!(snap["/x"].buckets, [2, 0, 0, 1, 1, 1]);
     }
 
     #[test]
