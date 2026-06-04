@@ -361,7 +361,7 @@ mod tests {
                 name: "Live Test".into(),
                 category: "test".into(),
                 logo_url: None,
-                channel_type: "live".into(),
+                channel_type: channel::ChannelType::Live,
                 sort_order: 0,
                 loop_anchor: None,
             },
@@ -377,7 +377,7 @@ mod tests {
                 name: "VOD Test".into(),
                 category: "test".into(),
                 logo_url: None,
-                channel_type: "vod_loop".into(),
+                channel_type: channel::ChannelType::VodLoop,
                 sort_order: 0,
                 loop_anchor: Some(DateTime::from_timestamp(anchor_secs, 0).unwrap()),
             },
@@ -397,7 +397,7 @@ mod tests {
             &state.pool,
             source::NewSource {
                 channel_id: ch.id,
-                kind: "hls".into(),
+                kind: source::SourceKind::Hls,
                 url: "https://primary.example.com/stream.m3u8".into(),
                 priority: 1,
             },
@@ -419,7 +419,7 @@ mod tests {
             &state.pool,
             source::NewSource {
                 channel_id: ch.id,
-                kind: "youtube_live".into(),
+                kind: source::SourceKind::YoutubeLive,
                 url: "https://www.youtube.com/watch?v=FAIL_YTDLP_NOT_INSTALLED".into(),
                 priority: 1,
             },
@@ -431,7 +431,7 @@ mod tests {
             &state.pool,
             source::NewSource {
                 channel_id: ch.id,
-                kind: "hls".into(),
+                kind: source::SourceKind::Hls,
                 url: "https://backup.example.com/stream.m3u8".into(),
                 priority: 2,
             },
@@ -533,7 +533,7 @@ mod tests {
             &state.pool,
             source::NewSource {
                 channel_id: ch.id,
-                kind: "hls".into(),
+                kind: source::SourceKind::Hls,
                 url: "https://primary.example.com/stream.m3u8".into(),
                 priority: 1,
             },
@@ -545,7 +545,7 @@ mod tests {
             &state.pool,
             source::NewSource {
                 channel_id: ch.id,
-                kind: "hls".into(),
+                kind: source::SourceKind::Hls,
                 url: "https://backup.example.com/stream.m3u8".into(),
                 priority: 2,
             },
@@ -568,7 +568,7 @@ mod tests {
             &state.pool,
             source::NewSource {
                 channel_id: ch.id,
-                kind: "hls".into(),
+                kind: source::SourceKind::Hls,
                 url: "https://primary.example.com/stream.m3u8".into(),
                 priority: 1,
             },
@@ -666,7 +666,7 @@ mod tests {
             &state.pool,
             source::NewSource {
                 channel_id: ch.id,
-                kind: "hls".into(),
+                kind: source::SourceKind::Hls,
                 url: "https://primary.example.com/stream.m3u8".into(),
                 priority: 1,
             },

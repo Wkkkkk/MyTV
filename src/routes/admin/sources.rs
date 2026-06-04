@@ -32,9 +32,10 @@ pub async fn source_create(
     Path(channel_id): Path<i64>,
     axum::extract::Form(form): axum::extract::Form<SourceForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    if !["hls", "youtube_live", "iptv"].contains(&form.kind.as_str()) {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
+    let kind = form
+        .kind
+        .parse::<source::SourceKind>()
+        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
     if form.url.trim().is_empty() {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
@@ -43,7 +44,7 @@ pub async fn source_create(
         &state.pool,
         source::NewSource {
             channel_id,
-            kind: form.kind.clone(),
+            kind,
             url: form.url.trim().to_string(),
             priority,
         },

@@ -109,9 +109,10 @@ pub async fn channel_create(
     State(state): State<AppState>,
     Form(form): Form<ChannelForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    if !["live", "vod_loop"].contains(&form.channel_type.as_str()) {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
+    let channel_type = form
+        .channel_type
+        .parse::<channel::ChannelType>()
+        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
     if form.name.trim().is_empty() || form.category.trim().is_empty() {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
@@ -121,7 +122,7 @@ pub async fn channel_create(
     } else {
         Some(form.logo_url.trim().to_string())
     };
-    let loop_anchor = if form.channel_type.as_str() == "vod_loop" {
+    let loop_anchor = if channel_type == channel::ChannelType::VodLoop {
         parse_loop_anchor(&form.loop_anchor).or_else(|| Some(Utc::now()))
     } else {
         None
@@ -133,7 +134,7 @@ pub async fn channel_create(
             name: form.name.trim().to_string(),
             category: form.category.trim().to_string(),
             logo_url,
-            channel_type: form.channel_type.clone(),
+            channel_type,
             sort_order,
             loop_anchor,
         },
@@ -173,9 +174,10 @@ pub async fn channel_update(
     Path(id): Path<i64>,
     Form(form): Form<ChannelForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    if !["live", "vod_loop"].contains(&form.channel_type.as_str()) {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
+    let channel_type = form
+        .channel_type
+        .parse::<channel::ChannelType>()
+        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
     if form.name.trim().is_empty() || form.category.trim().is_empty() {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
@@ -190,7 +192,7 @@ pub async fn channel_update(
     } else {
         Some(form.logo_url.trim().to_string())
     };
-    let loop_anchor = if form.channel_type.as_str() == "vod_loop" {
+    let loop_anchor = if channel_type == channel::ChannelType::VodLoop {
         parse_loop_anchor(&form.loop_anchor).or(existing.loop_anchor)
     } else {
         None
@@ -203,7 +205,7 @@ pub async fn channel_update(
             name: form.name.trim().to_string(),
             category: form.category.trim().to_string(),
             logo_url,
-            channel_type: form.channel_type.clone(),
+            channel_type,
             sort_order,
             loop_anchor,
         },

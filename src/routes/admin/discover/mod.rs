@@ -13,7 +13,12 @@ use axum::{
 use serde::Deserialize;
 
 use crate::routes::{internal_error, render};
-use crate::{media::m3u as media_m3u, media::resolver, model::channel, AppState};
+use crate::{
+    media::m3u as media_m3u,
+    media::resolver,
+    model::{channel, source},
+    AppState,
+};
 
 use m3u::M3uResultRow;
 use youtube::YoutubeResultRow;
@@ -224,7 +229,7 @@ pub async fn discover_m3u_search(
             group: ch.group.clone(),
             country: ch.country.clone(),
             url: ch.url.clone(),
-            source_kind: detect_source_kind(&ch.url).to_string(),
+            source_kind: source::SourceKind::detect(&ch.url).as_str().to_string(),
             form_id: i,
         })
         .collect();
@@ -307,39 +312,8 @@ pub async fn discover_manual_resolve(
         group: String::new(),
         is_live,
         duration_secs,
-        source_kind: detect_source_kind(&form.url).to_string(),
+        source_kind: source::SourceKind::detect(&form.url).as_str().to_string(),
         show_duration_input: !is_live && duration_secs == 0,
         channels,
     })
-}
-
-pub fn detect_source_kind(url: &str) -> &'static str {
-    if url.contains("youtube.com") || url.contains("youtu.be") {
-        "youtube_live"
-    } else if url.contains(".m3u8") {
-        "hls"
-    } else {
-        "iptv"
-    }
-}
-
-// ── tests ──────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_detect_source_kind() {
-        assert_eq!(
-            detect_source_kind("https://www.youtube.com/watch?v=abc"),
-            "youtube_live"
-        );
-        assert_eq!(detect_source_kind("https://youtu.be/abc"), "youtube_live");
-        assert_eq!(detect_source_kind("https://example.com/stream.m3u8"), "hls");
-        assert_eq!(
-            detect_source_kind("https://iptv.example.com/channel/1"),
-            "iptv"
-        );
-    }
 }

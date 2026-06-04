@@ -1,11 +1,8 @@
 use axum::http::StatusCode;
 use chrono::Utc;
 
+use crate::model::{channel, playlist_item, source};
 use crate::routes::internal_error;
-use crate::{
-    media::{hls, resolver},
-    model::{channel, playlist_item, source},
-};
 
 pub struct DiscoverAddParams<'a> {
     pub pool: &'a sqlx::SqlitePool,
@@ -36,18 +33,18 @@ pub async fn do_discover_add(params: DiscoverAddParams<'_>) -> Result<i64, Statu
     if url.is_empty() || (!url.starts_with("http://") && !url.starts_with("https://")) {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
-    if !["hls", "youtube_live", "iptv"].contains(&source_kind) {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
+    let source_kind = source_kind
+        .parse::<source::SourceKind>()
+        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
 
     let channel_id = if channel_choice == "new" {
         if new_name.trim().is_empty() {
             return Err(StatusCode::UNPROCESSABLE_ENTITY);
         }
-        if !["live", "vod_loop"].contains(&new_channel_type) {
-            return Err(StatusCode::UNPROCESSABLE_ENTITY);
-        }
-        let loop_anchor = if new_channel_type == "vod_loop" {
+        let new_channel_type = new_channel_type
+            .parse::<channel::ChannelType>()
+            .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
+        let loop_anchor = if new_channel_type == channel::ChannelType::VodLoop {
             Some(Utc::now())
         } else {
             None
@@ -58,7 +55,7 @@ pub async fn do_discover_add(params: DiscoverAddParams<'_>) -> Result<i64, Statu
                 name: new_name.trim().to_string(),
                 category: new_category.trim().to_string(),
                 logo_url: None,
-                channel_type: new_channel_type.to_string(),
+                channel_type: new_channel_type,
                 sort_order: 0,
                 loop_anchor,
             },
@@ -80,17 +77,12 @@ pub async fn do_discover_add(params: DiscoverAddParams<'_>) -> Result<i64, Statu
     if ch.channel_type() == channel::ChannelType::VodLoop {
         let mut duration_secs = duration_secs;
         if duration_secs <= 0 {
-            if resolver::needs_resolution(url) {
-                duration_secs = resolver::fetch_duration_secs(url).await.map_err(|e| {
-                    tracing::warn!(url = %url, error = %e, "failed to auto-fetch duration in discover_add");
+            duration_secs = crate::media::fetch_duration(client, url)
+                .await
+                .map_err(|e| {
+                    tracing::warn!(url = %url, error = %e, "failed to auto-fetch duration");
                     StatusCode::UNPROCESSABLE_ENTITY
                 })?;
-            } else {
-                duration_secs = hls::fetch_hls_duration(client, url).await.map_err(|e| {
-                    tracing::warn!(url = %url, error = %e, "failed to fetch HLS duration in discover_add");
-                    StatusCode::UNPROCESSABLE_ENTITY
-                })?;
-            }
         }
         let items = playlist_item::list_for_channel(pool, channel_id)
             .await
@@ -112,7 +104,7 @@ pub async fn do_discover_add(params: DiscoverAddParams<'_>) -> Result<i64, Statu
             pool,
             source::NewSource {
                 channel_id,
-                kind: source_kind.to_string(),
+                kind: source_kind,
                 url: url.to_string(),
                 priority: 0,
             },
@@ -200,7 +192,7 @@ mod tests {
                 name: "Existing".into(),
                 category: "news".into(),
                 logo_url: None,
-                channel_type: "live".into(),
+                channel_type: channel::ChannelType::Live,
                 sort_order: 0,
                 loop_anchor: None,
             },
@@ -237,7 +229,7 @@ mod tests {
                 name: "VOD".into(),
                 category: "movies".into(),
                 logo_url: None,
-                channel_type: "vod_loop".into(),
+                channel_type: channel::ChannelType::VodLoop,
                 sort_order: 0,
                 loop_anchor: Some(Utc::now()),
             },
