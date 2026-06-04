@@ -69,7 +69,10 @@ pub fn rewrite_mpd_urls(xml: &str, base_url: &str, direct: bool) -> String {
             Ok(e) => {
                 writer.write_event(e).unwrap();
             }
-            Err(_) => break,
+            Err(e) => {
+                tracing::warn!(error = %e, "MPD XML parse error; rewrite may be truncated");
+                break;
+            }
         }
     }
 
@@ -128,6 +131,7 @@ fn rewrite_url_attrs(e: BytesStart<'_>, url_attr_names: &[&[u8]]) -> BytesStart<
     for attr in e.attributes().flatten() {
         let key = attr.key.as_ref().to_owned();
         let val = attr
+            // XML 1.0 — all real-world MPDs are XML 1.0
             .normalized_value(quick_xml::XmlVersion::Implicit1_0)
             .unwrap_or_default()
             .into_owned();
