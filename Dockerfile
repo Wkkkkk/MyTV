@@ -5,9 +5,12 @@ FROM rust:1-slim-bookworm AS builder
 
 WORKDIR /app
 
-# Build dependencies layer (cached unless Cargo.toml/Cargo.lock change)
+# Build dependencies layer (cached unless Cargo.toml/Cargo.lock change).
+# The dummy bench satisfies the [[bench]] manifest entry and stays in place:
+# cargo build never compiles bench targets, it only resolves their paths.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo 'fn main() {}' > src/main.rs \
+RUN mkdir src benches && echo 'fn main() {}' > src/main.rs \
+    && echo 'fn main() {}' > benches/hot_paths.rs \
     && cargo build --release \
     && rm -rf src
 
