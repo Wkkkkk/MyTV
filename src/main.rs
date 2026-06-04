@@ -36,11 +36,11 @@ async fn main() -> Result<()> {
         ssrf_cache,
     };
 
-    health::start(
-        state.pool.clone(),
-        state.http_client.clone(),
-        state.cors_cache.clone(),
-    );
+    health::start(health::HealthClients {
+        pool: state.pool.clone(),
+        http_client: state.http_client.clone(),
+        cors_cache: state.cors_cache.clone(),
+    });
 
     let app = build_router(state);
     let addr = format!("0.0.0.0:{}", config.port);

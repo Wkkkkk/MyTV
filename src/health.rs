@@ -15,14 +15,21 @@ enum HealthAction {
     None,
 }
 
-pub fn start(pool: SqlitePool, client: reqwest::Client, cors_cache: CorsCache) {
+/// Dependencies for the background health checker.
+pub struct HealthClients {
+    pub pool: SqlitePool,
+    pub http_client: reqwest::Client,
+    pub cors_cache: CorsCache,
+}
+
+pub fn start(clients: HealthClients) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(CHECK_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         interval.tick().await;
         loop {
             interval.tick().await;
-            check_all(&pool, &client, &cors_cache).await;
+            check_all(&clients.pool, &clients.http_client, &clients.cors_cache).await;
         }
     });
 }
