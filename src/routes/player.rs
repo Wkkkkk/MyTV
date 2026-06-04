@@ -175,27 +175,19 @@ fn resolve_location(location: &str, base_url: &str) -> Option<String> {
         .map(|u| u.to_string())
 }
 
-async fn resolve_direct_segments(state: &AppState, content: &str, base_url: &str) -> bool {
-    let host_key = hls::extract_manifest_host(base_url);
+async fn resolve_direct_segments(state: &AppState, base_url: &str) -> bool {
+    let host_key = crate::media::hls::extract_manifest_host(base_url);
     {
         let cache = state.cors_cache.read().await;
         if let Some(&cached) = cache.get(&host_key) {
             return cached;
         }
     }
-    let segment_url =
-        match hls::find_segment_with_descent(&state.http_client, content, base_url).await {
-            Some(u) => u,
-            None => return false,
-        };
-    if !segment_url.starts_with("https://") {
-        state.cors_cache.write().await.insert(host_key, false);
-        return false;
-    }
-    let result = hls::probe_cors(&state.http_client, &segment_url).await;
-    tracing::debug!(host = %host_key, cors = result, "CORS probe result cached");
-    state.cors_cache.write().await.insert(host_key, result);
-    result
+    // Cache miss: delegate to health::probe_and_cache_cors.
+    // Re-fetches the manifest internally; cache misses are rare (once per host per session).
+    crate::health::probe_and_cache_cors(&state.http_client, &state.cors_cache, base_url)
+        .await
+        .unwrap_or(false)
 }
 
 pub async fn stream_proxy(
@@ -311,7 +303,7 @@ pub async fn stream_proxy(
         }
         let body_bytes = Bytes::from(collected);
         let text = String::from_utf8_lossy(&body_bytes);
-        let direct = resolve_direct_segments(&state, &text, &url).await;
+        let direct = resolve_direct_segments(&state, &url).await;
         let rewritten = hls::rewrite_hls_urls(&text, &url, direct);
         headers.insert(
             axum::http::header::CONTENT_TYPE,
