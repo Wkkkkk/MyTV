@@ -4,7 +4,9 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Json, Response},
 };
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 
 use crate::{
     media::{hls, resolver},
@@ -302,6 +304,10 @@ pub async fn stream_proxy(
             }
         }
         let body_bytes = Bytes::from(collected);
+        state
+            .metrics
+            .proxy_bytes
+            .fetch_add(body_bytes.len() as u64, Ordering::Relaxed);
         let text = String::from_utf8_lossy(&body_bytes);
         let direct = resolve_direct_segments(&state, &url).await;
         let rewritten = hls::rewrite_hls_urls(&text, &url, direct);
@@ -311,12 +317,17 @@ pub async fn stream_proxy(
         );
         (status, headers, rewritten).into_response()
     } else {
-        (
-            status,
-            headers,
-            axum::body::Body::from_stream(upstream.bytes_stream()),
-        )
-            .into_response()
+        let guard = crate::metrics::ActiveStreamGuard::new(state.metrics.clone());
+        let metrics = state.metrics.clone();
+        let counted = upstream.bytes_stream().inspect(move |chunk| {
+            let _hold = &guard;
+            if let Ok(c) = chunk {
+                metrics
+                    .proxy_bytes
+                    .fetch_add(c.len() as u64, Ordering::Relaxed);
+            }
+        });
+        (status, headers, axum::body::Body::from_stream(counted)).into_response()
     }
 }
 

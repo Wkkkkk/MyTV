@@ -1121,6 +1121,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dotenvy",
+ "futures-util",
  "http-body-util",
  "m3u8-rs",
  "reqwest",

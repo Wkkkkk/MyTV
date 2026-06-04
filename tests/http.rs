@@ -909,3 +909,42 @@ async fn test_metrics_route_counter_increments() {
     let json = body_json(response).await;
     assert_eq!(json["routes"]["/guide"]["count"], 1);
 }
+
+#[tokio::test]
+async fn test_metrics_counts_proxied_bytes_and_resets_gauge() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 512];
+        let _ = conn.read(&mut buf).await;
+        conn.write_all(
+            b"HTTP/1.1 200 OK\r\n\
+              Content-Type: video/mp2t\r\n\
+              Content-Length: 10\r\n\
+              \r\n\
+              0123456789",
+        )
+        .await
+        .unwrap();
+    });
+
+    let app = app_with_ssrf_bypass("127.0.0.1").await;
+    // .ts path + non-mpegurl content type → non-playlist streaming branch.
+    let url_param = format!("http%3A%2F%2F127.0.0.1%3A{}%2Fseg.ts", port);
+    let response = app
+        .clone()
+        .oneshot(req(&format!("/stream-proxy?url={}", url_param)))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await; // fully consume → stream (and gauge guard) dropped
+    assert_eq!(body, "0123456789");
+
+    let metrics = body_json(app.oneshot(authed("/admin/metrics")).await.unwrap()).await;
+    assert_eq!(metrics["proxy"]["bytes_proxied"], 10);
+    assert_eq!(metrics["proxy"]["active_streams"], 0);
+}
