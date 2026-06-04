@@ -4,6 +4,7 @@ pub mod db;
 mod epg;
 pub mod health;
 mod media;
+pub mod metrics;
 mod model;
 mod routes;
 pub mod ssrf;
