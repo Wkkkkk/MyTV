@@ -1,5 +1,5 @@
 use anyhow::Result;
-use mytv::{build_router, config, db, health, AppState, CorsCache, SsrfCache};
+use mytv::{build_router, config, db, health, metrics, AppState, CorsCache, SsrfCache};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -34,6 +34,7 @@ async fn main() -> Result<()> {
         proxy_client,
         cors_cache,
         ssrf_cache,
+        metrics: Arc::new(metrics::Metrics::new()),
     };
 
     health::start(health::HealthClients {

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use mytv::{build_router, config::Config, db, AppState};
+use mytv::{build_router, config::Config, db, metrics, AppState};
 use tower::ServiceExt;
 
 // A bounded-timeout client so any test that triggers an outbound request (e.g.
@@ -38,6 +38,7 @@ async fn app() -> axum::Router {
             .unwrap(),
         cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        metrics: Arc::new(metrics::Metrics::new()),
     };
     build_router(state)
 }
@@ -114,6 +115,7 @@ async fn app_with_ssrf_bypass(host: &str) -> axum::Router {
             .unwrap(),
         cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         ssrf_cache,
+        metrics: Arc::new(metrics::Metrics::new()),
     };
     build_router(state)
 }
@@ -143,6 +145,7 @@ async fn app_with_cors(host: &str, direct: bool) -> axum::Router {
             .unwrap(),
         cors_cache,
         ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        metrics: Arc::new(metrics::Metrics::new()),
     };
     build_router(state)
 }
@@ -872,4 +875,37 @@ async fn stream_proxy_follows_relative_redirect() {
         "stream_proxy must follow a relative Location redirect (got {} instead)",
         response.status()
     );
+}
+
+// ── Metrics endpoint ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_metrics_requires_auth() {
+    let response = app().await.oneshot(req("/admin/metrics")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_metrics_returns_expected_shape() {
+    let response = app().await.oneshot(authed("/admin/metrics")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert!(json.as_object().unwrap().contains_key("rss_bytes"));
+    assert!(json["routes"].is_object());
+    assert!(json["proxy"]["bytes_proxied"].is_u64());
+    assert!(json["proxy"]["active_streams"].is_u64());
+    assert!(json["caches"]["ssrf_entries"].is_u64());
+    assert!(json["caches"]["cors_entries"].is_u64());
+}
+
+#[tokio::test]
+async fn test_metrics_route_counter_increments() {
+    // Router clones share AppState (Arc fields), so the /guide hit is visible
+    // to the subsequent /admin/metrics request.
+    let app = app().await;
+    let r = app.clone().oneshot(req("/guide")).await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let response = app.oneshot(authed("/admin/metrics")).await.unwrap();
+    let json = body_json(response).await;
+    assert_eq!(json["routes"]["/guide"]["count"], 1);
 }

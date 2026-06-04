@@ -343,6 +343,7 @@ mod tests {
             ssrf_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            metrics: std::sync::Arc::new(crate::metrics::Metrics::new()),
         }
     }
 

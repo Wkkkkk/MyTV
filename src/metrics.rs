@@ -1,3 +1,8 @@
+use axum::{
+    extract::{MatchedPath, Request, State},
+    middleware::Next,
+    response::Response,
+};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -72,6 +77,26 @@ impl Metrics {
             })
             .collect()
     }
+}
+
+pub async fn track_metrics(
+    State(state): State<crate::AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    // MatchedPath gives the route template ("/channel/:id/tune"), not the
+    // concrete URI, keeping metric cardinality bounded.
+    let route = req
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|p| p.as_str().to_owned())
+        .unwrap_or_else(|| req.uri().path().to_owned());
+    let start = std::time::Instant::now();
+    let response = next.run(req).await;
+    state
+        .metrics
+        .record(&route, start.elapsed().as_micros() as u64);
+    response
 }
 
 /// RAII gauge: increments `active_streams` on creation, decrements on drop.

@@ -34,6 +34,7 @@ pub struct AppState {
     pub proxy_client: reqwest::Client,
     pub cors_cache: CorsCache,
     pub ssrf_cache: SsrfCache,
+    pub metrics: Arc<metrics::Metrics>,
 }
 
 async fn redirect_trailing_slash(req: Request, next: Next) -> axum::response::Response {
@@ -95,6 +96,7 @@ pub fn build_router(state: AppState) -> Router {
             "/discover/manual/resolve",
             post(routes::admin::discover_manual_resolve),
         )
+        .route("/metrics", get(routes::admin::metrics_json))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             routes::admin::basic_auth,
@@ -112,6 +114,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/manifest.json", get(routes::static_files::manifest_json))
         .route("/favicon.ico", get(routes::static_files::favicon_ico))
         .nest("/admin", admin_router)
+        // route_layer (not layer): MatchedPath is only available after routing.
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            metrics::track_metrics,
+        ))
         .layer(middleware::from_fn(redirect_trailing_slash))
         .with_state(state)
 }
