@@ -765,6 +765,38 @@ async fn channel_edit_form_returns_404_for_missing_channel() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+#[tokio::test]
+async fn channel_detail_returns_200_with_budget_badge() {
+    // Test with empty CORS cache (Unknown status)
+    let response = app()
+        .await
+        .oneshot(authed("/admin/channels/1"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    // When CORS cache is empty, budget is Unknown, which renders a dot but no CSS class.
+    assert!(
+        body.contains("Network budget not yet probed"),
+        "channel detail with empty CORS cache should show 'Network budget not yet probed'"
+    );
+
+    // Test with CORS cache populated (Direct budget)
+    let response = app_with_cors("https://stream.example.com", true)
+        .await
+        .oneshot(authed("/admin/channels/1"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    // Channel 1's source host is https://stream.example.com with Direct=true,
+    // so budget_badge_class should be "budget-direct"
+    assert!(
+        body.contains("budget-direct"),
+        "channel detail with cached Direct status should show 'budget-direct' class"
+    );
+}
+
 // Discover page
 
 #[tokio::test]
