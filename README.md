@@ -52,7 +52,7 @@ MyTV is a single-user personal server. It does not transcode, record, or manage 
 ```bash
 git clone https://github.com/Wkkkkk/MyTV.git
 cd MyTV
-cargo run --release
+cargo run
 ```
 
 Open `http://localhost:3000/guide` for the EPG guide or `http://localhost:3000/admin` for the admin UI (default password: `admin`).

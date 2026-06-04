@@ -18,7 +18,7 @@ The server ships as a single binary. Askama templates and SQL migrations are emb
 
 | Dependency | Purpose |
 |---|---|
-| [Rust](https://rustup.rs) stable 1.75+ | Build the binary |
+| [Rust](https://rustup.rs) (via rustup) | Build the binary — exact version pinned by `rust-toolchain.toml` |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Resolve YouTube/platform URLs at runtime |
 | SQLite | Embedded — no separate server needed |
 
@@ -39,15 +39,22 @@ yt-dlp must be on `PATH` when the server runs.
 
 ## Running locally
 
-**1. Clone and build**
+**1. Clone**
 
 ```bash
 git clone https://github.com/Wkkkkk/MyTV.git
 cd MyTV
-cargo build --release
 ```
 
-**2. Create a `.env` file** (optional — all vars have defaults)
+**2. Install git hooks** (once after cloning)
+
+```bash
+./scripts/install-hooks.sh
+```
+
+This installs a pre-push hook that runs `cargo fmt --check`, `cargo clippy --all-targets`, and `cargo test` before every push.
+
+**3. Create a `.env` file** (optional — all vars have defaults)
 
 ```env
 DATABASE_URL=sqlite:mytv.db
@@ -56,15 +63,15 @@ PORT=3000
 # YOUTUBE_API_KEY=AIza...   # optional — enables YouTube search in /admin/discover
 ```
 
-**3. Run**
+**4. Run**
 
 ```bash
-cargo run --release
+cargo run
 ```
 
 The server starts on `http://localhost:3000`. The SQLite database (`mytv.db`) is created automatically on first run and migrations are applied.
 
-**4. Open the app**
+**5. Open the app**
 
 | URL | What |
 |---|---|
@@ -74,21 +81,14 @@ The server starts on `http://localhost:3000`. The SQLite database (`mytv.db`) is
 
 ---
 
-## Development setup
-
-Install git hooks once after cloning:
-
-```bash
-./scripts/install-hooks.sh
-```
-
-This installs a pre-push hook that runs `cargo fmt --check`, `cargo clippy --all-targets`, and `cargo test` before every push.
-
----
-
 ## Development tips
 
-**Run tests:**
+**Format before committing** (CI will reject any diff):
+```bash
+cargo fmt
+```
+
+**Run tests** (226 tests: unit + integration; integration tests use an in-memory SQLite DB seeded automatically — no setup needed):
 ```bash
 cargo test
 ```
