@@ -317,6 +317,8 @@ pub async fn stream_proxy(
         );
         (status, headers, rewritten).into_response()
     } else {
+        // Guard lives inside the closure, so active_streams decrements when the
+        // client drops the body stream, not when this handler returns.
         let guard = crate::metrics::ActiveStreamGuard::new(state.metrics.clone());
         let metrics = state.metrics.clone();
         let counted = upstream.bytes_stream().inspect(move |chunk| {
