@@ -113,13 +113,10 @@ pub fn current_position(
             return Some((i, offset));
         }
     }
-    Some((
-        items.len() - 1,
-        items
-            .last()
-            .expect("non-empty: checked by is_empty guard above")
-            .duration_secs,
-    ))
+    unreachable!(
+        "elapsed ({elapsed}) < total ({total}) guaranteed by rem_euclid, \
+         but for-loop found no matching item"
+    )
 }
 
 #[cfg(test)]
