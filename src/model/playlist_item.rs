@@ -138,7 +138,7 @@ mod tests {
                 name: "VOD Loop".to_string(),
                 category: "test".to_string(),
                 logo_url: None,
-                channel_type: "vod_loop".to_string(),
+                channel_type: channel::ChannelType::VodLoop,
                 sort_order: 0,
                 loop_anchor: None,
             },

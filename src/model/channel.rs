@@ -31,21 +31,44 @@ impl Channel {
     }
 }
 
+impl ChannelType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ChannelType::Live => "live",
+            ChannelType::VodLoop => "vod_loop",
+        }
+    }
+}
+
+impl std::str::FromStr for ChannelType {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "live" => Ok(ChannelType::Live),
+            "vod_loop" => Ok(ChannelType::VodLoop),
+            _ => anyhow::bail!("invalid channel_type: {s}"),
+        }
+    }
+}
+
+impl std::fmt::Display for ChannelType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Input for creating a new channel.
 pub struct NewChannel {
     pub name: String,
     pub category: String,
     pub logo_url: Option<String>,
-    pub channel_type: String,
+    pub channel_type: ChannelType,
     pub sort_order: i64,
     pub loop_anchor: Option<DateTime<Utc>>,
 }
 
 /// Insert a new channel and return it.
 pub async fn create(pool: &SqlitePool, input: NewChannel) -> Result<Channel> {
-    if !["live", "vod_loop"].contains(&input.channel_type.as_str()) {
-        anyhow::bail!("invalid channel_type: {}", input.channel_type);
-    }
     let id = sqlx::query(
         "INSERT INTO channels (name, category, logo_url, type, sort_order, loop_anchor)
          VALUES (?, ?, ?, ?, ?, ?)",
@@ -53,7 +76,7 @@ pub async fn create(pool: &SqlitePool, input: NewChannel) -> Result<Channel> {
     .bind(&input.name)
     .bind(&input.category)
     .bind(&input.logo_url)
-    .bind(&input.channel_type)
+    .bind(input.channel_type.as_str())
     .bind(input.sort_order)
     .bind(input.loop_anchor)
     .execute(pool)
@@ -71,7 +94,7 @@ pub struct UpdateChannel {
     pub name: String,
     pub category: String,
     pub logo_url: Option<String>,
-    pub channel_type: String,
+    pub channel_type: ChannelType,
     pub sort_order: i64,
     pub loop_anchor: Option<DateTime<Utc>>,
 }
@@ -84,7 +107,7 @@ pub async fn update(pool: &SqlitePool, id: i64, input: UpdateChannel) -> Result<
     .bind(&input.name)
     .bind(&input.category)
     .bind(&input.logo_url)
-    .bind(&input.channel_type)
+    .bind(input.channel_type.as_str())
     .bind(input.sort_order)
     .bind(input.loop_anchor)
     .bind(id)
@@ -151,7 +174,7 @@ mod tests {
             name: name.to_string(),
             category: category.to_string(),
             logo_url: None,
-            channel_type: "live".to_string(),
+            channel_type: ChannelType::Live,
             sort_order: 0,
             loop_anchor: None,
         }
@@ -217,7 +240,7 @@ mod tests {
                 name: "CNN International".to_string(),
                 category: "world".to_string(),
                 logo_url: None,
-                channel_type: "live".to_string(),
+                channel_type: ChannelType::Live,
                 sort_order: 1,
                 loop_anchor: None,
             },
@@ -241,7 +264,7 @@ mod tests {
                 name: "Ghost".to_string(),
                 category: "none".to_string(),
                 logo_url: None,
-                channel_type: "live".to_string(),
+                channel_type: ChannelType::Live,
                 sort_order: 0,
                 loop_anchor: None,
             },

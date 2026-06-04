@@ -2,6 +2,53 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
+/// Source media kind.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SourceKind {
+    Hls,
+    YoutubeLive,
+    Iptv,
+}
+
+impl SourceKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SourceKind::Hls => "hls",
+            SourceKind::YoutubeLive => "youtube_live",
+            SourceKind::Iptv => "iptv",
+        }
+    }
+
+    /// Infers the kind from a URL using the same rules as the discover UI.
+    pub fn detect(url: &str) -> Self {
+        if url.contains("youtube.com") || url.contains("youtu.be") {
+            SourceKind::YoutubeLive
+        } else if url.contains(".m3u8") {
+            SourceKind::Hls
+        } else {
+            SourceKind::Iptv
+        }
+    }
+}
+
+impl std::str::FromStr for SourceKind {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "hls" => Ok(SourceKind::Hls),
+            "youtube_live" => Ok(SourceKind::YoutubeLive),
+            "iptv" => Ok(SourceKind::Iptv),
+            _ => anyhow::bail!("invalid source kind: {s}"),
+        }
+    }
+}
+
+impl std::fmt::Display for SourceKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A source row as stored in the database.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Source {
@@ -20,21 +67,18 @@ pub struct Source {
 /// Input for creating a new source.
 pub struct NewSource {
     pub channel_id: i64,
-    pub kind: String,
+    pub kind: SourceKind,
     pub url: String,
     pub priority: i64,
 }
 
 /// Insert a new source and return it.
 pub async fn create(pool: &SqlitePool, input: NewSource) -> Result<Source> {
-    if !["hls", "youtube_live", "iptv"].contains(&input.kind.as_str()) {
-        anyhow::bail!("invalid source kind: {}", input.kind);
-    }
     let id = sqlx::query(
         "INSERT INTO sources (channel_id, kind, url, priority, is_active) VALUES (?, ?, ?, ?, 1)",
     )
     .bind(input.channel_id)
-    .bind(&input.kind)
+    .bind(input.kind.as_str())
     .bind(&input.url)
     .bind(input.priority)
     .execute(pool)
@@ -167,7 +211,7 @@ mod tests {
                 name: "Test".to_string(),
                 category: "test".to_string(),
                 logo_url: None,
-                channel_type: "live".to_string(),
+                channel_type: channel::ChannelType::Live,
                 sort_order: 0,
                 loop_anchor: None,
             },
@@ -179,7 +223,7 @@ mod tests {
     fn hls(channel_id: i64, url: &str, priority: i64) -> NewSource {
         NewSource {
             channel_id,
-            kind: "hls".to_string(),
+            kind: SourceKind::Hls,
             url: url.to_string(),
             priority,
         }
