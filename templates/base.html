@@ -9,6 +9,7 @@
   <title>MyTV</title>
   <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,sans-serif;min-height:100vh}
@@ -121,6 +122,8 @@
       let currentChannelId = null;
       let currentUrl = null;
       let currentChannel = null;
+      let dash = null;
+      let dashErrorFired = false;
 
       function hashColor(str) {
         var h = 0;
@@ -222,34 +225,70 @@
 
       function _loadSource(url, offset) {
         currentUrl = url;
+        dashErrorFired = false;
+        var isDash = url.indexOf('.mpd') >= 0;
         url = proxyUrl(url);
-        if (hls) {
-          hls.loadSource(url);
-          hls.once(Hls.Events.MANIFEST_PARSED, function() {
-            if (offset > 0) video.currentTime = offset;
-            video.play().catch(function(){});
-          });
-        } else if (video && video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.onerror = function() {
+
+        if (isDash) {
+          if (hls) { hls.stopLoad(); hls.detachMedia(); }
+          if (dash) { dash.reset(); dash = null; }
+          dash = dashjs.MediaPlayer().create();
+          dash.on(dashjs.MediaPlayer.events.ERROR, function() {
+            if (dashErrorFired || !currentChannelId) return;
+            dashErrorFired = true;
+            if (typeof debugLog === 'function') debugLog('warn', 'DASH error, trying next source');
             var nextUrl = '/channel/' + currentChannelId + '/next';
             if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
             fetch(nextUrl)
-              .then(function(r) {
-                if (!r.ok) { showPlayerError(); return; }
-                return r.json();
-              })
+              .then(function(r) { if (!r.ok) { showPlayerError(); return null; } return r.json(); })
               .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
-              .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'native HLS: ' + err); console.error('native hls error:', err); showPlayerError(); });
-          };
-          video.src = url;
+              .catch(function(err) {
+                if (typeof debugLog === 'function') debugLog('error', 'DASH failover: ' + err);
+                showPlayerError();
+              });
+          });
           if (offset > 0) {
-            video.addEventListener('loadedmetadata', function onMeta() {
-              video.removeEventListener('loadedmetadata', onMeta);
+            dash.on(dashjs.MediaPlayer.events.MANIFEST_LOADED, function onManifest() {
+              dash.off(dashjs.MediaPlayer.events.MANIFEST_LOADED, onManifest);
               video.currentTime = offset;
+            });
+          }
+          dash.initialize(video, url, true);
+        } else {
+          if (dash) { dash.reset(); dash = null; }
+          if (hls) hls.attachMedia(video);
+          if (hls) {
+            hls.loadSource(url);
+            hls.once(Hls.Events.MANIFEST_PARSED, function() {
+              if (offset > 0) video.currentTime = offset;
               video.play().catch(function(){});
             });
-          } else {
-            video.play().catch(function(){});
+          } else if (video && video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.onerror = function() {
+              var nextUrl = '/channel/' + currentChannelId + '/next';
+              if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
+              fetch(nextUrl)
+                .then(function(r) {
+                  if (!r.ok) { showPlayerError(); return; }
+                  return r.json();
+                })
+                .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
+                .catch(function(err) {
+                  if (typeof debugLog === 'function') debugLog('error', 'native HLS: ' + err);
+                  console.error('native hls error:', err);
+                  showPlayerError();
+                });
+            };
+            video.src = url;
+            if (offset > 0) {
+              video.addEventListener('loadedmetadata', function onMeta() {
+                video.removeEventListener('loadedmetadata', onMeta);
+                video.currentTime = offset;
+                video.play().catch(function(){});
+              });
+            } else {
+              video.play().catch(function(){});
+            }
           }
         }
       }
@@ -271,6 +310,8 @@
         currentChannelId = channelId;
         currentUrl = null;
         hidePlayerError();
+        if (hls) hls.stopLoad();
+        if (dash) { dash.reset(); dash = null; }
         document.getElementById('player-panel').style.display = 'block';
         fetch('/channel/' + channelId + '/tune')
           .then(function(r) {
