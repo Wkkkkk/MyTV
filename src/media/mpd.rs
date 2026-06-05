@@ -147,6 +147,60 @@ fn rewrite_url_attrs(e: BytesStart<'_>, url_attr_names: &[&[u8]]) -> BytesStart<
     new
 }
 
+/// Extracts `mediaPresentationDuration` from an MPD XML string and returns seconds.
+/// Returns an error for live/dynamic streams where the attribute is absent.
+pub fn parse_mpd_duration(xml: &str) -> anyhow::Result<i64> {
+    let mut reader = Reader::from_str(xml);
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
+                if e.local_name().as_ref() == b"MPD" =>
+            {
+                for attr in e.attributes().flatten() {
+                    if attr.key.as_ref() == b"mediaPresentationDuration" {
+                        let val = String::from_utf8_lossy(&attr.value);
+                        return parse_iso8601_duration_secs(&val);
+                    }
+                }
+                anyhow::bail!("MPD has no mediaPresentationDuration (live stream?)");
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => anyhow::bail!("MPD XML parse error: {e}"),
+            _ => {}
+        }
+    }
+    anyhow::bail!("MPD root element not found");
+}
+
+/// Converts an ISO 8601 duration string (e.g. `PT1H30M5.5S`) to whole seconds.
+fn parse_iso8601_duration_secs(s: &str) -> anyhow::Result<i64> {
+    let s = s
+        .strip_prefix('P')
+        .ok_or_else(|| anyhow::anyhow!("not an ISO 8601 duration: {s}"))?;
+    let (date_part, time_part) = s.split_once('T').unwrap_or((s, ""));
+    let mut secs = 0i64;
+    if let Some(idx) = date_part.find('D') {
+        let v: f64 = date_part[..idx].parse()?;
+        secs += (v * 86400.0) as i64;
+    }
+    let mut rest = time_part;
+    if let Some(idx) = rest.find('H') {
+        let v: f64 = rest[..idx].parse()?;
+        secs += (v * 3600.0) as i64;
+        rest = &rest[idx + 1..];
+    }
+    if let Some(idx) = rest.find('M') {
+        let v: f64 = rest[..idx].parse()?;
+        secs += (v * 60.0) as i64;
+        rest = &rest[idx + 1..];
+    }
+    if let Some(idx) = rest.find('S') {
+        let v: f64 = rest[..idx].parse()?;
+        secs += v as i64;
+    }
+    Ok(secs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +301,29 @@ mod tests {
             "relative templates must not be proxied"
         );
         assert!(out.contains("<MPD"));
+    }
+
+    #[test]
+    fn parse_mpd_duration_seconds_only() {
+        let xml = r#"<?xml version="1.0"?><MPD mediaPresentationDuration="PT634.566S"></MPD>"#;
+        assert_eq!(parse_mpd_duration(xml).unwrap(), 634);
+    }
+
+    #[test]
+    fn parse_mpd_duration_hours_minutes_seconds() {
+        let xml = r#"<?xml version="1.0"?><MPD mediaPresentationDuration="PT1H30M5S"></MPD>"#;
+        assert_eq!(parse_mpd_duration(xml).unwrap(), 5405);
+    }
+
+    #[test]
+    fn parse_mpd_duration_missing_returns_error() {
+        let xml = r#"<?xml version="1.0"?><MPD type="dynamic"></MPD>"#;
+        assert!(parse_mpd_duration(xml).is_err());
+    }
+
+    #[test]
+    fn bbb_fixture_duration() {
+        let xml = include_str!("../../tests/fixtures/bbb_30fps.mpd");
+        assert_eq!(parse_mpd_duration(xml).unwrap(), 634);
     }
 }

@@ -35,24 +35,29 @@ pub async fn playlist_item_create(
     State(state): State<AppState>,
     Path(channel_id): Path<i64>,
     axum::extract::Form(form): axum::extract::Form<PlaylistItemForm>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> impl IntoResponse {
     let url = form.url.trim().to_string();
     let mut duration_secs: i64 = form.duration_secs.trim().parse().unwrap_or(0);
     if duration_secs <= 0 {
-        duration_secs = media::fetch_duration(&state.http_client, &url)
-            .await
-            .map_err(|e| {
+        match media::fetch_duration(&state.http_client, &url).await {
+            Ok(d) => duration_secs = d,
+            Err(e) => {
                 tracing::warn!(url = %url, error = %e, "failed to auto-fetch duration");
-                StatusCode::UNPROCESSABLE_ENTITY
-            })?;
+                return Html(format!(
+                    r#"<p style="color:#e94560;padding:16px">Could not determine duration — enter it manually. <a href="/admin/channels/{channel_id}">← Go back</a></p>"#
+                ))
+                .into_response();
+            }
+        }
     }
 
-    let existing = playlist_item::list_for_channel(&state.pool, channel_id)
-        .await
-        .map_err(internal_error)?;
+    let existing = match playlist_item::list_for_channel(&state.pool, channel_id).await {
+        Ok(items) => items,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
     let sort_order = existing.len() as i64;
 
-    playlist_item::create(
+    if playlist_item::create(
         &state.pool,
         NewPlaylistItem {
             channel_id,
@@ -63,8 +68,11 @@ pub async fn playlist_item_create(
         },
     )
     .await
-    .map_err(internal_error)?;
-    Ok(Redirect::to(&format!("/admin/channels/{channel_id}")))
+    .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    Redirect::to(&format!("/admin/channels/{channel_id}")).into_response()
 }
 
 pub async fn playlist_item_delete(
