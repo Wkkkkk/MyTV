@@ -193,7 +193,9 @@ pub async fn channel_update(
         Some(form.logo_url.trim().to_string())
     };
     let loop_anchor = if channel_type == channel::ChannelType::VodLoop {
-        parse_loop_anchor(&form.loop_anchor).or(existing.loop_anchor)
+        parse_loop_anchor(&form.loop_anchor)
+            .or(existing.loop_anchor)
+            .or_else(|| Some(Utc::now()))
     } else {
         None
     };
