@@ -8,6 +8,7 @@ pub enum SourceKind {
     Hls,
     YoutubeLive,
     Iptv,
+    Dash,
 }
 
 impl SourceKind {
@@ -16,6 +17,7 @@ impl SourceKind {
             SourceKind::Hls => "hls",
             SourceKind::YoutubeLive => "youtube_live",
             SourceKind::Iptv => "iptv",
+            SourceKind::Dash => "dash",
         }
     }
 
@@ -23,6 +25,8 @@ impl SourceKind {
     pub fn detect(url: &str) -> Self {
         if url.contains("youtube.com") || url.contains("youtu.be") {
             SourceKind::YoutubeLive
+        } else if url.contains(".mpd") {
+            SourceKind::Dash
         } else if url.contains(".m3u8") {
             SourceKind::Hls
         } else {
@@ -38,6 +42,7 @@ impl std::str::FromStr for SourceKind {
             "hls" => Ok(SourceKind::Hls),
             "youtube_live" => Ok(SourceKind::YoutubeLive),
             "iptv" => Ok(SourceKind::Iptv),
+            "dash" => Ok(SourceKind::Dash),
             _ => anyhow::bail!("invalid source kind: {s}"),
         }
     }
