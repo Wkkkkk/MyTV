@@ -165,6 +165,8 @@ async fn check_source(
     )
     .await;
 
+    // Only probe CORS for reachable sources: a down source would just incur a
+    // second timeout, and its cached budget is best left as-is.
     if ok {
         probe_and_cache_cors(client, cors_cache, &src.url).await;
     }
@@ -207,6 +209,8 @@ async fn check_playlist_item(
     ok
 }
 
+/// Probes a playlist item's health and updates stats without touching `is_active`.
+/// Used by the admin Test button — respects the admin's manual enable/disable choice.
 pub async fn probe_playlist_item(
     pool: &SqlitePool,
     client: &reqwest::Client,
