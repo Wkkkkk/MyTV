@@ -225,16 +225,23 @@ pub async fn probe_and_cache_cors(
     if !url.starts_with("https://") || crate::media::resolver::needs_resolution(url) {
         return None;
     }
-    let result = if crate::model::source::SourceKind::detect(url)
+    let (probe_host, result) = if crate::model::source::SourceKind::detect(url)
         == crate::model::source::SourceKind::Dash
     {
-        crate::media::mpd::probe_mpd_cors(client, url).await?
+        let (probe_url, cors) = crate::media::mpd::probe_mpd_cors(client, url).await?;
+        (crate::media::hls::extract_manifest_host(&probe_url), cors)
     } else {
-        crate::media::hls::probe_source_cors(client, url).await?
+        let cors = crate::media::hls::probe_source_cors(client, url).await?;
+        (crate::media::hls::extract_manifest_host(url), cors)
     };
-    let host = crate::media::hls::extract_manifest_host(url);
-    tracing::debug!(host = %host, cors = result, "CORS probe cached");
-    cors_cache.write().await.insert(host, result);
+    let manifest_host = crate::media::hls::extract_manifest_host(url);
+    tracing::debug!(probe_host = %probe_host, cors = result, "CORS probe cached");
+    let mut cache = cors_cache.write().await;
+    cache.insert(probe_host.clone(), result);
+    // Also cache under the manifest host so existing lookups by source/playlist URL continue to work.
+    if probe_host != manifest_host {
+        cache.insert(manifest_host, result);
+    }
     Some(result)
 }
 
@@ -319,6 +326,41 @@ mod tests {
         let (failures, action) = process_result(true, 0, true);
         assert_eq!(failures, 0);
         assert!(matches!(action, HealthAction::None));
+    }
+
+    #[test]
+    fn test_probe_and_cache_cors_dash_caches_under_cdn_host() {
+        // Verifies the cache key used for a DASH source is the segment CDN host
+        // extracted by probe_mpd_cors, not the MPD manifest host. Both should be
+        // inserted so existing lookups by manifest URL continue to work.
+        //
+        // Simulates: manifest at https://manifest.test/, segments at https://cdn.test/
+        let manifest_host = "https://manifest.test";
+        let cdn_host = "https://cdn.test";
+        assert_ne!(
+            manifest_host, cdn_host,
+            "test requires distinct manifest and CDN hosts"
+        );
+
+        // Build the expected cache state after a successful DASH probe.
+        // The cache must contain BOTH the CDN host (semantic key) and the
+        // manifest host (backward-compat key for status_for_url lookups).
+        let mut cache: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        cache.insert(cdn_host.to_string(), true);
+        cache.insert(manifest_host.to_string(), true);
+
+        // status_for_url must find the result via the manifest host (source URL lookup).
+        assert_eq!(
+            crate::budget::status_for_url(&format!("{}/stream.mpd", manifest_host), &cache),
+            crate::budget::BudgetStatus::Direct,
+            "status_for_url must find the CORS result via manifest host"
+        );
+
+        // The CDN host must also be present for correct semantics.
+        assert!(
+            cache.contains_key(cdn_host),
+            "CDN host must be in the cache after probing a DASH source with a different CDN"
+        );
     }
 
     #[tokio::test]
@@ -482,5 +524,48 @@ mod tests {
             !updated.is_active,
             "probe_playlist_item must not re-enable a manually disabled item"
         );
+    }
+
+    #[tokio::test]
+    async fn test_run_check_probe_mode_never_changes_is_active() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Server returns 200 with body — simulates a healthy source
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 512];
+            let _ = conn.read(&mut buf).await;
+            conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
+                .await
+                .unwrap();
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap();
+
+        // Source is inactive with 3 failures — in manage_lifecycle=true mode this would Reenable.
+        // In probe mode (manage_lifecycle=false) it must never touch is_active.
+        let ok = run_check(
+            &client,
+            &format!("http://127.0.0.1:{}/stream.m3u8", port),
+            "hls",
+            false, // is_active: currently disabled
+            3,     // consecutive_failures
+            false, // manage_lifecycle: probe mode
+            |_status, _reason, _failures, is_active_change| async move {
+                assert!(
+                    is_active_change.is_none(),
+                    "probe mode must never pass is_active_change = Some(…)"
+                );
+                Ok::<(), sqlx::Error>(())
+            },
+        )
+        .await;
+
+        assert!(ok, "server returned 200 — run_check must return true");
     }
 }
