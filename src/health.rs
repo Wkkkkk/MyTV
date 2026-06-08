@@ -598,4 +598,124 @@ mod tests {
 
         assert!(ok, "server returned 200 — run_check must return true");
     }
+
+    #[test]
+    fn test_probed_hosts_dedup_same_cdn() {
+        // Two episodes on the same CDN produce the same manifest host.
+        // The HashSet used in check_all must deduplicate them so only
+        // the first triggers a CORS probe.
+        let mut probed_hosts = std::collections::HashSet::new();
+
+        let ep1 = "https://cdn.example.com/vod/season1/ep1.m3u8";
+        let ep2 = "https://cdn.example.com/vod/season1/ep2.m3u8";
+        let ep3 = "https://other-cdn.example.com/vod/ep3.m3u8";
+
+        let h1 = crate::media::hls::extract_manifest_host(ep1);
+        let h2 = crate::media::hls::extract_manifest_host(ep2);
+        let h3 = crate::media::hls::extract_manifest_host(ep3);
+
+        assert!(
+            probed_hosts.insert(h1),
+            "ep1: first insert for this CDN host must succeed"
+        );
+        assert!(
+            !probed_hosts.insert(h2),
+            "ep2: same CDN host must be deduplicated"
+        );
+        assert!(
+            probed_hosts.insert(h3),
+            "ep3: different CDN host must not be deduplicated"
+        );
+        assert_eq!(probed_hosts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_check_all_health_checks_each_item_independently() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Server returns 200 for the first two connections (one per item health check)
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            for _ in 0..2u8 {
+                let (mut conn, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 512];
+                let _ = conn.read(&mut buf).await;
+                conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let pool = crate::db::connect("sqlite::memory:").await.unwrap();
+        let ch = crate::model::channel::create(
+            &pool,
+            crate::model::channel::NewChannel {
+                name: "vod".to_string(),
+                category: "test".to_string(),
+                logo_url: None,
+                channel_type: crate::model::channel::ChannelType::VodLoop,
+                sort_order: 0,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let it1 = crate::model::playlist_item::create(
+            &pool,
+            crate::model::playlist_item::NewPlaylistItem {
+                channel_id: ch.id,
+                title: "ep1".to_string(),
+                url: format!("http://127.0.0.1:{}/ep1.mp4", port),
+                duration_secs: 3600,
+                sort_order: 0,
+            },
+        )
+        .await
+        .unwrap();
+
+        let it2 = crate::model::playlist_item::create(
+            &pool,
+            crate::model::playlist_item::NewPlaylistItem {
+                channel_id: ch.id,
+                title: "ep2".to_string(),
+                url: format!("http://127.0.0.1:{}/ep2.mp4", port),
+                duration_secs: 3600,
+                sort_order: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        let cors_cache: crate::CorsCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap();
+
+        check_all(&pool, &client, &cors_cache).await;
+
+        // Both items must have been health-checked independently
+        let updated1 = crate::model::playlist_item::get(&pool, it1.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let updated2 = crate::model::playlist_item::get(&pool, it2.id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            updated1.last_status.as_deref(),
+            Some("ok"),
+            "ep1 must be health-checked independently"
+        );
+        assert_eq!(
+            updated2.last_status.as_deref(),
+            Some("ok"),
+            "ep2 must be health-checked independently"
+        );
+    }
 }
