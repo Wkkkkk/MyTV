@@ -55,7 +55,12 @@ pub async fn playlist_item_create(
         Ok(items) => items,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    let sort_order = existing.len() as i64;
+    let sort_order = existing
+        .iter()
+        .map(|i| i.sort_order)
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
 
     if playlist_item::create(
         &state.pool,

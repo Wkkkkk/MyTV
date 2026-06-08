@@ -1001,6 +1001,45 @@ async fn test_metrics_counts_proxied_bytes_and_resets_gauge() {
 }
 
 #[tokio::test]
+async fn playlist_item_create_sort_order_skips_gap_after_delete() {
+    // After deleting ep1, list_for_channel returns [ep2(sort=2)], len=1.
+    // Bug: sort_order = len = 1 < ep2 sort_order=2 → ep3 renders before ep2.
+    // Fix: sort_order = max(2)+1 = 3 → ep3 renders after ep2.
+    let app = app().await;
+
+    let del = app
+        .clone()
+        .oneshot(authed_post("/admin/playlist/1/delete"))
+        .await
+        .unwrap();
+    assert_eq!(del.status(), StatusCode::SEE_OTHER);
+
+    let create = app
+        .clone()
+        .oneshot(authed_form_post(
+            "/admin/channels/4/playlist",
+            "title=Episode+3&url=https%3A%2F%2Fvod.example.com%2Fep3.mp4&duration_secs=1800",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::SEE_OTHER);
+
+    let detail = app.oneshot(authed("/admin/channels/4")).await.unwrap();
+    let html = body_text(detail).await;
+
+    let pos_ep2 = html
+        .find("ep2.mp4")
+        .expect("ep2 must appear in the playlist");
+    let pos_ep3 = html
+        .find("ep3.mp4")
+        .expect("ep3 must appear in the playlist");
+    assert!(
+        pos_ep2 < pos_ep3,
+        "ep2 (sort_order=2) must render before ep3 (sort_order=3 with fix, 1 with bug)"
+    );
+}
+
+#[tokio::test]
 #[ignore = "requires network access — run manually"]
 async fn test_stream_proxy_rewrites_dash_bbb_manifest() {
     use http_body_util::BodyExt;
