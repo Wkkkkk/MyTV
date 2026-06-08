@@ -83,14 +83,10 @@ pub fn rewrite_mpd_urls(xml: &str, base_url: &str, direct: bool) -> String {
 /// Like `pct_encode` but preserves `$` so DASH template variables
 /// (`$Number$`, `$RepresentationID$`, etc.) survive proxy URL wrapping.
 fn pct_encode_template(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'$' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{:02X}", b),
-        })
-        .collect()
+    s.split('$')
+        .map(super::hls::pct_encode)
+        .collect::<Vec<_>>()
+        .join("$")
 }
 
 /// Rewrites named URL attributes on a start/empty element.
