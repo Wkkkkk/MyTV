@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
@@ -35,6 +36,8 @@ pub fn start(clients: HealthClients) {
 }
 
 async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &CorsCache) {
+    let mut probed_hosts: HashSet<String> = HashSet::new();
+
     let sources = match source::list_all(pool).await {
         Ok(s) => s,
         Err(e) => {
@@ -43,7 +46,13 @@ async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &Cor
         }
     };
     for src in sources {
-        let _ = check_source(pool, client, cors_cache, &src).await;
+        let ok = check_source(pool, client, &src).await;
+        if ok {
+            let host = crate::media::hls::extract_manifest_host(&src.url);
+            if probed_hosts.insert(host) {
+                probe_and_cache_cors(client, cors_cache, &src.url).await;
+            }
+        }
     }
 
     let items = match crate::model::playlist_item::list_all(pool).await {
@@ -54,7 +63,13 @@ async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &Cor
         }
     };
     for item in items {
-        let _ = check_playlist_item(pool, client, cors_cache, &item).await;
+        let ok = check_playlist_item(pool, client, &item).await;
+        if ok {
+            let host = crate::media::hls::extract_manifest_host(&item.url);
+            if probed_hosts.insert(host) {
+                probe_and_cache_cors(client, cors_cache, &item.url).await;
+            }
+        }
     }
 }
 
@@ -138,13 +153,8 @@ pub async fn probe_source(
     }
 }
 
-async fn check_source(
-    pool: &SqlitePool,
-    client: &reqwest::Client,
-    cors_cache: &CorsCache,
-    src: &Source,
-) -> bool {
-    let ok = run_check(
+async fn check_source(pool: &SqlitePool, client: &reqwest::Client, src: &Source) -> bool {
+    run_check(
         client,
         &src.url,
         &src.kind,
@@ -163,25 +173,16 @@ async fn check_source(
             .await
         },
     )
-    .await;
-
-    // Only probe CORS for reachable sources: a down source would just incur a
-    // second timeout, and its cached budget is best left as-is.
-    if ok {
-        probe_and_cache_cors(client, cors_cache, &src.url).await;
-    }
-
-    ok
+    .await
 }
 
 async fn check_playlist_item(
     pool: &SqlitePool,
     client: &reqwest::Client,
-    cors_cache: &CorsCache,
     item: &crate::model::playlist_item::PlaylistItem,
 ) -> bool {
     let kind = crate::model::source::SourceKind::detect(&item.url);
-    let ok = run_check(
+    run_check(
         client,
         &item.url,
         kind.as_str(),
@@ -200,13 +201,7 @@ async fn check_playlist_item(
             .await
         },
     )
-    .await;
-
-    if ok {
-        probe_and_cache_cors(client, cors_cache, &item.url).await;
-    }
-
-    ok
+    .await
 }
 
 /// Probes a playlist item's health and updates stats without touching `is_active`.
