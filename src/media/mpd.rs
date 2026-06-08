@@ -243,9 +243,10 @@ fn attr_value(e: &BytesStart<'_>, name: &[u8]) -> Option<String> {
 }
 
 /// Fetches an MPD and HEAD-probes its effective segment origin for `Access-Control-Allow-Origin: *`.
-/// Returns `Some(true)` if direct load is possible, `Some(false)` if proxy is needed,
-/// `None` if the MPD could not be fetched.
-pub async fn probe_mpd_cors(client: &reqwest::Client, mpd_url: &str) -> Option<bool> {
+/// Returns `Some((probe_url, cors))` where `probe_url` is the segment CDN URL that was
+/// probed (extracted from the MPD body) and `cors` is `true` if that CDN sends
+/// `Access-Control-Allow-Origin: *`. Returns `None` if the MPD could not be fetched.
+pub async fn probe_mpd_cors(client: &reqwest::Client, mpd_url: &str) -> Option<(String, bool)> {
     let body = client
         .get(mpd_url)
         .timeout(Duration::from_secs(10))
@@ -257,9 +258,10 @@ pub async fn probe_mpd_cors(client: &reqwest::Client, mpd_url: &str) -> Option<b
         .ok()?;
     let probe_url = find_mpd_probe_url(&body, mpd_url);
     if probe_url.starts_with("http://") {
-        return Some(false);
+        return Some((probe_url, false));
     }
-    Some(crate::media::hls::probe_cors(client, &probe_url).await)
+    let cors = crate::media::hls::probe_cors(client, &probe_url).await;
+    Some((probe_url, cors))
 }
 
 #[cfg(test)]
@@ -441,5 +443,38 @@ mod tests {
             "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd",
         );
         assert_eq!(url, "https://dash.akamaized.net/akamai/bbb_30fps/");
+    }
+
+    #[tokio::test]
+    async fn probe_mpd_cors_returns_probe_url_for_different_cdn() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // MPD is served at origin.test; its <BaseURL> points to a different CDN host.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 512];
+            let _ = conn.read(&mut buf).await;
+            let body =
+                b"<?xml version=\"1.0\"?><MPD><BaseURL>https://cdn.test/live/</BaseURL></MPD>";
+            conn.write_all(
+                format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len()).as_bytes(),
+            )
+            .await
+            .unwrap();
+            conn.write_all(body).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let (probe_url, cors_result) =
+            probe_mpd_cors(&client, &format!("http://127.0.0.1:{}/stream.mpd", port))
+                .await
+                .unwrap();
+        // probe_url must be the CDN URL extracted from <BaseURL>, not the manifest URL
+        // probe_url must be the CDN URL from <BaseURL>, not the manifest origin
+        assert_eq!(probe_url, "https://cdn.test/live/");
+        // cdn.test doesn't exist → connection failure → CORS defaults to false
+        assert!(!cors_result, "unreachable CDN must default to no CORS");
     }
 }
