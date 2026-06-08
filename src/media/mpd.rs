@@ -245,18 +245,33 @@ fn attr_value(e: &BytesStart<'_>, name: &[u8]) -> Option<String> {
 /// Fetches an MPD and HEAD-probes its effective segment origin for `Access-Control-Allow-Origin: *`.
 /// Returns `Some((probe_url, cors))` where `probe_url` is the segment CDN URL that was
 /// probed (extracted from the MPD body) and `cors` is `true` if that CDN sends
-/// `Access-Control-Allow-Origin: *`. Returns `None` if the MPD could not be fetched.
+/// `Access-Control-Allow-Origin: *`. Returns `None` if the MPD could not be fetched or exceeds
+/// the 20 MB body cap.
 pub async fn probe_mpd_cors(client: &reqwest::Client, mpd_url: &str) -> Option<(String, bool)> {
-    let body = client
+    const MAX_BODY: usize = 20 * 1024 * 1024;
+    let mut resp = client
         .get(mpd_url)
         .timeout(Duration::from_secs(10))
         .send()
         .await
-        .ok()?
-        .text()
-        .await
         .ok()?;
-    let probe_url = find_mpd_probe_url(&body, mpd_url);
+    if resp
+        .content_length()
+        .map_or(false, |n| n as usize > MAX_BODY)
+    {
+        tracing::warn!(url = %mpd_url, "MPD response exceeds 20 MB cap");
+        return None;
+    }
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp.chunk().await.ok()? {
+        if body.len() + chunk.len() > MAX_BODY {
+            tracing::warn!(url = %mpd_url, "MPD response body exceeds 20 MB cap");
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let text = String::from_utf8_lossy(&body).into_owned();
+    let probe_url = find_mpd_probe_url(&text, mpd_url);
     if probe_url.starts_with("http://") {
         return Some((probe_url, false));
     }
@@ -476,5 +491,31 @@ mod tests {
         assert_eq!(probe_url, "https://cdn.test/live/");
         // cdn.test doesn't exist → connection failure → CORS defaults to false
         assert!(!cors_result, "unreachable CDN must default to no CORS");
+    }
+
+    #[tokio::test]
+    async fn probe_mpd_cors_rejects_oversized_response() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 512];
+            let _ = conn.read(&mut buf).await;
+            // Advertise a 21 MB body — exceeds the 20 MB cap
+            conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 21000000\r\n\r\n")
+                .await
+                .unwrap();
+            // Connection closes; full body is never sent — content-length check must fire first
+        });
+
+        let client = reqwest::Client::new();
+        let result =
+            probe_mpd_cors(&client, &format!("http://127.0.0.1:{}/stream.mpd", port)).await;
+        assert!(
+            result.is_none(),
+            "oversized MPD (Content-Length > 20 MB) must return None"
+        );
     }
 }
