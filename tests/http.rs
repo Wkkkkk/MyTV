@@ -796,6 +796,36 @@ async fn source_toggle_returns_404_for_missing_source() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+// Playlist item toggle
+
+#[tokio::test]
+async fn playlist_item_toggle_redirects_on_success() {
+    // Item id=1 (ep1) belongs to channel 4 in seed data.
+    let response = app()
+        .await
+        .oneshot(authed_post("/admin/playlist/1/toggle"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok()),
+        Some("/admin/channels/4")
+    );
+}
+
+#[tokio::test]
+async fn playlist_item_toggle_returns_404_for_missing_item() {
+    let response = app()
+        .await
+        .oneshot(authed_post("/admin/playlist/9999/toggle"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
 // Channel edit form
 
 #[tokio::test]
