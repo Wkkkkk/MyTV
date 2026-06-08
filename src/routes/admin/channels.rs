@@ -116,7 +116,14 @@ pub async fn channel_create(
     if form.name.trim().is_empty() || form.category.trim().is_empty() {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
-    let sort_order: i64 = form.sort_order.trim().parse().unwrap_or(0);
+    let sort_order: i64 = if form.sort_order.trim().is_empty() {
+        0
+    } else {
+        form.sort_order
+            .trim()
+            .parse()
+            .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?
+    };
     let logo_url = if form.logo_url.trim().is_empty() {
         None
     } else {
@@ -186,7 +193,14 @@ pub async fn channel_update(
         .map_err(internal_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let sort_order: i64 = form.sort_order.trim().parse().unwrap_or(0);
+    let sort_order: i64 = if form.sort_order.trim().is_empty() {
+        0
+    } else {
+        form.sort_order
+            .trim()
+            .parse()
+            .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?
+    };
     let logo_url = if form.logo_url.trim().is_empty() {
         None
     } else {

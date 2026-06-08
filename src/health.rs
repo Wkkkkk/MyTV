@@ -88,7 +88,7 @@ pub async fn probe_source(
     }
 }
 
-pub async fn check_source(
+async fn check_source(
     pool: &SqlitePool,
     client: &reqwest::Client,
     cors_cache: &CorsCache,
@@ -137,7 +137,7 @@ pub async fn check_source(
     }
 }
 
-pub async fn check_playlist_item(
+async fn check_playlist_item(
     pool: &SqlitePool,
     client: &reqwest::Client,
     cors_cache: &CorsCache,

@@ -26,7 +26,7 @@ pub async fn fetch_hls_duration(client: &reqwest::Client, url: &str) -> Result<i
                 .ok_or_else(|| anyhow::anyhow!("no variants in master playlist: {}", url))?
                 .uri
                 .clone();
-            let variant_url = resolve_uri(&uri, url);
+            let variant_url = super::resolve_url(&uri, url);
             Box::pin(fetch_hls_duration(client, &variant_url)).await
         }
         m3u8_rs::Playlist::MediaPlaylist(media) => {
@@ -57,7 +57,7 @@ pub fn rewrite_hls_urls(content: &str, base_url: &str, direct_segments: bool) ->
             if line.starts_with('#') {
                 return rewrite_tag_uri(line, base_url, direct_segments);
             }
-            let abs = resolve_uri(line, base_url);
+            let abs = super::resolve_url(line, base_url);
             let lower = abs.to_lowercase();
             let path = lower.split('?').next().unwrap_or(&lower);
             if direct_segments && !path.ends_with(".m3u8") && !path.ends_with(".m3u") {
@@ -89,7 +89,7 @@ fn rewrite_tag_uri(line: &str, base_url: &str, direct_segments: bool) -> String 
         return line.to_string();
     };
     let uri = &line[val_start..val_start + val_len];
-    let abs = resolve_uri(uri, base_url);
+    let abs = super::resolve_url(uri, base_url);
     let lower = abs.to_lowercase();
     let path = lower.split('?').next().unwrap_or(&lower);
     let replacement = if direct_segments && !path.ends_with(".m3u8") && !path.ends_with(".m3u") {
@@ -126,21 +126,6 @@ fn origin_of(url: &str) -> &str {
     &url[..after_scheme + host_len]
 }
 
-/// Resolves a URI from an HLS manifest relative to the manifest's own URL.
-fn resolve_uri(uri: &str, base_url: &str) -> String {
-    if uri.starts_with("http://") || uri.starts_with("https://") {
-        return uri.to_string();
-    }
-    if uri.starts_with('/') {
-        return format!("{}{}", origin_of(base_url), uri);
-    }
-    let base_dir = base_url
-        .rsplit_once('/')
-        .map(|(b, _)| b)
-        .unwrap_or(base_url);
-    format!("{}/{}", base_dir, uri)
-}
-
 /// Returns the first resolved absolute segment URL from an HLS media playlist.
 /// Skips comment lines, empty lines, and sub-playlist lines (`.m3u8`/`.m3u`).
 /// Returns `None` for master playlists that contain only sub-playlist lines.
@@ -154,7 +139,7 @@ pub fn find_first_segment_url(content: &str, base_url: &str) -> Option<String> {
         if path.ends_with(".m3u8") || path.ends_with(".m3u") {
             continue;
         }
-        return Some(resolve_uri(line, base_url));
+        return Some(super::resolve_url(line, base_url));
     }
     None
 }
@@ -175,7 +160,7 @@ pub fn find_first_variant_url(content: &str, base_url: &str) -> Option<String> {
         let lower = line.to_lowercase();
         let path = lower.split('?').next().unwrap_or(&lower);
         if path.ends_with(".m3u8") || path.ends_with(".m3u") {
-            return Some(resolve_uri(line, base_url));
+            return Some(super::resolve_url(line, base_url));
         }
     }
     None
@@ -302,33 +287,6 @@ mod tests {
         assert_eq!(
             pct_encode("https://example.com/a?b=c&d=e"),
             "https%3A%2F%2Fexample.com%2Fa%3Fb%3Dc%26d%3De"
-        );
-    }
-
-    #[test]
-    fn test_resolve_uri_absolute() {
-        assert_eq!(
-            resolve_uri(
-                "https://cdn.example.com/seg.ts",
-                "https://example.com/index.m3u8"
-            ),
-            "https://cdn.example.com/seg.ts"
-        );
-    }
-
-    #[test]
-    fn test_resolve_uri_relative() {
-        assert_eq!(
-            resolve_uri("variant.m3u8", "https://example.com/live/master.m3u8"),
-            "https://example.com/live/variant.m3u8"
-        );
-    }
-
-    #[test]
-    fn test_resolve_uri_root_relative() {
-        assert_eq!(
-            resolve_uri("/hls/variant.m3u8", "https://example.com/live/master.m3u8"),
-            "https://example.com/hls/variant.m3u8"
         );
     }
 

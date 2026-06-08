@@ -51,7 +51,7 @@ pub fn rewrite_mpd_urls(xml: &str, base_url: &str, direct: bool) -> String {
                         writer.write_event(Event::Text(e)).unwrap();
                     } else {
                         // Relative BaseURL — resolve to absolute
-                        let resolved = resolve_relative_url(trimmed, base_url);
+                        let resolved = super::resolve_url(trimmed, base_url);
                         writer
                             .write_event(Event::Text(BytesText::new(&resolved)))
                             .unwrap();
@@ -91,33 +91,6 @@ fn pct_encode_template(s: &str) -> String {
             _ => format!("%{:02X}", b),
         })
         .collect()
-}
-
-/// Resolves a URL against a base URL.
-/// Absolute URLs are returned unchanged.
-/// Relative URLs (including `./`) are combined with the base URL's directory.
-fn resolve_relative_url(url: &str, base_url: &str) -> String {
-    if url.starts_with("http://") || url.starts_with("https://") {
-        return url.to_string();
-    }
-    if url.starts_with('/') {
-        let after_scheme = base_url.find("://").map(|i| i + 3).unwrap_or(0);
-        let host_len = base_url[after_scheme..]
-            .find('/')
-            .unwrap_or(base_url[after_scheme..].len());
-        let origin = &base_url[..after_scheme + host_len];
-        return format!("{}{}", origin, url);
-    }
-    let base_dir = base_url
-        .rsplit_once('/')
-        .map(|(b, _)| b)
-        .unwrap_or(base_url);
-    let stripped = url.trim_start_matches("./");
-    if stripped.is_empty() {
-        format!("{}/", base_dir)
-    } else {
-        format!("{}/{}", base_dir, stripped)
-    }
 }
 
 /// Rewrites named URL attributes on a start/empty element.
@@ -236,7 +209,7 @@ pub fn find_mpd_probe_url(xml: &str, mpd_url: &str) -> String {
             },
             Ok(Event::Text(ref e)) if in_base_url => {
                 let text = e.decode().unwrap_or_default();
-                let resolved = resolve_relative_url(text.trim(), mpd_url);
+                let resolved = super::resolve_url(text.trim(), mpd_url);
                 if resolved.starts_with("https://") {
                     return resolved;
                 }
