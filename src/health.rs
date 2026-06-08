@@ -43,7 +43,7 @@ async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &Cor
         }
     };
     for src in sources {
-        check_source(pool, client, cors_cache, &src).await;
+        let _ = check_source(pool, client, cors_cache, &src).await;
     }
 
     let items = match crate::model::playlist_item::list_all(pool).await {
@@ -54,8 +54,54 @@ async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &Cor
         }
     };
     for item in items {
-        check_playlist_item(pool, client, cors_cache, &item).await;
+        let _ = check_playlist_item(pool, client, cors_cache, &item).await;
     }
+}
+
+async fn run_check<F, Fut>(
+    client: &reqwest::Client,
+    url: &str,
+    kind: &str,
+    is_active: bool,
+    consecutive_failures: i64,
+    manage_lifecycle: bool,
+    update: F,
+) -> bool
+where
+    F: FnOnce(&'static str, Option<String>, i64, Option<bool>) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<()>>,
+{
+    let (ok, reason) = do_http_check(client, url, kind).await;
+    let (new_failures, action) = process_result(is_active, consecutive_failures, ok);
+    let is_active_change = if manage_lifecycle {
+        match action {
+            HealthAction::Disable => Some(false),
+            HealthAction::Reenable => Some(true),
+            HealthAction::None => None,
+        }
+    } else {
+        None
+    };
+
+    let status: &'static str = if ok { "ok" } else { "error" };
+    if let Err(e) = update(status, reason, new_failures, is_active_change).await {
+        tracing::error!("health: failed to update {url}: {e}");
+        return false;
+    }
+
+    if manage_lifecycle {
+        match action {
+            HealthAction::Disable => tracing::warn!(
+                "health: {url} auto-disabled after {new_failures} consecutive failures"
+            ),
+            HealthAction::Reenable => {
+                tracing::info!("health: {url} auto-re-enabled after passing health check")
+            }
+            HealthAction::None => {}
+        }
+    }
+
+    ok
 }
 
 /// Probes a source's health and updates stats without touching `is_active`.
@@ -66,22 +112,26 @@ pub async fn probe_source(
     cors_cache: &CorsCache,
     src: &Source,
 ) {
-    let (ok, reason) = do_http_check(client, &src.url, &src.kind).await;
-    let new_failures = if ok { 0 } else { src.consecutive_failures + 1 };
-
-    if let Err(e) = source::update_health(
-        pool,
-        src.id,
-        if ok { "ok" } else { "error" },
-        reason.as_deref(),
-        new_failures,
-        None, // never change is_active
+    let ok = run_check(
+        client,
+        &src.url,
+        &src.kind,
+        src.is_active,
+        src.consecutive_failures,
+        false,
+        |status, reason, failures, is_active_change| async move {
+            source::update_health(
+                pool,
+                src.id,
+                status,
+                reason.as_deref(),
+                failures,
+                is_active_change,
+            )
+            .await
+        },
     )
-    .await
-    {
-        tracing::error!("health: failed to update source {}: {e}", src.id);
-        return;
-    }
+    .await;
 
     if ok {
         probe_and_cache_cors(client, cors_cache, &src.url).await;
@@ -93,48 +143,33 @@ async fn check_source(
     client: &reqwest::Client,
     cors_cache: &CorsCache,
     src: &Source,
-) {
-    let (ok, reason) = do_http_check(client, &src.url, &src.kind).await;
-    let (new_failures, action) = process_result(src.is_active, src.consecutive_failures, ok);
-
-    let is_active = match action {
-        HealthAction::Disable => Some(false),
-        HealthAction::Reenable => Some(true),
-        HealthAction::None => None,
-    };
-
-    if let Err(e) = source::update_health(
-        pool,
-        src.id,
-        if ok { "ok" } else { "error" },
-        reason.as_deref(),
-        new_failures,
-        is_active,
+) -> bool {
+    let ok = run_check(
+        client,
+        &src.url,
+        &src.kind,
+        src.is_active,
+        src.consecutive_failures,
+        true,
+        |status, reason, failures, is_active_change| async move {
+            source::update_health(
+                pool,
+                src.id,
+                status,
+                reason.as_deref(),
+                failures,
+                is_active_change,
+            )
+            .await
+        },
     )
-    .await
-    {
-        tracing::error!("health: failed to update source {}: {e}", src.id);
-        return;
-    }
+    .await;
 
-    match action {
-        HealthAction::Disable => tracing::warn!(
-            "health: source {} auto-disabled after {} consecutive failures",
-            src.id,
-            new_failures
-        ),
-        HealthAction::Reenable => tracing::info!(
-            "health: source {} auto-re-enabled after passing health check",
-            src.id
-        ),
-        HealthAction::None => {}
-    }
-
-    // Only probe CORS for reachable sources: a down source would just incur a
-    // second timeout, and its cached budget is best left as-is.
     if ok {
         probe_and_cache_cors(client, cors_cache, &src.url).await;
     }
+
+    ok
 }
 
 async fn check_playlist_item(
@@ -142,47 +177,34 @@ async fn check_playlist_item(
     client: &reqwest::Client,
     cors_cache: &CorsCache,
     item: &crate::model::playlist_item::PlaylistItem,
-) {
+) -> bool {
     let kind = crate::model::source::SourceKind::detect(&item.url);
-    let (ok, reason) = do_http_check(client, &item.url, kind.as_str()).await;
-    let (new_failures, action) = process_result(item.is_active, item.consecutive_failures, ok);
-
-    let is_active = match action {
-        HealthAction::Disable => Some(false),
-        HealthAction::Reenable => Some(true),
-        HealthAction::None => None,
-    };
-
-    if let Err(e) = crate::model::playlist_item::update_health(
-        pool,
-        item.id,
-        if ok { "ok" } else { "error" },
-        reason.as_deref(),
-        new_failures,
-        is_active,
+    let ok = run_check(
+        client,
+        &item.url,
+        kind.as_str(),
+        item.is_active,
+        item.consecutive_failures,
+        true,
+        |status, reason, failures, is_active_change| async move {
+            crate::model::playlist_item::update_health(
+                pool,
+                item.id,
+                status,
+                reason.as_deref(),
+                failures,
+                is_active_change,
+            )
+            .await
+        },
     )
-    .await
-    {
-        tracing::error!("health: failed to update playlist item {}: {e}", item.id);
-        return;
-    }
-
-    match action {
-        HealthAction::Disable => tracing::warn!(
-            "health: playlist item {} auto-disabled after {} consecutive failures",
-            item.id,
-            new_failures
-        ),
-        HealthAction::Reenable => tracing::info!(
-            "health: playlist item {} auto-re-enabled after passing health check",
-            item.id
-        ),
-        HealthAction::None => {}
-    }
+    .await;
 
     if ok {
         probe_and_cache_cors(client, cors_cache, &item.url).await;
     }
+
+    ok
 }
 
 pub async fn probe_playlist_item(
@@ -192,22 +214,26 @@ pub async fn probe_playlist_item(
     item: &crate::model::playlist_item::PlaylistItem,
 ) {
     let kind = crate::model::source::SourceKind::detect(&item.url);
-    let (ok, reason) = do_http_check(client, &item.url, kind.as_str()).await;
-    let new_failures = if ok { 0 } else { item.consecutive_failures + 1 };
-
-    if let Err(e) = crate::model::playlist_item::update_health(
-        pool,
-        item.id,
-        if ok { "ok" } else { "error" },
-        reason.as_deref(),
-        new_failures,
-        None,
+    let ok = run_check(
+        client,
+        &item.url,
+        kind.as_str(),
+        item.is_active,
+        item.consecutive_failures,
+        false,
+        |status, reason, failures, is_active_change| async move {
+            crate::model::playlist_item::update_health(
+                pool,
+                item.id,
+                status,
+                reason.as_deref(),
+                failures,
+                is_active_change,
+            )
+            .await
+        },
     )
-    .await
-    {
-        tracing::error!("health: failed to update playlist item {}: {e}", item.id);
-        return;
-    }
+    .await;
 
     if ok {
         probe_and_cache_cors(client, cors_cache, &item.url).await;
@@ -561,7 +587,7 @@ mod tests {
                     is_active_change.is_none(),
                     "probe mode must never pass is_active_change = Some(…)"
                 );
-                Ok::<(), sqlx::Error>(())
+                Ok::<(), anyhow::Error>(())
             },
         )
         .await;
