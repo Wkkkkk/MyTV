@@ -77,6 +77,7 @@ fn rewrite_tag_uri(line: &str, base_url: &str, direct_segments: bool) -> String 
         && !line.starts_with("#EXT-X-MAP:")
         && !line.starts_with("#EXT-X-I-FRAME-STREAM-INF:")
         && !line.starts_with("#EXT-X-SESSION-DATA:")
+        && !line.starts_with("#EXT-X-KEY:")
     {
         return line.to_string();
     }
@@ -509,6 +510,36 @@ mod tests {
             "got: {result}"
         );
         assert!(!result.contains("/stream-proxy"), "got: {result}");
+    }
+
+    #[test]
+    fn test_rewrite_hls_urls_ext_x_key_uri_proxied() {
+        let manifest = "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://keys.example.com/key.bin\",IV=0x00000000000000000000000000000001\n";
+        let result = rewrite_hls_urls(
+            manifest,
+            "https://cdn.example.com/live/playlist.m3u8",
+            false,
+        );
+        assert!(
+            result.contains("/stream-proxy?url=https%3A%2F%2Fkeys.example.com%2Fkey.bin"),
+            "EXT-X-KEY URI must be proxied; got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_rewrite_hls_urls_ext_x_key_relative_uri_proxied() {
+        let manifest = "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"keys/key.bin\"\n";
+        let result = rewrite_hls_urls(
+            manifest,
+            "https://cdn.example.com/live/playlist.m3u8",
+            false,
+        );
+        assert!(
+            result.contains(
+                "/stream-proxy?url=https%3A%2F%2Fcdn.example.com%2Flive%2Fkeys%2Fkey.bin"
+            ),
+            "EXT-X-KEY relative URI must be resolved and proxied; got: {result}"
+        );
     }
 
     #[test]
