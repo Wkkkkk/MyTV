@@ -14,7 +14,9 @@ pub use discover::{
     discover_youtube_search,
 };
 pub use metrics::metrics_json;
-pub use playlist::{playlist_item_create, playlist_item_delete, playlist_item_test};
+pub use playlist::{
+    playlist_item_create, playlist_item_delete, playlist_item_test, playlist_item_toggle,
+};
 pub use sources::{source_create, source_delete, source_test, source_toggle};
 
 use axum::{
@@ -61,6 +63,10 @@ pub struct AdminPlaylistItemRow {
     pub sort_order: i64,
     pub budget_badge_class: &'static str,
     pub budget_badge_char: &'static str,
+    pub is_active: bool,
+    pub last_status: Option<String>,
+    pub consecutive_failures: i64,
+    pub failure_reason: Option<String>,
 }
 
 impl AdminPlaylistItemRow {
@@ -126,6 +132,10 @@ impl From<playlist_item::PlaylistItem> for AdminPlaylistItemRow {
             sort_order: i.sort_order,
             budget_badge_class,
             budget_badge_char,
+            is_active: i.is_active,
+            last_status: i.last_status,
+            consecutive_failures: i.consecutive_failures,
+            failure_reason: i.failure_reason,
         }
     }
 }

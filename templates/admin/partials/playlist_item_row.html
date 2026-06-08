@@ -4,6 +4,33 @@
   <td style="word-break:break-all;max-width:360px;font-size:0.78rem">{{ item.url }}</td>
   <td style="white-space:nowrap">{{ item.duration_secs }}s</td>
   <td>
+    {% if item.is_active %}
+    <span class="badge badge-on">on</span>
+    {% else %}
+    <span class="badge badge-off">off</span>
+    {% endif %}
+  </td>
+  <td>
+    {% match item.last_status %}
+    {% when None %}
+    <span style="color:#888" title="Never checked">○</span>
+    {% when Some(status) %}
+    {% if status == "ok" %}
+    <span style="color:#4caf50" title="Healthy">●</span>
+    {% else %}
+    <span style="color:#e94560" title="Last check failed">●</span>
+    {% match item.failure_reason %}
+    {% when Some(reason) %}
+    <div style="font-size:0.7rem;color:#e94560;margin-top:2px">{{ reason }}</div>
+    {% when None %}
+    {% endmatch %}
+    {% if !item.is_active && item.consecutive_failures >= 3 %}
+    <div style="font-size:0.7rem;color:#888">[auto-disabled]</div>
+    {% endif %}
+    {% endif %}
+    {% endmatch %}
+  </td>
+  <td>
     {% if item.budget_badge_char.is_empty() %}
     <span style="color:#888" title="Network budget not yet probed">·</span>
     {% else %}
@@ -11,15 +38,21 @@
     {% endif %}
   </td>
   <td style="white-space:nowrap">
-    <button class="btn btn-sm" type="button"
-            hx-post="/admin/playlist/{{ item.id }}/test"
-            hx-target="#pl-row-{{ item.id }}"
-            hx-swap="outerHTML"
-            hx-disabled-elt="this">Test</button>
+    <form action="/admin/playlist/{{ item.id }}/toggle" method="post" style="display:inline-block">
+      <button class="btn btn-sm" type="submit">
+        {% if item.is_active %}Disable{% else %}Enable{% endif %}
+      </button>
+    </form>
     <form action="/admin/playlist/{{ item.id }}/delete" method="post"
           style="display:inline-block;margin-left:4px">
       <button class="btn btn-sm btn-danger" type="submit"
               onclick="return confirm('Remove this item?')">Delete</button>
     </form>
+    <button class="btn btn-sm" type="button"
+            hx-post="/admin/playlist/{{ item.id }}/test"
+            hx-target="#pl-row-{{ item.id }}"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            style="margin-left:4px">Test</button>
   </td>
 </tr>

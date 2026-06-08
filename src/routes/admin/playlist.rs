@@ -93,6 +93,24 @@ pub async fn playlist_item_delete(
     )))
 }
 
+pub async fn playlist_item_toggle(
+    State(state): State<AppState>,
+    Path(item_id): Path<i64>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let item = playlist_item::get(&state.pool, item_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    playlist_item::set_active(&state.pool, item_id, !item.is_active)
+        .await
+        .map_err(internal_error)?;
+    Ok(Redirect::to(&format!(
+        "/admin/channels/{}",
+        item.channel_id
+    )))
+}
+
 pub async fn playlist_item_test(
     State(state): State<AppState>,
     Path(item_id): Path<i64>,
@@ -102,10 +120,16 @@ pub async fn playlist_item_test(
         .map_err(internal_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    crate::health::probe_and_cache_cors(&state.http_client, &state.cors_cache, &item.url).await;
+    crate::health::probe_playlist_item(&state.pool, &state.http_client, &state.cors_cache, &item)
+        .await;
+
+    let updated = playlist_item::get(&state.pool, item_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let cors = state.cors_cache.read().await.clone();
-    let mut row: AdminPlaylistItemRow = item.into();
+    let mut row: AdminPlaylistItemRow = updated.into();
     row.apply_budget(&cors);
 
     render(PlaylistItemRowTemplate { item: row })

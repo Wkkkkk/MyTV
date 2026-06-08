@@ -95,6 +95,11 @@ mod tests {
             url: format!("https://example.com/{}.mp4", title),
             duration_secs,
             sort_order: id - 1,
+            is_active: true,
+            last_checked_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            failure_reason: None,
         }
     }
 

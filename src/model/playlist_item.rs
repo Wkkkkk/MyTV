@@ -11,6 +11,11 @@ pub struct PlaylistItem {
     pub url: String,
     pub duration_secs: i64,
     pub sort_order: i64,
+    pub is_active: bool,
+    pub last_checked_at: Option<i64>,
+    pub last_status: Option<String>,
+    pub consecutive_failures: i64,
+    pub failure_reason: Option<String>,
 }
 
 /// Input for creating a new playlist item.
@@ -82,6 +87,76 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
         .await?
         .rows_affected();
     Ok(rows > 0)
+}
+
+/// List only active items for a channel ordered by sort_order.
+pub async fn list_active_for_channel(
+    pool: &SqlitePool,
+    channel_id: i64,
+) -> Result<Vec<PlaylistItem>> {
+    sqlx::query_as::<_, PlaylistItem>(
+        "SELECT * FROM playlist_items WHERE channel_id = ? AND is_active = 1 ORDER BY sort_order ASC",
+    )
+    .bind(channel_id)
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
+}
+
+/// Set the is_active flag on a playlist item; returns true if a row was updated.
+pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool> {
+    let rows = sqlx::query("UPDATE playlist_items SET is_active = ? WHERE id = ?")
+        .bind(active)
+        .bind(id)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    Ok(rows > 0)
+}
+
+/// Update health check fields on a playlist item; optionally changes is_active.
+pub async fn update_health(
+    pool: &SqlitePool,
+    id: i64,
+    status: &str,
+    reason: Option<&str>,
+    consecutive_failures: i64,
+    is_active: Option<bool>,
+) -> Result<()> {
+    if let Some(active) = is_active {
+        sqlx::query(
+            "UPDATE playlist_items
+             SET last_checked_at = strftime('%s','now'),
+                 last_status = ?,
+                 failure_reason = ?,
+                 consecutive_failures = ?,
+                 is_active = ?
+             WHERE id = ?",
+        )
+        .bind(status)
+        .bind(reason)
+        .bind(consecutive_failures)
+        .bind(active)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE playlist_items
+             SET last_checked_at = strftime('%s','now'),
+                 last_status = ?,
+                 failure_reason = ?,
+                 consecutive_failures = ?
+             WHERE id = ?",
+        )
+        .bind(status)
+        .bind(reason)
+        .bind(consecutive_failures)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
 }
 
 /// Sum the duration of all items in the playlist.
@@ -179,6 +254,11 @@ mod tests {
                 url: "u".into(),
                 duration_secs: 3600,
                 sort_order: 0,
+                is_active: true,
+                last_checked_at: None,
+                last_status: None,
+                consecutive_failures: 0,
+                failure_reason: None,
             },
             PlaylistItem {
                 id: 2,
@@ -187,6 +267,11 @@ mod tests {
                 url: "u".into(),
                 duration_secs: 1800,
                 sort_order: 1,
+                is_active: true,
+                last_checked_at: None,
+                last_status: None,
+                consecutive_failures: 0,
+                failure_reason: None,
             },
         ];
         // 500 seconds into the loop — still in item A
@@ -205,6 +290,11 @@ mod tests {
                 url: "u".into(),
                 duration_secs: 3600,
                 sort_order: 0,
+                is_active: true,
+                last_checked_at: None,
+                last_status: None,
+                consecutive_failures: 0,
+                failure_reason: None,
             },
             PlaylistItem {
                 id: 2,
@@ -213,6 +303,11 @@ mod tests {
                 url: "u".into(),
                 duration_secs: 1800,
                 sort_order: 1,
+                is_active: true,
+                last_checked_at: None,
+                last_status: None,
+                consecutive_failures: 0,
+                failure_reason: None,
             },
         ];
         // 4000 seconds in — 400 seconds into item B (after A's 3600)
@@ -231,6 +326,11 @@ mod tests {
                 url: "u".into(),
                 duration_secs: 3600,
                 sort_order: 0,
+                is_active: true,
+                last_checked_at: None,
+                last_status: None,
+                consecutive_failures: 0,
+                failure_reason: None,
             },
             PlaylistItem {
                 id: 2,
@@ -239,6 +339,11 @@ mod tests {
                 url: "u".into(),
                 duration_secs: 1800,
                 sort_order: 1,
+                is_active: true,
+                last_checked_at: None,
+                last_status: None,
+                consecutive_failures: 0,
+                failure_reason: None,
             },
         ];
         // total = 5400; 5500 seconds in wraps to 100 seconds into item A
@@ -278,5 +383,109 @@ mod tests {
             items.is_empty(),
             "ON DELETE CASCADE should remove playlist items"
         );
+    }
+
+    #[tokio::test]
+    async fn test_list_active_excludes_inactive_items() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+
+        let first = create(&pool, item(ch.id, "ep1", 1800, 0)).await.unwrap();
+        create(&pool, item(ch.id, "ep2", 2400, 1)).await.unwrap();
+
+        set_active(&pool, first.id, false).await.unwrap();
+
+        let active = list_active_for_channel(&pool, ch.id).await.unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].title, "ep2");
+    }
+
+    #[tokio::test]
+    async fn test_set_active_toggles_item() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+
+        let it = create(&pool, item(ch.id, "ep1", 1800, 0)).await.unwrap();
+        assert!(it.is_active);
+
+        set_active(&pool, it.id, false).await.unwrap();
+        assert!(list_active_for_channel(&pool, ch.id)
+            .await
+            .unwrap()
+            .is_empty());
+
+        set_active(&pool, it.id, true).await.unwrap();
+        assert_eq!(
+            list_active_for_channel(&pool, ch.id).await.unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_health_ok_resets_failures() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let it = create(&pool, item(ch.id, "ep1", 1800, 0)).await.unwrap();
+
+        update_health(&pool, it.id, "error", Some("timeout"), 2, None)
+            .await
+            .unwrap();
+        update_health(&pool, it.id, "ok", None, 0, None)
+            .await
+            .unwrap();
+
+        let updated = get(&pool, it.id).await.unwrap().unwrap();
+        assert_eq!(updated.last_status.as_deref(), Some("ok"));
+        assert_eq!(updated.consecutive_failures, 0);
+        assert!(updated.failure_reason.is_none());
+        assert!(updated.is_active);
+    }
+
+    #[tokio::test]
+    async fn test_update_health_disables_after_threshold() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let it = create(&pool, item(ch.id, "ep1", 1800, 0)).await.unwrap();
+
+        update_health(
+            &pool,
+            it.id,
+            "error",
+            Some("connection refused"),
+            3,
+            Some(false),
+        )
+        .await
+        .unwrap();
+
+        let updated = get(&pool, it.id).await.unwrap().unwrap();
+        assert!(!updated.is_active);
+        assert_eq!(updated.consecutive_failures, 3);
+        assert_eq!(updated.last_status.as_deref(), Some("error"));
+        assert_eq!(
+            updated.failure_reason.as_deref(),
+            Some("connection refused")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_health_reenables_disabled_item() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let it = create(&pool, item(ch.id, "ep1", 1800, 0)).await.unwrap();
+
+        update_health(&pool, it.id, "error", Some("timeout"), 3, Some(false))
+            .await
+            .unwrap();
+        assert!(!get(&pool, it.id).await.unwrap().unwrap().is_active);
+
+        update_health(&pool, it.id, "ok", None, 0, Some(true))
+            .await
+            .unwrap();
+        let reenabled = get(&pool, it.id).await.unwrap().unwrap();
+        assert!(reenabled.is_active);
+        assert_eq!(reenabled.consecutive_failures, 0);
+        assert_eq!(reenabled.last_status.as_deref(), Some("ok"));
+        assert!(reenabled.failure_reason.is_none());
     }
 }

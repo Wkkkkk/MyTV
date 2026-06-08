@@ -113,7 +113,7 @@ async fn vod_items_and_index(
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
         .timestamp();
 
-    let items = playlist_item::list_for_channel(&state.pool, ch.id)
+    let items = playlist_item::list_active_for_channel(&state.pool, ch.id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -697,6 +697,72 @@ mod tests {
         let err = next_live(&state, &ch, Some("https://primary.example.com/stream.m3u8"))
             .await
             .unwrap_err();
+        assert_eq!(err, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_tune_vod_skips_disabled_item() {
+        let state = test_state().await;
+        let ch = make_vod_channel(&state, 0).await;
+
+        let first = playlist_item::create(
+            &state.pool,
+            playlist_item::NewPlaylistItem {
+                channel_id: ch.id,
+                title: "A".into(),
+                url: "https://example.com/a.m3u8".into(),
+                duration_secs: 3600,
+                sort_order: 0,
+            },
+        )
+        .await
+        .unwrap();
+
+        playlist_item::create(
+            &state.pool,
+            playlist_item::NewPlaylistItem {
+                channel_id: ch.id,
+                title: "B".into(),
+                url: "https://example.com/b.m3u8".into(),
+                duration_secs: 1800,
+                sort_order: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        playlist_item::set_active(&state.pool, first.id, false)
+            .await
+            .unwrap();
+
+        // Active set = [B] (1800s). Any offset within 1800s lands on B.
+        let result = tune_vod_at(&state, &ch, 100).await.unwrap();
+        assert_eq!(result.url, "https://example.com/b.m3u8");
+    }
+
+    #[tokio::test]
+    async fn test_tune_vod_returns_503_when_all_items_disabled() {
+        let state = test_state().await;
+        let ch = make_vod_channel(&state, 0).await;
+
+        let it = playlist_item::create(
+            &state.pool,
+            playlist_item::NewPlaylistItem {
+                channel_id: ch.id,
+                title: "A".into(),
+                url: "https://example.com/a.m3u8".into(),
+                duration_secs: 3600,
+                sort_order: 0,
+            },
+        )
+        .await
+        .unwrap();
+
+        playlist_item::set_active(&state.pool, it.id, false)
+            .await
+            .unwrap();
+
+        let err = tune_vod_at(&state, &ch, 1000).await.unwrap_err();
         assert_eq!(err, StatusCode::SERVICE_UNAVAILABLE);
     }
 

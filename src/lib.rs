@@ -81,6 +81,10 @@ pub fn build_router(state: AppState) -> Router {
             "/playlist/:id/test",
             post(routes::admin::playlist_item_test),
         )
+        .route(
+            "/playlist/:id/toggle",
+            post(routes::admin::playlist_item_toggle),
+        )
         .route("/discover", get(routes::admin::discover_page))
         .route("/discover/add-form", post(routes::admin::discover_add_form))
         .route("/discover/add", post(routes::admin::discover_add))

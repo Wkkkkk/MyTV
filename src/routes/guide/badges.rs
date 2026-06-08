@@ -123,6 +123,11 @@ mod tests {
             url: url.into(),
             duration_secs: dur,
             sort_order: 0,
+            is_active: true,
+            last_checked_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            failure_reason: None,
         }
     }
 

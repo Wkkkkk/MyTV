@@ -45,14 +45,7 @@ async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &Cor
     for src in sources {
         check_source(pool, client, cors_cache, &src).await;
     }
-    probe_all_playlist_cors(pool, client, cors_cache).await;
-}
 
-async fn probe_all_playlist_cors(
-    pool: &SqlitePool,
-    client: &reqwest::Client,
-    cors_cache: &CorsCache,
-) {
     let items = match crate::model::playlist_item::list_all(pool).await {
         Ok(i) => i,
         Err(e) => {
@@ -60,18 +53,8 @@ async fn probe_all_playlist_cors(
             return;
         }
     };
-    // Dedupe by host so each CDN is probed at most once per cycle.
-    let mut probed_hosts = std::collections::HashSet::new();
     for item in items {
-        if !item.url.starts_with("https://") || crate::media::resolver::needs_resolution(&item.url)
-        {
-            continue;
-        }
-        let host = crate::media::hls::extract_manifest_host(&item.url);
-        if !probed_hosts.insert(host) {
-            continue;
-        }
-        probe_and_cache_cors(client, cors_cache, &item.url).await;
+        check_playlist_item(pool, client, cors_cache, &item).await;
     }
 }
 
@@ -83,7 +66,7 @@ pub async fn probe_source(
     cors_cache: &CorsCache,
     src: &Source,
 ) {
-    let (ok, reason) = do_http_check(client, src).await;
+    let (ok, reason) = do_http_check(client, &src.url, &src.kind).await;
     let new_failures = if ok { 0 } else { src.consecutive_failures + 1 };
 
     if let Err(e) = source::update_health(
@@ -111,8 +94,8 @@ pub async fn check_source(
     cors_cache: &CorsCache,
     src: &Source,
 ) {
-    let (ok, reason) = do_http_check(client, src).await;
-    let (new_failures, action) = process_result(src, ok);
+    let (ok, reason) = do_http_check(client, &src.url, &src.kind).await;
+    let (new_failures, action) = process_result(src.is_active, src.consecutive_failures, ok);
 
     let is_active = match action {
         HealthAction::Disable => Some(false),
@@ -154,6 +137,83 @@ pub async fn check_source(
     }
 }
 
+pub async fn check_playlist_item(
+    pool: &SqlitePool,
+    client: &reqwest::Client,
+    cors_cache: &CorsCache,
+    item: &crate::model::playlist_item::PlaylistItem,
+) {
+    let kind = crate::model::source::SourceKind::detect(&item.url);
+    let (ok, reason) = do_http_check(client, &item.url, kind.as_str()).await;
+    let (new_failures, action) = process_result(item.is_active, item.consecutive_failures, ok);
+
+    let is_active = match action {
+        HealthAction::Disable => Some(false),
+        HealthAction::Reenable => Some(true),
+        HealthAction::None => None,
+    };
+
+    if let Err(e) = crate::model::playlist_item::update_health(
+        pool,
+        item.id,
+        if ok { "ok" } else { "error" },
+        reason.as_deref(),
+        new_failures,
+        is_active,
+    )
+    .await
+    {
+        tracing::error!("health: failed to update playlist item {}: {e}", item.id);
+        return;
+    }
+
+    match action {
+        HealthAction::Disable => tracing::warn!(
+            "health: playlist item {} auto-disabled after {} consecutive failures",
+            item.id,
+            new_failures
+        ),
+        HealthAction::Reenable => tracing::info!(
+            "health: playlist item {} auto-re-enabled after passing health check",
+            item.id
+        ),
+        HealthAction::None => {}
+    }
+
+    if ok {
+        probe_and_cache_cors(client, cors_cache, &item.url).await;
+    }
+}
+
+pub async fn probe_playlist_item(
+    pool: &SqlitePool,
+    client: &reqwest::Client,
+    cors_cache: &CorsCache,
+    item: &crate::model::playlist_item::PlaylistItem,
+) {
+    let kind = crate::model::source::SourceKind::detect(&item.url);
+    let (ok, reason) = do_http_check(client, &item.url, kind.as_str()).await;
+    let new_failures = if ok { 0 } else { item.consecutive_failures + 1 };
+
+    if let Err(e) = crate::model::playlist_item::update_health(
+        pool,
+        item.id,
+        if ok { "ok" } else { "error" },
+        reason.as_deref(),
+        new_failures,
+        None,
+    )
+    .await
+    {
+        tracing::error!("health: failed to update playlist item {}: {e}", item.id);
+        return;
+    }
+
+    if ok {
+        probe_and_cache_cors(client, cors_cache, &item.url).await;
+    }
+}
+
 /// Probes CORS for one URL and caches the result keyed by host. Returns `None`
 /// (a no-op, leaving the cache unchanged) for non-HTTPS URLs or resolution-needed
 /// (youtube/twitch) URLs, which have no stable HLS manifest to probe.
@@ -172,8 +232,8 @@ pub async fn probe_and_cache_cors(
     Some(result)
 }
 
-async fn do_http_check(client: &reqwest::Client, src: &Source) -> (bool, Option<String>) {
-    let mut resp = match client.get(&src.url).timeout(HTTP_TIMEOUT).send().await {
+async fn do_http_check(client: &reqwest::Client, url: &str, kind: &str) -> (bool, Option<String>) {
+    let mut resp = match client.get(url).timeout(HTTP_TIMEOUT).send().await {
         Ok(r) => r,
         Err(e) => return (false, Some(format!("request failed: {e}"))),
     };
@@ -183,7 +243,7 @@ async fn do_http_check(client: &reqwest::Client, src: &Source) -> (bool, Option<
         return (false, Some(format!("HTTP {}", status.as_u16())));
     }
 
-    if src.kind == "youtube_live" {
+    if kind == "youtube_live" {
         return (true, None);
     }
 
@@ -197,11 +257,11 @@ async fn do_http_check(client: &reqwest::Client, src: &Source) -> (bool, Option<
     }
 }
 
-fn process_result(src: &Source, ok: bool) -> (i64, HealthAction) {
-    let new_failures = if ok { 0 } else { src.consecutive_failures + 1 };
-    let action = if ok && !src.is_active {
+fn process_result(is_active: bool, consecutive_failures: i64, ok: bool) -> (i64, HealthAction) {
+    let new_failures = if ok { 0 } else { consecutive_failures + 1 };
+    let action = if ok && !is_active {
         HealthAction::Reenable
-    } else if !ok && new_failures >= FAILURE_THRESHOLD && src.is_active {
+    } else if !ok && new_failures >= FAILURE_THRESHOLD && is_active {
         HealthAction::Disable
     } else {
         HealthAction::None
@@ -213,82 +273,44 @@ fn process_result(src: &Source, ok: bool) -> (i64, HealthAction) {
 mod tests {
     use super::*;
 
-    fn mock_source() -> Source {
-        Source {
-            id: 1,
-            channel_id: 1,
-            kind: "hls".to_string(),
-            url: "https://example.com/stream.m3u8".to_string(),
-            priority: 1,
-            is_active: true,
-            last_checked_at: None,
-            last_status: None,
-            consecutive_failures: 0,
-            failure_reason: None,
-        }
-    }
-
     #[test]
     fn test_process_result_ok_resets_failures() {
-        let src = Source {
-            consecutive_failures: 2,
-            ..mock_source()
-        };
-        let (failures, action) = process_result(&src, true);
+        let (failures, action) = process_result(true, 2, true);
         assert_eq!(failures, 0);
         assert!(matches!(action, HealthAction::None));
     }
 
     #[test]
     fn test_process_result_error_increments_failures() {
-        let src = Source {
-            consecutive_failures: 1,
-            ..mock_source()
-        };
-        let (failures, action) = process_result(&src, false);
+        let (failures, action) = process_result(true, 1, false);
         assert_eq!(failures, 2);
         assert!(matches!(action, HealthAction::None));
     }
 
     #[test]
     fn test_process_result_triggers_disable_at_threshold() {
-        let src = Source {
-            consecutive_failures: 2,
-            ..mock_source()
-        };
-        let (failures, action) = process_result(&src, false);
+        let (failures, action) = process_result(true, 2, false);
         assert_eq!(failures, 3);
         assert!(matches!(action, HealthAction::Disable));
     }
 
     #[test]
     fn test_process_result_already_inactive_not_disabled_again() {
-        let src = Source {
-            consecutive_failures: 2,
-            is_active: false,
-            ..mock_source()
-        };
-        let (failures, action) = process_result(&src, false);
+        let (failures, action) = process_result(false, 2, false);
         assert_eq!(failures, 3);
         assert!(matches!(action, HealthAction::None));
     }
 
     #[test]
     fn test_process_result_reenables_inactive_source_on_success() {
-        let src = Source {
-            is_active: false,
-            consecutive_failures: 3,
-            ..mock_source()
-        };
-        let (failures, action) = process_result(&src, true);
+        let (failures, action) = process_result(false, 3, true);
         assert_eq!(failures, 0);
         assert!(matches!(action, HealthAction::Reenable));
     }
 
     #[test]
     fn test_process_result_active_source_ok_no_action() {
-        let src = mock_source();
-        let (failures, action) = process_result(&src, true);
+        let (failures, action) = process_result(true, 0, true);
         assert_eq!(failures, 0);
         assert!(matches!(action, HealthAction::None));
     }
@@ -382,6 +404,77 @@ mod tests {
         assert!(
             !updated.is_active,
             "probe_source must not re-enable a manually disabled source"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_playlist_item_does_not_reenable_disabled_item() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 512];
+            let _ = conn.read(&mut buf).await;
+            conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
+                .await
+                .unwrap();
+        });
+
+        let pool = crate::db::connect("sqlite::memory:").await.unwrap();
+        let ch = crate::model::channel::create(
+            &pool,
+            crate::model::channel::NewChannel {
+                name: "test".to_string(),
+                category: "test".to_string(),
+                logo_url: None,
+                channel_type: crate::model::channel::ChannelType::VodLoop,
+                sort_order: 0,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let it = crate::model::playlist_item::create(
+            &pool,
+            crate::model::playlist_item::NewPlaylistItem {
+                channel_id: ch.id,
+                title: "ep1".to_string(),
+                url: format!("http://127.0.0.1:{}/ep1.mp4", port),
+                duration_secs: 3600,
+                sort_order: 0,
+            },
+        )
+        .await
+        .unwrap();
+
+        crate::model::playlist_item::set_active(&pool, it.id, false)
+            .await
+            .unwrap();
+        let it = crate::model::playlist_item::get(&pool, it.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!it.is_active, "item must start disabled");
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let cors_cache: crate::CorsCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+
+        probe_playlist_item(&pool, &client, &cors_cache, &it).await;
+
+        let updated = crate::model::playlist_item::get(&pool, it.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            !updated.is_active,
+            "probe_playlist_item must not re-enable a manually disabled item"
         );
     }
 }

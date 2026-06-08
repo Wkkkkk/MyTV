@@ -318,6 +318,29 @@ async fn test_tune_vod_empty_playlist_returns_503() {
 }
 
 #[tokio::test]
+async fn test_tune_vod_skips_disabled_item() {
+    let app = app().await;
+
+    // Seed has channel 4 with items id=1 (ep1) and id=2 (ep2).
+    // Disable ep1 via the new toggle endpoint.
+    let toggle = app
+        .clone()
+        .oneshot(authed_post("/admin/playlist/1/toggle"))
+        .await
+        .unwrap();
+    assert_eq!(toggle.status(), StatusCode::SEE_OTHER);
+
+    // Channel 4 now only has ep2 active — tune must return its URL.
+    let tune = app.oneshot(req("/channel/4/tune")).await.unwrap();
+    assert_eq!(tune.status(), StatusCode::OK);
+    let json = body_json(tune).await;
+    assert!(
+        json["url"].as_str().unwrap().contains("ep2"),
+        "disabled ep1 should be skipped; ep2 expected"
+    );
+}
+
+#[tokio::test]
 async fn tune_response_includes_channel_metadata() {
     let app = app().await;
     let resp = app
