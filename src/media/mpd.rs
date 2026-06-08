@@ -251,10 +251,7 @@ pub async fn probe_mpd_cors(client: &reqwest::Client, mpd_url: &str) -> Option<(
         .send()
         .await
         .ok()?;
-    if resp
-        .content_length()
-        .map_or(false, |n| n as usize > MAX_BODY)
-    {
+    if resp.content_length().is_some_and(|n| n as usize > MAX_BODY) {
         tracing::warn!(url = %mpd_url, "MPD response exceeds 20 MB cap");
         return None;
     }
