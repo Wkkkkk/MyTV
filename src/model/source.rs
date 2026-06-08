@@ -164,40 +164,16 @@ pub async fn update_health(
     consecutive_failures: i64,
     is_active: Option<bool>,
 ) -> Result<()> {
-    if let Some(active) = is_active {
-        sqlx::query(
-            "UPDATE sources
-             SET last_checked_at = strftime('%s','now'),
-                 last_status = ?,
-                 failure_reason = ?,
-                 consecutive_failures = ?,
-                 is_active = ?
-             WHERE id = ?",
-        )
-        .bind(status)
-        .bind(reason)
-        .bind(consecutive_failures)
-        .bind(active)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    } else {
-        sqlx::query(
-            "UPDATE sources
-             SET last_checked_at = strftime('%s','now'),
-                 last_status = ?,
-                 failure_reason = ?,
-                 consecutive_failures = ?
-             WHERE id = ?",
-        )
-        .bind(status)
-        .bind(reason)
-        .bind(consecutive_failures)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    }
-    Ok(())
+    super::update_health_sql(
+        pool,
+        "sources",
+        id,
+        status,
+        reason,
+        consecutive_failures,
+        is_active,
+    )
+    .await
 }
 
 /// Returns the set of channel IDs that have at least one source (active or not).

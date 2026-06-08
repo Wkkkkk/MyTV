@@ -123,40 +123,16 @@ pub async fn update_health(
     consecutive_failures: i64,
     is_active: Option<bool>,
 ) -> Result<()> {
-    if let Some(active) = is_active {
-        sqlx::query(
-            "UPDATE playlist_items
-             SET last_checked_at = strftime('%s','now'),
-                 last_status = ?,
-                 failure_reason = ?,
-                 consecutive_failures = ?,
-                 is_active = ?
-             WHERE id = ?",
-        )
-        .bind(status)
-        .bind(reason)
-        .bind(consecutive_failures)
-        .bind(active)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    } else {
-        sqlx::query(
-            "UPDATE playlist_items
-             SET last_checked_at = strftime('%s','now'),
-                 last_status = ?,
-                 failure_reason = ?,
-                 consecutive_failures = ?
-             WHERE id = ?",
-        )
-        .bind(status)
-        .bind(reason)
-        .bind(consecutive_failures)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    }
-    Ok(())
+    super::update_health_sql(
+        pool,
+        "playlist_items",
+        id,
+        status,
+        reason,
+        consecutive_failures,
+        is_active,
+    )
+    .await
 }
 
 /// Sum the duration of all items in the playlist.
