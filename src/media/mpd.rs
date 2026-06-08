@@ -263,14 +263,23 @@ pub async fn probe_mpd_cors(client: &reqwest::Client, mpd_url: &str) -> Option<(
         return None;
     }
     let mut body: Vec<u8> = Vec::new();
-    while let Some(chunk) = resp.chunk().await.ok()? {
-        if body.len() + chunk.len() > MAX_BODY {
-            tracing::warn!(url = %mpd_url, "MPD response body exceeds 20 MB cap");
-            return None;
+    loop {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                if body.len() + chunk.len() > MAX_BODY {
+                    tracing::warn!(url = %mpd_url, "MPD response body exceeds 20 MB cap");
+                    return None;
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(e) => {
+                tracing::warn!(url = %mpd_url, error = %e, "MPD fetch read failed");
+                return None;
+            }
         }
-        body.extend_from_slice(&chunk);
     }
-    let text = String::from_utf8_lossy(&body).into_owned();
+    let text = String::from_utf8_lossy(&body);
     let probe_url = find_mpd_probe_url(&text, mpd_url);
     if probe_url.starts_with("http://") {
         return Some((probe_url, false));
@@ -486,7 +495,6 @@ mod tests {
             probe_mpd_cors(&client, &format!("http://127.0.0.1:{}/stream.mpd", port))
                 .await
                 .unwrap();
-        // probe_url must be the CDN URL extracted from <BaseURL>, not the manifest URL
         // probe_url must be the CDN URL from <BaseURL>, not the manifest origin
         assert_eq!(probe_url, "https://cdn.test/live/");
         // cdn.test doesn't exist → connection failure → CORS defaults to false
@@ -507,7 +515,6 @@ mod tests {
             conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 21000000\r\n\r\n")
                 .await
                 .unwrap();
-            // Connection closes; full body is never sent — content-length check must fire first
         });
 
         let client = reqwest::Client::new();
