@@ -18,7 +18,8 @@
   </div>
 </div>
 
-<!-- Sources -->
+<!-- Sources (live channels only) -->
+{% if channel_type.as_str() == "live" %}
 <div class="section">
   <h3>Sources</h3>
   {% if sources.is_empty() %}
@@ -58,6 +59,7 @@
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Add Source</button>
   </form>
 </div>
+{% endif %}
 
 <!-- Now & Upcoming (vod_loop only, rendered when schedule is computable) -->
 {% if !vod_schedule.is_empty() %}
