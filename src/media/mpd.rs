@@ -1,6 +1,7 @@
 use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 use std::io::Cursor;
+use std::time::Duration;
 
 /// Rewrites a DASH MPD manifest:
 /// - Relative <BaseURL> text → resolved to absolute (always, even when direct=true)
@@ -201,6 +202,93 @@ fn parse_iso8601_duration_secs(s: &str) -> anyhow::Result<i64> {
     Ok(secs)
 }
 
+/// Returns the best HTTPS URL to HEAD-probe for CORS on a DASH MPD.
+/// Priority: absolute/resolved <BaseURL> > absolute <SegmentURL media> >
+///   absolute <SegmentTemplate initialization> (no template vars) > MPD directory.
+pub fn find_mpd_probe_url(xml: &str, mpd_url: &str) -> String {
+    let mut reader = Reader::from_str(xml);
+    let mut in_base_url = false;
+    let mut fallback: Option<String> = None;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) => {
+                if e.local_name().as_ref() == b"BaseURL" {
+                    in_base_url = true;
+                }
+            }
+            Ok(Event::Empty(ref e)) if fallback.is_none() => match e.local_name().as_ref() {
+                b"SegmentURL" => {
+                    if let Some(url) = attr_value(e, b"media") {
+                        if url.starts_with("https://") {
+                            fallback = Some(url);
+                        }
+                    }
+                }
+                b"SegmentTemplate" => {
+                    if let Some(url) = attr_value(e, b"initialization") {
+                        if url.starts_with("https://") && !url.contains('$') {
+                            fallback = Some(url);
+                        }
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::Text(ref e)) if in_base_url => {
+                let text = e.decode().unwrap_or_default();
+                let resolved = resolve_relative_url(text.trim(), mpd_url);
+                if resolved.starts_with("https://") {
+                    return resolved;
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                if e.local_name().as_ref() == b"BaseURL" {
+                    in_base_url = false;
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+
+    fallback.unwrap_or_else(|| {
+        mpd_url
+            .rsplit_once('/')
+            .map(|(b, _)| format!("{}/", b))
+            .unwrap_or_else(|| mpd_url.to_string())
+    })
+}
+
+fn attr_value(e: &BytesStart<'_>, name: &[u8]) -> Option<String> {
+    e.attributes().flatten().find_map(|a| {
+        if a.key.as_ref() == name {
+            Some(String::from_utf8_lossy(&a.value).into_owned())
+        } else {
+            None
+        }
+    })
+}
+
+/// Fetches an MPD and HEAD-probes its effective segment origin for `Access-Control-Allow-Origin: *`.
+/// Returns `Some(true)` if direct load is possible, `Some(false)` if proxy is needed,
+/// `None` if the MPD could not be fetched.
+pub async fn probe_mpd_cors(client: &reqwest::Client, mpd_url: &str) -> Option<bool> {
+    let body = client
+        .get(mpd_url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+    let probe_url = find_mpd_probe_url(&body, mpd_url);
+    if probe_url.starts_with("http://") {
+        return Some(false);
+    }
+    Some(crate::media::hls::probe_cors(client, &probe_url).await)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,5 +413,60 @@ mod tests {
     fn bbb_fixture_duration() {
         let xml = include_str!("../../tests/fixtures/bbb_30fps.mpd");
         assert_eq!(parse_mpd_duration(xml).unwrap(), 634);
+    }
+
+    #[test]
+    fn find_mpd_probe_url_absolute_base_url() {
+        let xml =
+            r#"<?xml version="1.0"?><MPD><BaseURL>https://cdn.example.com/live/</BaseURL></MPD>"#;
+        let url = find_mpd_probe_url(xml, "https://origin.example.com/stream.mpd");
+        assert_eq!(url, "https://cdn.example.com/live/");
+    }
+
+    #[test]
+    fn find_mpd_probe_url_relative_base_url_resolved() {
+        let xml = r#"<?xml version="1.0"?><MPD><BaseURL>./</BaseURL></MPD>"#;
+        let url = find_mpd_probe_url(xml, "https://origin.example.com/path/stream.mpd");
+        assert_eq!(url, "https://origin.example.com/path/");
+    }
+
+    #[test]
+    fn find_mpd_probe_url_segment_url_media() {
+        let xml = r#"<?xml version="1.0"?><MPD><SegmentList><SegmentURL media="https://cdn.example.com/seg-1.m4s"/></SegmentList></MPD>"#;
+        let url = find_mpd_probe_url(xml, "https://origin.example.com/stream.mpd");
+        assert_eq!(url, "https://cdn.example.com/seg-1.m4s");
+    }
+
+    #[test]
+    fn find_mpd_probe_url_segment_template_initialization() {
+        let xml = r#"<?xml version="1.0"?><MPD><SegmentTemplate initialization="https://cdn.example.com/init.mp4" media="https://cdn.example.com/seg-$Number$.m4s"/></MPD>"#;
+        let url = find_mpd_probe_url(xml, "https://origin.example.com/stream.mpd");
+        assert_eq!(url, "https://cdn.example.com/init.mp4");
+    }
+
+    #[test]
+    fn find_mpd_probe_url_segment_template_with_only_template_vars_falls_back() {
+        let xml = r#"<?xml version="1.0"?><MPD><SegmentTemplate media="https://cdn.example.com/seg-$Number$.m4s" initialization="https://cdn.example.com/$RepresentationID$/init.mp4"/></MPD>"#;
+        let url = find_mpd_probe_url(xml, "https://origin.example.com/stream.mpd");
+        // initialization has $RepresentationID$ → skip; fallback to MPD directory
+        assert_eq!(url, "https://origin.example.com/");
+    }
+
+    #[test]
+    fn find_mpd_probe_url_no_hints_falls_back_to_mpd_directory() {
+        let xml = r#"<?xml version="1.0"?><MPD><SegmentTemplate media="seg-$Number$.m4s"/></MPD>"#;
+        let url = find_mpd_probe_url(xml, "https://origin.example.com/path/stream.mpd");
+        assert_eq!(url, "https://origin.example.com/path/");
+    }
+
+    #[test]
+    fn find_mpd_probe_url_bbb_fixture_resolves_to_mpd_directory() {
+        let xml = include_str!("../../tests/fixtures/bbb_30fps.mpd");
+        // BBB has <BaseURL>./</BaseURL> which resolves to the MPD directory
+        let url = find_mpd_probe_url(
+            xml,
+            "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd",
+        );
+        assert_eq!(url, "https://dash.akamaized.net/akamai/bbb_30fps/");
     }
 }

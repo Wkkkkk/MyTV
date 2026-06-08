@@ -225,7 +225,13 @@ pub async fn probe_and_cache_cors(
     if !url.starts_with("https://") || crate::media::resolver::needs_resolution(url) {
         return None;
     }
-    let result = crate::media::hls::probe_source_cors(client, url).await?;
+    let result = if crate::model::source::SourceKind::detect(url)
+        == crate::model::source::SourceKind::Dash
+    {
+        crate::media::mpd::probe_mpd_cors(client, url).await?
+    } else {
+        crate::media::hls::probe_source_cors(client, url).await?
+    };
     let host = crate::media::hls::extract_manifest_host(url);
     tracing::debug!(host = %host, cors = result, "CORS probe cached");
     cors_cache.write().await.insert(host, result);
