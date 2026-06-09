@@ -41,6 +41,35 @@ pub async fn resolve_url(url: &str) -> Result<String> {
     Ok(first_line)
 }
 
+/// Fetches the title of a video via yt-dlp.
+/// Used to pre-populate the channel name field in the manual URL resolve flow.
+pub async fn fetch_title(url: &str) -> Result<String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        bail!("invalid URL scheme: {}", url);
+    }
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("yt-dlp")
+            .args(["--print", "title", "--no-playlist", "--", url])
+            .output(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
+
+    if !output.status.success() {
+        bail!(
+            "yt-dlp failed for {}: {}",
+            url,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let title = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if title.is_empty() {
+        bail!("yt-dlp returned empty title for {}", url);
+    }
+    Ok(title)
+}
+
 /// Fetches the duration of a video in seconds via yt-dlp.
 /// Called once when an admin adds a VOD asset so duration is stored in the DB.
 pub async fn fetch_duration_secs(url: &str) -> Result<i64> {

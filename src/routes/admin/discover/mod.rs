@@ -291,17 +291,25 @@ pub async fn discover_manual_resolve(
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
     let is_youtube = resolver::needs_resolution(&form.url);
-    let duration_secs: i64 = if is_youtube {
-        tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            resolver::fetch_duration_secs(&form.url),
-        )
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .unwrap_or(0)
+    let (duration_secs, title) = if is_youtube {
+        let (dur_result, title_result) = tokio::join!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                resolver::fetch_duration_secs(&form.url),
+            ),
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                resolver::fetch_title(&form.url),
+            ),
+        );
+        let duration = dur_result.ok().and_then(|r| r.ok()).unwrap_or(0);
+        let title = title_result
+            .ok()
+            .and_then(|r| r.ok())
+            .unwrap_or_else(|| form.url.clone());
+        (duration, title)
     } else {
-        0
+        (0, form.url.clone())
     };
     let is_live = duration_secs == 0;
     let channels = channel::list(&state.pool)
@@ -317,7 +325,7 @@ pub async fn discover_manual_resolve(
     render(ManualResultTemplate {
         form_id: "manual".to_string(),
         url: form.url.clone(),
-        title: form.url.clone(),
+        title,
         group: String::new(),
         is_live,
         duration_secs,
