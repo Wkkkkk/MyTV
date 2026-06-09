@@ -117,6 +117,41 @@ async fn next_live(
     Err(StatusCode::SERVICE_UNAVAILABLE)
 }
 
+/// DB-only conversion of an ended live channel into a VOD loop: append the
+/// recording as a playlist item, flip the channel to vod_loop anchored at
+/// `anchor`, and deactivate the (now-finished) live sources. Idempotent: a
+/// channel already in vod_loop is left untouched.
+#[allow(dead_code)]
+async fn convert_channel_to_vod_loop(
+    pool: &sqlx::SqlitePool,
+    channel_id: i64,
+    title: &str,
+    watch_url: &str,
+    duration_secs: i64,
+    anchor: chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<()> {
+    let Some(ch) = channel::get(pool, channel_id).await? else {
+        anyhow::bail!("channel {channel_id} not found");
+    };
+    if ch.channel_type() == ChannelType::VodLoop {
+        return Ok(());
+    }
+    playlist_item::create(
+        pool,
+        playlist_item::NewPlaylistItem {
+            channel_id,
+            title: title.to_string(),
+            url: watch_url.to_string(),
+            duration_secs,
+            sort_order: 0,
+        },
+    )
+    .await?;
+    channel::set_type_and_anchor(pool, channel_id, ChannelType::VodLoop, Some(anchor)).await?;
+    source::deactivate_all_for_channel(pool, channel_id).await?;
+    Ok(())
+}
+
 async fn vod_items_and_index(
     state: &AppState,
     ch: &channel::Channel,
@@ -890,5 +925,73 @@ mod tests {
             "application/octet-stream",
             "https://cdn.example.com/hls/seg1.ts"
         ));
+    }
+
+    // ── convert_channel_to_vod_loop ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_convert_channel_to_vod_loop() {
+        let state = test_state().await;
+        let ch = make_live_channel(&state).await;
+        source::create(
+            &state.pool,
+            source::NewSource {
+                channel_id: ch.id,
+                kind: source::SourceKind::YoutubeLive,
+                url: "https://www.youtube.com/live/abc123".into(),
+                priority: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        let anchor = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        convert_channel_to_vod_loop(
+            &state.pool,
+            ch.id,
+            "Live Test",
+            "https://www.youtube.com/watch?v=abc123",
+            212,
+            anchor,
+        )
+        .await
+        .unwrap();
+
+        let updated = channel::get(&state.pool, ch.id).await.unwrap().unwrap();
+        assert_eq!(updated.channel_type(), channel::ChannelType::VodLoop);
+        assert_eq!(updated.loop_anchor, Some(anchor));
+
+        let items = playlist_item::list_active_for_channel(&state.pool, ch.id)
+            .await
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].url, "https://www.youtube.com/watch?v=abc123");
+        assert_eq!(items[0].duration_secs, 212);
+        assert_eq!(items[0].title, "Live Test");
+
+        assert!(source::list_active_for_channel(&state.pool, ch.id)
+            .await
+            .unwrap()
+            .is_empty());
+
+        // Idempotent: a second run on an already-converted channel is a no-op.
+        convert_channel_to_vod_loop(
+            &state.pool,
+            ch.id,
+            "Live Test",
+            "https://www.youtube.com/watch?v=abc123",
+            212,
+            anchor,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            playlist_item::list_active_for_channel(&state.pool, ch.id)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "second conversion must not append a duplicate item"
+        );
     }
 }
