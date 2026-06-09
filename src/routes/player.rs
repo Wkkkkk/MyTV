@@ -25,6 +25,7 @@ pub struct TuneResponse {
     pub logo_url: Option<String>,
     pub category: String,
     pub channel_type: String,
+    pub skip_proxy: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,7 +70,12 @@ pub async fn next(
     }
 }
 
-fn tune_response(ch: &channel::Channel, url: String, start_offset_secs: i64) -> Json<TuneResponse> {
+fn tune_response(
+    ch: &channel::Channel,
+    url: String,
+    start_offset_secs: i64,
+    skip_proxy: bool,
+) -> Json<TuneResponse> {
     Json(TuneResponse {
         url,
         start_offset_secs,
@@ -77,6 +83,7 @@ fn tune_response(ch: &channel::Channel, url: String, start_offset_secs: i64) -> 
         logo_url: ch.logo_url.clone(),
         category: ch.category.clone(),
         channel_type: ch.r#type.clone(),
+        skip_proxy,
     })
 }
 
@@ -94,7 +101,14 @@ async fn next_live(
         .filter(|s| Some(s.url.as_str()) != failed_url)
     {
         match resolver::resolve_url(&src.url).await {
-            Ok(url) => return Ok(tune_response(ch, url, 0)),
+            Ok(url) => {
+                return Ok(tune_response(
+                    ch,
+                    url,
+                    0,
+                    resolver::needs_resolution(&src.url),
+                ))
+            }
             Err(e) => {
                 tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source")
             }
@@ -134,7 +148,12 @@ async fn tune_vod_at(
     let (items, idx, offset) = vod_items_and_index(state, ch, now_secs).await?;
     let item = &items[idx];
     match resolver::resolve_url(&item.url).await {
-        Ok(url) => Ok(tune_response(ch, url, offset)),
+        Ok(url) => Ok(tune_response(
+            ch,
+            url,
+            offset,
+            resolver::needs_resolution(&item.url),
+        )),
         Err(e) => {
             tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
             Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -151,7 +170,12 @@ async fn next_vod_at(
     let next_idx = (idx + 1) % items.len();
     let item = &items[next_idx];
     match resolver::resolve_url(&item.url).await {
-        Ok(url) => Ok(tune_response(ch, url, 0)),
+        Ok(url) => Ok(tune_response(
+            ch,
+            url,
+            0,
+            resolver::needs_resolution(&item.url),
+        )),
         Err(e) => {
             tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
             Err(StatusCode::SERVICE_UNAVAILABLE)

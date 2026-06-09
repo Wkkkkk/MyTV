@@ -1070,6 +1070,14 @@ async fn playlist_item_create_sort_order_skips_gap_after_delete() {
 }
 
 #[tokio::test]
+async fn test_tune_skip_proxy_false_for_plain_hls() {
+    let response = app().await.oneshot(req("/channel/1/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["skip_proxy"], false);
+}
+
+#[tokio::test]
 #[ignore = "requires network access — run manually"]
 async fn test_stream_proxy_rewrites_dash_bbb_manifest() {
     use http_body_util::BodyExt;
