@@ -10,8 +10,8 @@ pub use channels::{
     channel_new_form, channel_update,
 };
 pub use discover::{
-    discover_add, discover_add_form, discover_m3u_search, discover_manual_resolve, discover_page,
-    discover_youtube_search,
+    discover_add, discover_add_form, discover_channel_resolve, discover_m3u_search,
+    discover_manual_resolve, discover_page, discover_youtube_search,
 };
 pub use metrics::metrics_json;
 pub use playlist::{

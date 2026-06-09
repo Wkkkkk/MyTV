@@ -7,6 +7,7 @@ use sqlx::{FromRow, SqlitePool};
 pub enum SourceKind {
     Hls,
     YoutubeLive,
+    YoutubeVod,
     Iptv,
     Dash,
 }
@@ -16,6 +17,7 @@ impl SourceKind {
         match self {
             SourceKind::Hls => "hls",
             SourceKind::YoutubeLive => "youtube_live",
+            SourceKind::YoutubeVod => "youtube_vod",
             SourceKind::Iptv => "iptv",
             SourceKind::Dash => "dash",
         }
@@ -41,6 +43,7 @@ impl std::str::FromStr for SourceKind {
         match s {
             "hls" => Ok(SourceKind::Hls),
             "youtube_live" => Ok(SourceKind::YoutubeLive),
+            "youtube_vod" => Ok(SourceKind::YoutubeVod),
             "iptv" => Ok(SourceKind::Iptv),
             "dash" => Ok(SourceKind::Dash),
             _ => anyhow::bail!("invalid source kind: {s}"),
@@ -463,5 +466,14 @@ mod tests {
         assert_eq!(reenabled.consecutive_failures, 0);
         assert_eq!(reenabled.last_status.as_deref(), Some("ok"));
         assert!(reenabled.failure_reason.is_none());
+    }
+
+    #[test]
+    fn youtube_vod_round_trips() {
+        assert_eq!(SourceKind::YoutubeVod.as_str(), "youtube_vod");
+        assert_eq!(
+            "youtube_vod".parse::<SourceKind>().unwrap(),
+            SourceKind::YoutubeVod
+        );
     }
 }

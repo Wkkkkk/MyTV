@@ -100,6 +100,10 @@ pub fn build_router(state: AppState) -> Router {
             "/discover/manual/resolve",
             post(routes::admin::discover_manual_resolve),
         )
+        .route(
+            "/discover/channel/resolve",
+            post(routes::admin::discover_channel_resolve),
+        )
         .route("/metrics", get(routes::admin::metrics_json))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

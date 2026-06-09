@@ -29,7 +29,7 @@
           <input type="hidden" name="title" value="{{ row.title }}">
           <input type="hidden" name="is_live" value="{% if row.is_live %}true{% else %}false{% endif %}">
           <input type="hidden" name="duration_secs" value="{{ row.duration_secs }}">
-          <input type="hidden" name="source_kind" value="youtube_live">
+          <input type="hidden" name="source_kind" value="{{ row.source_kind }}">
           <input type="hidden" name="form_id" value="yt{{ row.form_id }}">
           <button type="submit" class="btn btn-primary btn-sm">Add</button>
         </form>

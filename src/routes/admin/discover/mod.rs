@@ -90,10 +90,16 @@ pub struct M3uSearchForm {
 #[derive(Deserialize)]
 pub struct YoutubeSearchForm {
     pub keyword: String,
+    pub search_type: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct ManualResolveForm {
+    pub url: String,
+}
+
+#[derive(Deserialize)]
+pub struct ChannelUrlForm {
     pub url: String,
 }
 
@@ -263,17 +269,22 @@ pub async fn discover_youtube_search(
                     .to_string(),
             ),
         };
-    let rows =
-        match youtube::fetch_youtube_results(&form.keyword, &api_key, &state.http_client).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!("YouTube API error: {e}");
-                return Html(format!(
-                    "<p class=\"empty-state\" style=\"color:#f77\">YouTube search failed: {}.</p>",
-                    html_escape(&e.to_string())
-                ));
-            }
-        };
+    let search_type = form.search_type.as_deref().unwrap_or("video");
+    let fetched = if search_type == "channel" {
+        youtube::fetch_youtube_channels(&form.keyword, &api_key, &state.http_client).await
+    } else {
+        youtube::fetch_youtube_results(&form.keyword, &api_key, &state.http_client).await
+    };
+    let rows = match fetched {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("YouTube API error: {e}");
+            return Html(format!(
+                "<p class=\"empty-state\" style=\"color:#f77\">YouTube search failed: {}.</p>",
+                html_escape(&e.to_string())
+            ));
+        }
+    };
     match (YtResultsTemplate { rows }).render() {
         Ok(html) => Html(html),
         Err(e) => {
@@ -281,6 +292,36 @@ pub async fn discover_youtube_search(
             Html("<p class=\"empty-state\" style=\"color:#f77\">Render error.</p>".to_string())
         }
     }
+}
+
+pub async fn discover_channel_resolve(
+    State(state): State<AppState>,
+    Form(form): Form<ChannelUrlForm>,
+) -> Result<Html<String>, StatusCode> {
+    let normalized =
+        youtube::normalize_channel_url(&form.url).ok_or(StatusCode::UNPROCESSABLE_ENTITY)?;
+    let title = youtube::channel_title_from_url(&normalized);
+    let channels = channel::list(&state.pool)
+        .await
+        .map_err(internal_error)?
+        .into_iter()
+        .map(|ch| DiscoverChannelOption {
+            id: ch.id,
+            name: ch.name,
+            type_str: ch.r#type,
+        })
+        .collect();
+    render(ManualResultTemplate {
+        form_id: "channel".to_string(),
+        url: normalized,
+        title,
+        group: String::new(),
+        is_live: true,
+        duration_secs: 0,
+        source_kind: "youtube_live".to_string(),
+        show_duration_input: false,
+        channels,
+    })
 }
 
 pub async fn discover_manual_resolve(

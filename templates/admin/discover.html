@@ -41,6 +41,13 @@
       <label for="disc-keyword">Keyword</label>
       <input id="disc-keyword" type="text" name="keyword" placeholder="search YouTube…">
     </div>
+    <div class="form-row" style="margin:0;min-width:120px">
+      <label for="disc-yt-type">Type</label>
+      <select id="disc-yt-type" name="search_type" style="width:auto">
+        <option value="video">Videos</option>
+        <option value="channel">Channels</option>
+      </select>
+    </div>
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Search</button>
   </form>
   <div id="yt-results"></div>
@@ -50,6 +57,19 @@
     environment variable to enable YouTube search.
   </p>
   {% endif %}
+  <hr style="border-color:#222;margin:16px 0">
+  <form hx-post="/admin/discover/channel/resolve"
+        hx-target="#yt-channel-result"
+        hx-swap="innerHTML"
+        style="display:flex;gap:10px;align-items:flex-end;margin-bottom:12px">
+    <div class="form-row" style="margin:0;flex:1;min-width:260px">
+      <label for="disc-channel-url">Channel URL / @handle</label>
+      <input id="disc-channel-url" type="text" name="url"
+             placeholder="https://youtube.com/@NASA or @NASA" required>
+    </div>
+    <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Resolve</button>
+  </form>
+  <div id="yt-channel-result"></div>
 </div>
 
 <!-- Manual Tab -->

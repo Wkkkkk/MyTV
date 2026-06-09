@@ -1175,3 +1175,31 @@ async fn test_stream_proxy_rewrites_dash_bbb_manifest() {
     // Valid DASH XML
     assert!(body.contains("<MPD"), "expected MPD root element");
 }
+
+#[tokio::test]
+async fn admin_discover_channel_resolve_normalizes_handle() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/discover/channel/resolve",
+            "url=%40NASA",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("https://www.youtube.com/@NASA/live"));
+}
+
+#[tokio::test]
+async fn admin_discover_channel_resolve_rejects_non_youtube() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/discover/channel/resolve",
+            "url=https%3A%2F%2Fexample.com%2Ffoo",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
