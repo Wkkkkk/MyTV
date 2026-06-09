@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Patch `get_transcript.py` to accept a `--lang` argument so it fetches Chinese subtitles from Bilibili, then verify the full stack via the two-phase test plan.
+**Goal:** Copy the youtube-watcher skill into this project and patch the local copy's `get_transcript.py` to accept a `--lang` argument so it fetches Chinese subtitles from Bilibili, then verify the full stack via the two-phase test plan.
 
-**Architecture:** One-line argparse addition — `--lang` (default `en`) replaces the hardcoded `"en"` passed to `yt-dlp --sub-lang`. Manual CLI and MyTV verification follow.
+**Architecture:** Copy `~/.claude/skills/youtube-watcher/` into `.claude/skills/youtube-watcher/` (project-local, not global). Patch the local copy only — the global skill is left untouched. Manual CLI and MyTV verification follow.
 
 **Tech Stack:** Python 3, yt-dlp, MyTV (Rust/Axum, local `cargo run`)
 
@@ -14,7 +14,8 @@
 
 ## Files
 
-- Modify: `/Users/kunwu/.claude/skills/youtube-watcher/scripts/get_transcript.py`
+- Create: `.claude/skills/youtube-watcher/` (copied from `~/.claude/skills/youtube-watcher/`)
+- Modify: `.claude/skills/youtube-watcher/scripts/get_transcript.py`
 
 ---
 
@@ -48,32 +49,41 @@ Expected: one or more URLs printed (Bilibili typically returns separate video an
 
 ---
 
-### Task 2: Confirm transcript fetch fails before patch
+### Task 2: Copy skill into the project
 
-**Files:** none
+**Files:**
+- Create: `.claude/skills/youtube-watcher/`
 
-- [ ] **Step 2.1: Run unpatched script with `--lang` flag**
+- [ ] **Step 2.1: Copy the global skill into the project**
 
 ```bash
-python3 /Users/kunwu/.claude/skills/youtube-watcher/scripts/get_transcript.py --lang zh-Hans https://www.bilibili.com/video/BV1GpEs6gEAA/
+cp -r ~/.claude/skills/youtube-watcher /Users/kunwu/Workspace/playground/MyTV/.claude/skills/youtube-watcher
+```
+
+Expected: `.claude/skills/youtube-watcher/` appears in the project with `SKILL.md`, `scripts/get_transcript.py`, `skill-card.md`, and `_meta.json`.
+
+- [ ] **Step 2.2: Confirm the unpatched local script fails as expected**
+
+```bash
+python3 .claude/skills/youtube-watcher/scripts/get_transcript.py --lang zh-Hans https://www.bilibili.com/video/BV1GpEs6gEAA/
 ```
 
 Expected: `error: unrecognized arguments: --lang zh-Hans` — confirms the flag does not exist yet.
 
-- [ ] **Step 2.2: Run unpatched script without flag (English default)**
+- [ ] **Step 2.3: Confirm English default finds no subtitles on a Chinese-only video**
 
 ```bash
-python3 /Users/kunwu/.claude/skills/youtube-watcher/scripts/get_transcript.py https://www.bilibili.com/video/BV1GpEs6gEAA/
+python3 .claude/skills/youtube-watcher/scripts/get_transcript.py https://www.bilibili.com/video/BV1GpEs6gEAA/
 ```
 
-Expected: `No subtitles found.` printed to stderr — confirms English subtitles are absent and the default fails silently.
+Expected: `No subtitles found.` printed to stderr — confirms the need for the patch.
 
 ---
 
-### Task 3: Patch `get_transcript.py`
+### Task 3: Patch the local `get_transcript.py`
 
 **Files:**
-- Modify: `/Users/kunwu/.claude/skills/youtube-watcher/scripts/get_transcript.py`
+- Modify: `.claude/skills/youtube-watcher/scripts/get_transcript.py`
 
 - [ ] **Step 3.1: Update `get_transcript` signature to accept `lang`**
 
@@ -135,6 +145,13 @@ def main():
     get_transcript(args.url, lang=args.lang)
 ```
 
+- [ ] **Step 3.4: Commit**
+
+```bash
+git add .claude/skills/youtube-watcher/
+git commit -m "feat: add project-local youtube-watcher skill with --lang support"
+```
+
 ---
 
 ### Task 4: Verify patch — Phase 1 step 1.4
@@ -144,18 +161,18 @@ def main():
 - [ ] **Step 4.1: Run patched script with `zh-Hans`**
 
 ```bash
-python3 /Users/kunwu/.claude/skills/youtube-watcher/scripts/get_transcript.py --lang zh-Hans https://www.bilibili.com/video/BV1GpEs6gEAA/
+python3 .claude/skills/youtube-watcher/scripts/get_transcript.py --lang zh-Hans https://www.bilibili.com/video/BV1GpEs6gEAA/
 ```
 
-Expected: readable Chinese text printed to stdout (one subtitle line per paragraph, no VTT headers or timestamps).
+Expected: readable Chinese text printed to stdout (subtitle lines, no VTT headers or timestamps).
 
-- [ ] **Step 4.2: Confirm English default is unchanged**
+- [ ] **Step 4.2: Confirm English default is unchanged (YouTube regression check)**
 
 ```bash
-python3 /Users/kunwu/.claude/skills/youtube-watcher/scripts/get_transcript.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
+python3 .claude/skills/youtube-watcher/scripts/get_transcript.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
 ```
 
-Expected: English transcript text printed — regression check that the default `en` still works for YouTube.
+Expected: English transcript text printed — confirms the default `en` still works for YouTube.
 
 ---
 
