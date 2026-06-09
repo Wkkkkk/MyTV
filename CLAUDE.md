@@ -21,7 +21,7 @@ Live instance: https://kunstv.fly.dev/
 
 ```bash
 cargo build            # compile
-cargo test             # 226 tests: 172 unit + 54 integration
+cargo test             # 295 tests: 232 unit + 63 integration (5 ignored — need yt-dlp/network)
 cargo fmt              # format (ALWAYS run before committing)
 cargo clippy           # lint (CI runs with -D warnings)
 cargo run              # start server on :3000
@@ -70,7 +70,9 @@ tests/
 
 **Router layers**: `redirect_trailing_slash` is registered with `.layer()` (outermost) so it fires before route matching and before auth middleware. Auth is registered with `.route_layer()` on the admin sub-router. Consequence: `GET /admin/` returns 308 (redirect) before auth ever runs — use `/admin` (no trailing slash) to test auth.
 
-**Player routes return JSON**: `/channel/:id/tune` and `/channel/:id/next` return `Json<TuneResponse>` with HTTP 200 on success or HTTP 503 on failure. They do not redirect.
+**Player routes return JSON**: `/channel/:id/tune` and `/channel/:id/next` return `Json<TuneResponse>` with HTTP 200 on success or HTTP 503 on failure. They do not redirect. `TuneResponse` carries two booleans beyond the metadata: `skip_proxy` (player uses the unproxied resolved URL for `<video src>` — set for resolved YouTube VOD direct MP4s) and `ended` (the live broadcast finished; client auto-advances).
+
+**Ended live → VOD**: when a resolved live manifest contains `force_finished/1` (`resolver::is_finished_live`), the handler returns `{ ended: true, url: "" }` and fires a detached `tokio::spawn` (`convert_channel_to_vod_loop`) that appends the recording as a `playlist_item`, flips the channel to `vod_loop`, and deactivates the sources. Idempotent; no migration (recording URL lives on the playlist_item). See `docs/architecture/tune-flow.md`.
 
 **VOD position**: `tune_vod_at` computes current playlist position using `Utc::now()` and the channel's `loop_anchor`. The returned URL depends on current time — tests assert `url.contains(...)` rather than exact equality.
 

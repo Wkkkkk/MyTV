@@ -10,7 +10,9 @@ A personal web app that repackages live internet streams and VOD content into a 
 
 - **EPG guide** at `/guide` — channel grid organized by category, 24-hour window, now-line, category tabs and time scrolling
 - **Live channels** — multiple failover sources per channel; yt-dlp resolves YouTube and Twitch URLs to direct HLS at tune-in time
-- **VOD loop channels** — playlists that run continuously like a FAST channel; every viewer sees the same position
+- **VOD loop channels** — playlists that run continuously like a FAST channel; every viewer sees the same position. YouTube VOD plays as direct MP4 straight from the CDN (no proxy hop)
+- **Ended-live → VOD** — when a YouTube live broadcast ends, the player shows a brief overlay, auto-advances to the next channel, and the dead channel is converted into a replayable VOD loop in the background
+- **Budget badges** — the guide marks each channel ⚡ (loads direct from the CDN) or ☁ (routed through the proxy) based on probed CORS support, including resolved YouTube/Twitch live streams
 - **Admin UI** at `/admin` — manage channels, sources, and playlist items
 - **Discovery** at `/admin/discover` — find streams via the iptv-org M3U index, YouTube search, or manual URL entry
 
@@ -22,9 +24,11 @@ A personal web app that repackages live internet streams and VOD content into a 
 
 **Live failover** — sources are tried in order. When a source fails mid-stream, the player calls `/next` with the failed URL so the server can skip it and return the next available source. The cycle restarts from the top once all sources have been tried.
 
-**Stream proxy** — browsers block cross-origin HLS manifests. `/stream-proxy?url=…` fetches the manifest server-side and rewrites segment and sub-manifest URLs so subsequent requests also go through the proxy. This makes any public HLS stream embeddable without CORS issues.
+**Stream proxy** — browsers block cross-origin HLS manifests. `/stream-proxy?url=…` fetches the manifest server-side and rewrites segment and sub-manifest URLs so subsequent requests also go through the proxy. This makes any public HLS stream embeddable without CORS issues. When a CDN already sends permissive CORS headers, segments load direct from origin and only the manifest is proxied; resolved YouTube VOD MP4s skip the proxy entirely.
 
-**yt-dlp resolution** — YouTube and Twitch URLs are not stored as stream URLs. At tune-in time the server calls yt-dlp to resolve the current direct HLS URL. This keeps streams working as platforms rotate their internal URLs.
+**yt-dlp resolution** — YouTube and Twitch URLs are not stored as stream URLs. At tune-in time the server calls yt-dlp to resolve the current direct URL — an HLS manifest for live, a single combined MP4 for VOD. This keeps streams working as platforms rotate their internal URLs.
+
+**Ended-live conversion** — yt-dlp marks a finished live broadcast with a `force_finished` manifest. The server detects this at tune time, returns an "ended" signal so the player can move on, and converts the channel into a VOD loop pointing at the recording (`watch?v=<id>`) — appending a playlist item, flipping the channel type, and deactivating the now-dead live sources. The conversion is idempotent and needs no schema change.
 
 ---
 

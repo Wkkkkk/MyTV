@@ -16,7 +16,10 @@ flowchart TD
     live --> src["list_active_for_channel\nordered by priority ASC"]
     src --> iter{"for each source"}
     iter --> res1["resolver::resolve_url(src.url)"]
-    res1 -->|ok| ok1(["200 { url, start_offset_secs, name, logo_url, category, channel_type }"])
+    res1 -->|ok| fin{"is_finished_live?"}
+    fin -->|no| ok1(["200 { …, skip_proxy, ended: false }"])
+    fin -->|yes| conv["spawn live→VOD conversion"]
+    conv --> okE(["200 { url: '', …, ended: true }"])
     res1 -->|err| iter
     iter -->|all fail or none| s503a(["503 Service Unavailable"])
 
@@ -26,9 +29,11 @@ flowchart TD
     items -->|empty| s503b(["503 Service Unavailable"])
     items --> pos["current_position(items, now_secs, anchor_secs)"]
     pos --> res2["resolver::resolve_url(item.url)"]
-    res2 -->|ok| ok2(["200 { url, start_offset_secs, name, logo_url, category, channel_type }"])
+    res2 -->|ok| ok2(["200 { …, skip_proxy, ended: false }"])
     res2 -->|err| s503c(["503 Service Unavailable"])
 ```
+
+Every success response carries two extra booleans beyond the metadata fields: `skip_proxy` (the player points `<video>` straight at the resolved CDN URL when `true` — see `ytdlp-resolution.md`) and `ended` (signals a broadcast that has finished — see below). The full payload is `{ url, start_offset_secs, name, logo_url, category, channel_type, skip_proxy, ended }`.
 
 ## VOD Position Calculation
 
@@ -56,16 +61,39 @@ flowchart TD
     nlive --> src["list_active_for_channel\nfilter out failed_url"]
     src --> iter{"for each remaining source"}
     iter --> res1["resolver::resolve_url"]
-    res1 -->|ok| ok1(["200 { url, start_offset_secs, name, logo_url, category, channel_type }"])
+    res1 -->|ok| fin{"is_finished_live?"}
+    fin -->|no| ok1(["200 { …, ended: false }"])
+    fin -->|yes| conv["spawn live→VOD conversion"]
+    conv --> okE(["200 { url: '', …, ended: true }"])
     res1 -->|err| iter
     iter -->|none left| s503(["503 Service Unavailable"])
 
     nvod --> items["list_for_channel"]
     items --> idx["next_idx = (current_idx + 1) % len"]
     idx --> res2["resolver::resolve_url(items[next_idx].url)"]
-    res2 -->|ok| ok2(["200 { url, start_offset_secs, name, logo_url, category, channel_type }"])
+    res2 -->|ok| ok2(["200 { …, ended: false }"])
     res2 -->|err| s503b(["503 Service Unavailable"])
 ```
+
+## Ended Live → VOD Conversion
+
+When `resolve_url` succeeds but `resolver::is_finished_live` detects a `force_finished/1` manifest (a YouTube live broadcast that has ended), the handler does **not** return the dead manifest. Instead it:
+
+1. Fires a detached `tokio::spawn` task (`spawn_live_to_vod_conversion`) and returns `TuneResponse { ended: true, url: "" }` immediately.
+2. The frontend shows a brief "Stream ended — switching…" overlay and auto-advances to the next channel in the lineup (loop-guarded, cancelled on a manual tune).
+
+The background task (`live_to_vod_conversion` → `convert_channel_to_vod_loop`):
+
+```
+watch_url = live_url_to_watch_url(source_url)            # youtube.com/live/<id> → watch?v=<id>
+          ?? "watch?v=" + fetch_video_id(source_url)     # fallback for handle/channel /live forms
+duration  = fetch_duration_secs(watch_url)
+create playlist_item { url: watch_url, duration, sort_order: 0 }
+channel::set_type_and_anchor(VodLoop, anchor = now)
+source::deactivate_all_for_channel(...)
+```
+
+The conversion is **idempotent** — a channel already in `vod_loop` is left untouched, so concurrent tunes that both observe the ended manifest don't create duplicate items. No schema migration was needed: the recording URL lives on the new `playlist_item`, not the source.
 
 ## Notes
 
@@ -78,3 +106,5 @@ flowchart TD
 **VOD `/next` ignores `failed_url`.** The VOD next handler advances to the next playlist item by index and ignores the `failed_url` parameter entirely — VOD items don't have fallback sources.
 
 **Channel metadata in response.** `/tune` and `/next` both include `name`, `logo_url`, `category`, and `channel_type` so the client can render the info bar without a separate fetch.
+
+**`skip_proxy` and `ended` flags.** `skip_proxy` tells the player to use the unproxied resolved URL for `<video src>` (set for resolved YouTube VOD direct MP4s). `ended` signals the live broadcast has finished and conversion has been triggered — the client treats it as a cue to auto-advance, not an error.
