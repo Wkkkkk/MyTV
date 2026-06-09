@@ -177,6 +177,13 @@ fn resolve_location(location: &str, base_url: &str) -> Option<String> {
         .map(|u| u.to_string())
 }
 
+fn detect_playlist(content_type: &str, url: &str) -> bool {
+    let lower = url.to_lowercase();
+    let path = &lower[..lower.find('?').unwrap_or(lower.len())];
+    let is_dash = content_type.contains("dash+xml") || path.ends_with(".mpd");
+    is_dash || content_type.contains("mpegurl") || path.ends_with(".m3u8") || path.ends_with(".m3u")
+}
+
 async fn resolve_direct_segments(state: &AppState, base_url: &str) -> bool {
     let host_key = crate::media::hls::extract_manifest_host(base_url);
     {
@@ -251,11 +258,10 @@ pub async fn stream_proxy(
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+        .unwrap_or("")
+        .to_owned();
 
-    let is_dash = ct.contains("dash+xml") || url.contains(".mpd");
-    let is_playlist =
-        is_dash || ct.contains("mpegurl") || url.contains(".m3u8") || url.contains(".m3u");
+    let is_playlist = detect_playlist(&ct, &url);
 
     // RFC 7230 §6.1: collect headers listed in Connection so we can strip them too.
     let connection_options: Vec<String> = upstream
@@ -312,7 +318,8 @@ pub async fn stream_proxy(
             .fetch_add(body_bytes.len() as u64, Ordering::Relaxed);
         let text = String::from_utf8_lossy(&body_bytes);
         let direct = resolve_direct_segments(&state, &url).await;
-        let (rewritten, content_type) = if is_dash {
+        let is_dash_playlist = ct.contains("dash+xml") || url.to_lowercase().ends_with(".mpd");
+        let (rewritten, content_type) = if is_dash_playlist {
             (
                 mpd::rewrite_mpd_urls(&text, &url, direct),
                 "application/dash+xml",
@@ -809,5 +816,55 @@ mod tests {
             ),
             Some("https://cdn.example.com/stream.m3u8".to_string())
         );
+    }
+
+    // ── detect_playlist ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_detect_playlist_hls_manifest_by_extension() {
+        assert!(detect_playlist(
+            "application/octet-stream",
+            "https://cdn.example.com/live/index.m3u8"
+        ));
+    }
+
+    #[test]
+    fn test_detect_playlist_hls_manifest_by_content_type() {
+        assert!(detect_playlist(
+            "application/vnd.apple.mpegurl",
+            "https://cdn.example.com/live/stream"
+        ));
+    }
+
+    #[test]
+    fn test_detect_playlist_dash_manifest() {
+        assert!(detect_playlist(
+            "application/dash+xml",
+            "https://cdn.example.com/stream.mpd"
+        ));
+    }
+
+    #[test]
+    fn test_detect_playlist_youtube_live_segment_not_playlist() {
+        // YouTube live segment URL has .m3u8 as an intermediate path component,
+        // not the final path element — must NOT be treated as a playlist.
+        let seg_url = "https://rr1---sn-cgxqc5oqufv-5gos.googlevideo.com/videoplayback/\
+            id/abc123/itag/300/source/yt_live_broadcast/\
+            playlist/index.m3u8/sq/174385/file/seg.ts";
+        assert!(!detect_playlist("application/octet-stream", seg_url));
+    }
+
+    #[test]
+    fn test_detect_playlist_youtube_live_segment_with_query_not_playlist() {
+        let seg_url = "https://cdn.example.com/playlist/index.m3u8/sq/123/file/seg.ts?expire=999";
+        assert!(!detect_playlist("application/octet-stream", seg_url));
+    }
+
+    #[test]
+    fn test_detect_playlist_plain_ts_segment_not_playlist() {
+        assert!(!detect_playlist(
+            "application/octet-stream",
+            "https://cdn.example.com/hls/seg1.ts"
+        ));
     }
 }
