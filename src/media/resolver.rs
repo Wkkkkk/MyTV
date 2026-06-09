@@ -20,7 +20,7 @@ pub async fn resolve_url(url: &str) -> Result<String> {
     let output = tokio::time::timeout(
         Duration::from_secs(30),
         Command::new("yt-dlp")
-            .args(["-g", "--no-playlist", "--", url])
+            .args(["-g", "--no-playlist", "-f", "b[ext=mp4]/b", "--", url])
             .output(),
     )
     .await
@@ -134,5 +134,24 @@ mod tests {
         assert!(result.is_ok(), "expected duration, got: {:?}", result);
         let secs = result.unwrap();
         assert!(secs > 0, "duration should be positive");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires yt-dlp installed and network access — run manually"]
+    async fn test_resolve_youtube_vod_returns_single_line_mp4_url() {
+        let url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+        let result = resolve_url(url).await;
+        assert!(result.is_ok(), "expected resolved URL, got: {:?}", result);
+        let resolved = result.unwrap();
+        assert!(
+            !resolved.contains('\n'),
+            "expected single-line URL (no separate audio stream), got multiple lines: {}",
+            resolved
+        );
+        assert!(
+            resolved.contains("mime=video%2Fmp4") || resolved.contains("video/mp4"),
+            "expected video/mp4 URL, got: {}",
+            resolved
+        );
     }
 }
