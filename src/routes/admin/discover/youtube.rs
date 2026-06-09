@@ -42,6 +42,64 @@ pub(super) fn build_video_rows(
         .collect()
 }
 
+pub(super) fn build_channel_rows(items: &[serde_json::Value]) -> Vec<YoutubeResultRow> {
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, item)| {
+            let channel_id = item["id"]["channelId"].as_str()?;
+            let snippet = &item["snippet"];
+            let title = snippet["title"].as_str().unwrap_or("Unknown").to_string();
+            let channel_title = snippet["channelTitle"].as_str().unwrap_or("").to_string();
+            let url = format!("https://www.youtube.com/channel/{}/live", channel_id);
+            Some(YoutubeResultRow {
+                title,
+                channel_title,
+                is_live: true,
+                duration_secs: 0,
+                url,
+                source_kind: "youtube_live".to_string(),
+                form_id: i,
+            })
+        })
+        .collect()
+}
+
+pub(super) async fn fetch_youtube_channels(
+    keyword: &str,
+    api_key: &str,
+    client: &reqwest::Client,
+) -> anyhow::Result<Vec<YoutubeResultRow>> {
+    let search_resp: serde_json::Value = client
+        .get("https://www.googleapis.com/youtube/v3/search")
+        .query(&[
+            ("part", "snippet"),
+            ("type", "channel"),
+            ("maxResults", "12"),
+            ("q", keyword),
+            ("key", api_key),
+        ])
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if let Some(err) = search_resp.get("error") {
+        let msg = err["message"]
+            .as_str()
+            .unwrap_or("YouTube API error")
+            .to_string();
+        anyhow::bail!("{}", msg);
+    }
+
+    let items = match search_resp["items"].as_array() {
+        Some(v) => v,
+        None => return Ok(vec![]),
+    };
+
+    Ok(build_channel_rows(items))
+}
+
 pub fn parse_iso8601_duration(s: &str) -> i64 {
     let s = s.strip_prefix("PT").unwrap_or(s);
     let mut total = 0i64;
@@ -140,6 +198,21 @@ pub(super) async fn fetch_youtube_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_rows_build_live_urls() {
+        let items = vec![serde_json::json!({
+            "id": {"channelId": "UC123"},
+            "snippet": {"title": "NASA", "channelTitle": "NASA"}
+        })];
+        let rows = build_channel_rows(&items);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].url, "https://www.youtube.com/channel/UC123/live");
+        assert!(rows[0].is_live);
+        assert_eq!(rows[0].duration_secs, 0);
+        assert_eq!(rows[0].source_kind, "youtube_live");
+        assert_eq!(rows[0].title, "NASA");
+    }
 
     #[test]
     fn test_parse_iso8601_duration() {

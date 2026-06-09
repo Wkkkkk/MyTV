@@ -41,6 +41,13 @@
       <label for="disc-keyword">Keyword</label>
       <input id="disc-keyword" type="text" name="keyword" placeholder="search YouTube…">
     </div>
+    <div class="form-row" style="margin:0;min-width:120px">
+      <label for="disc-yt-type">Type</label>
+      <select id="disc-yt-type" name="search_type" style="width:auto">
+        <option value="video">Videos</option>
+        <option value="channel">Channels</option>
+      </select>
+    </div>
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Search</button>
   </form>
   <div id="yt-results"></div>

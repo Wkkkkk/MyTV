@@ -90,6 +90,7 @@ pub struct M3uSearchForm {
 #[derive(Deserialize)]
 pub struct YoutubeSearchForm {
     pub keyword: String,
+    pub search_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -263,17 +264,22 @@ pub async fn discover_youtube_search(
                     .to_string(),
             ),
         };
-    let rows =
-        match youtube::fetch_youtube_results(&form.keyword, &api_key, &state.http_client).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!("YouTube API error: {e}");
-                return Html(format!(
-                    "<p class=\"empty-state\" style=\"color:#f77\">YouTube search failed: {}.</p>",
-                    html_escape(&e.to_string())
-                ));
-            }
-        };
+    let search_type = form.search_type.as_deref().unwrap_or("video");
+    let fetched = if search_type == "channel" {
+        youtube::fetch_youtube_channels(&form.keyword, &api_key, &state.http_client).await
+    } else {
+        youtube::fetch_youtube_results(&form.keyword, &api_key, &state.http_client).await
+    };
+    let rows = match fetched {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("YouTube API error: {e}");
+            return Html(format!(
+                "<p class=\"empty-state\" style=\"color:#f77\">YouTube search failed: {}.</p>",
+                html_escape(&e.to_string())
+            ));
+        }
+    };
     match (YtResultsTemplate { rows }).render() {
         Ok(html) => Html(html),
         Err(e) => {
