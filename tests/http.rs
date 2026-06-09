@@ -958,6 +958,25 @@ async fn stream_proxy_follows_relative_redirect() {
     );
 }
 
+#[tokio::test]
+async fn test_playlist_item_test_marks_youtube_as_direct_budget() {
+    use http_body_util::BodyExt;
+    // seed.sql: playlist items ids 1 (ep1) and 2 (ep2) for channel 4,
+    // plus YouTube item as id 3 (is_active=0, excluded from VOD loop).
+    let resp = app()
+        .await
+        .oneshot(authed_post("/admin/playlist/3/test"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8_lossy(&bytes);
+    assert!(
+        html.contains('⚡'),
+        "YouTube VOD item must show Direct (⚡) budget after Test"
+    );
+}
+
 // ── Metrics endpoint ──────────────────────────────────────────────────────────
 
 #[tokio::test]
