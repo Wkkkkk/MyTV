@@ -246,6 +246,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_find_first_segment_on_mp4_body_is_some_not_none() {
+        // A progressive MP4 fetched and lossily decoded as text: its "lines" are
+        // binary garbage — none start with '#', none end in .m3u8. find_first_segment_url
+        // returns the FIRST such line as a (garbage) segment rather than None, so the
+        // "no segment line -> None -> Unknown badge" mechanism does NOT hold for a VOD MP4.
+        let mp4ish = "\u{0}\u{0}\u{0}\u{18}ftypmp42\u{0}\u{0}\u{0}\u{0}mp42isom\nmoovbox";
+        let seg = find_first_segment_url(mp4ish, "https://rr3.googlevideo.com/videoplayback/abc");
+        assert!(
+            seg.is_some(),
+            "MP4-as-text yields a (garbage) segment, not None"
+        );
+    }
+
+    #[test]
+    fn test_find_first_segment_none_only_when_all_lines_are_playlists_or_comments() {
+        // None is returned only when every non-comment line is itself a playlist.
+        let only_variants = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nhttps://h/v.m3u8\n";
+        assert!(find_first_segment_url(only_variants, "https://h/").is_none());
+    }
+
+    #[test]
     fn test_rewrite_hls_urls_absolute() {
         let manifest = "#EXTM3U\nhttps://cdn.example.com/seg1.ts\n";
         let result = rewrite_hls_urls(
