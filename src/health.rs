@@ -270,6 +270,43 @@ pub async fn probe_and_cache_cors(
     Some(result)
 }
 
+/// Resolves a YouTube/Twitch live source via yt-dlp, probes the resolved HLS
+/// manifest's segment-CDN CORS, and caches the result under BOTH the resolved
+/// CDN host and the original source host. The original-host entry is what the
+/// guide and admin source-row budget lookups query with (they only know the DB
+/// source URL, never the resolved googlevideo URL). Returns `None` (cache
+/// unchanged) if resolution fails or the resolved URL is not a probeable HLS
+/// manifest, or for a URL that does not require resolution. Intended for the
+/// admin Test button only — the 15-min background sweep does not resolve live
+/// sources (too expensive).
+pub async fn probe_and_cache_resolved_cors(
+    client: &reqwest::Client,
+    cors_cache: &CorsCache,
+    source_url: &str,
+) -> Option<bool> {
+    if !crate::media::resolver::needs_resolution(source_url) {
+        return None;
+    }
+    let resolved = crate::media::resolver::resolve_url(source_url).await.ok()?;
+    let cors = crate::media::hls::probe_source_cors(client, &resolved).await?;
+
+    let resolved_host = crate::media::hls::extract_manifest_host(&resolved);
+    let original_host = crate::media::hls::extract_manifest_host(source_url);
+
+    tracing::debug!(
+        resolved_host = %resolved_host,
+        original_host = %original_host,
+        cors,
+        "resolved-live CORS probe cached"
+    );
+    let mut cache = cors_cache.write().await;
+    cache.insert(resolved_host.clone(), cors);
+    if original_host != resolved_host {
+        cache.insert(original_host, cors);
+    }
+    Some(cors)
+}
+
 async fn do_http_check(client: &reqwest::Client, url: &str, kind: &str) -> (bool, Option<String>) {
     let mut resp = match client.get(url).timeout(HTTP_TIMEOUT).send().await {
         Ok(r) => r,
@@ -406,6 +443,46 @@ mod tests {
         let result = probe_and_cache_cors(&client, &cache, "https://youtube.com/watch?v=abc").await;
         assert_eq!(result, None);
         assert!(cache.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_probe_and_cache_resolved_cors_noop_when_no_resolution_needed() {
+        // "not-a-url" does not require resolution, so the helper short-circuits to
+        // None before spawning yt-dlp — deterministic, never touches the network.
+        // The cache must be left untouched.
+        let cache: crate::CorsCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let client = reqwest::Client::new();
+        let result = probe_and_cache_resolved_cors(&client, &cache, "not-a-url").await;
+        assert_eq!(result, None);
+        assert!(cache.read().await.is_empty());
+    }
+
+    #[test]
+    fn test_resolved_cors_caches_under_both_hosts() {
+        // Contract test (mirrors test_probe_and_cache_cors_dash_caches_under_cdn_host):
+        // after a successful resolved-live probe, the cache must hold the result under
+        // BOTH the resolved CDN host (semantic key) and the original source host (the
+        // key the guide/admin-row lookups actually query with). The guide only ever
+        // knows the DB source URL (youtube.com), never the resolved googlevideo URL.
+        let original_host = "https://www.youtube.com";
+        let cdn_host = "https://rr3---sn-xyz.googlevideo.com";
+        assert_ne!(original_host, cdn_host);
+
+        let mut cache: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        cache.insert(cdn_host.to_string(), true);
+        cache.insert(original_host.to_string(), true);
+
+        // The guide looks up by the original source URL host -> must find Direct.
+        assert_eq!(
+            crate::budget::status_for_url("https://www.youtube.com/live/abc123", &cache),
+            crate::budget::BudgetStatus::Direct,
+            "guide lookup by original youtube host must find the probe result"
+        );
+        assert!(
+            cache.contains_key(cdn_host),
+            "resolved CDN host must also be cached for correct semantics"
+        );
     }
 
     #[tokio::test]
