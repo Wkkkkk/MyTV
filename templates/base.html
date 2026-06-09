@@ -297,7 +297,14 @@
           // Direct MP4 (e.g. YouTube VOD resolved via yt-dlp)
           if (hls) { hls.stopLoad(); hls.detachMedia(); }
           if (dash) { dash.reset(); dash = null; }
-          video.onerror = function() { showPlayerError(); };
+          video.onerror = function() {
+            var nextUrl = '/channel/' + currentChannelId + '/next';
+            if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
+            fetch(nextUrl)
+              .then(function(r) { if (!r.ok) { showPlayerError(); return; } return r.json(); })
+              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
+              .catch(function() { showPlayerError(); });
+          };
           video.src = url;
           if (offset > 0) {
             video.addEventListener('loadedmetadata', function onMeta() {
