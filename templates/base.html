@@ -210,7 +210,7 @@
                 if (!r.ok) { showPlayerError(); return; }
                 return r.json();
               })
-              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
+              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy); })
               .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'failover: ' + err); console.error('failover error:', err); showPlayerError(); });
           }
         });
@@ -223,7 +223,7 @@
         return '/stream-proxy?url=' + encodeURIComponent(url);
       }
 
-      function _loadSource(url, offset) {
+      function _loadSource(url, offset, skipProxy) {
         currentUrl = url;
         dashErrorFired = false;
         var isDash = url.indexOf('.mpd') >= 0;
@@ -242,7 +242,7 @@
             if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
             fetch(nextUrl)
               .then(function(r) { if (!r.ok) { showPlayerError(); return null; } return r.json(); })
-              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
+              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy); })
               .catch(function(err) {
                 if (typeof debugLog === 'function') debugLog('error', 'DASH failover: ' + err);
                 showPlayerError();
@@ -275,7 +275,7 @@
                   if (!r.ok) { showPlayerError(); return; }
                   return r.json();
                 })
-                .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
+                .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy); })
                 .catch(function(err) {
                   if (typeof debugLog === 'function') debugLog('error', 'native HLS: ' + err);
                   console.error('native hls error:', err);
@@ -302,10 +302,10 @@
             if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
             fetch(nextUrl)
               .then(function(r) { if (!r.ok) { showPlayerError(); return; } return r.json(); })
-              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs); })
+              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy); })
               .catch(function() { showPlayerError(); });
           };
-          video.src = url;
+          video.src = skipProxy ? currentUrl : url;
           if (offset > 0) {
             video.addEventListener('loadedmetadata', function onMeta() {
               video.removeEventListener('loadedmetadata', onMeta);
@@ -346,7 +346,7 @@
           .then(function(d) {
             currentChannel = Object.assign({ channel_id: channelId }, d);
             renderInfoBar(currentChannel);
-            _loadSource(d.url, d.start_offset_secs);
+            _loadSource(d.url, d.start_offset_secs, d.skip_proxy);
           })
           .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'tune: ' + err); console.error('tune error:', err); showPlayerError(); });
       }
@@ -360,7 +360,7 @@
               return r.json();
             })
             .then(function(d) {
-              if (d.url) _loadSource(d.url, d.start_offset_secs);
+              if (d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy);
             })
             .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'next: ' + err); console.error('next error:', err); showPlayerError(); });
         });
