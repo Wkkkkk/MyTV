@@ -3,5 +3,6 @@
 *.db
 *.pem
 .superpowers/
-.claude/
+.claude/*
+!.claude/skills/
 .vscode/
