@@ -147,6 +147,16 @@ pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool
     Ok(rows > 0)
 }
 
+/// Deactivate every source for a channel. Used when an ended YouTube live is
+/// converted to a VOD loop; rows are kept for reference, only is_active flips.
+pub async fn deactivate_all_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<()> {
+    sqlx::query("UPDATE sources SET is_active = 0 WHERE channel_id = ?")
+        .bind(channel_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// List all sources across all channels ordered by channel_id then priority.
 pub async fn list_all(pool: &SqlitePool) -> Result<Vec<Source>> {
     sqlx::query_as::<_, Source>("SELECT * FROM sources ORDER BY channel_id ASC, priority ASC")
@@ -399,6 +409,30 @@ mod tests {
         assert_eq!(
             updated.failure_reason.as_deref(),
             Some("connection refused")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_deactivate_all_for_channel() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        create(&pool, hls(ch.id, "https://a.example.com/s.m3u8", 1))
+            .await
+            .unwrap();
+        create(&pool, hls(ch.id, "https://b.example.com/s.m3u8", 2))
+            .await
+            .unwrap();
+
+        deactivate_all_for_channel(&pool, ch.id).await.unwrap();
+
+        assert!(list_active_for_channel(&pool, ch.id)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            list_for_channel(&pool, ch.id).await.unwrap().len(),
+            2,
+            "rows are kept, only is_active flips"
         );
     }
 
