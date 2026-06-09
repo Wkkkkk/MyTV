@@ -93,6 +93,36 @@ pub async fn fetch_title(url: &str) -> Result<String> {
     Ok(title)
 }
 
+/// Fetches the canonical video id of a YouTube URL via yt-dlp. Used to build a
+/// `watch?v=<id>` URL when an ended live source carries no id in its path
+/// (channel/handle live URLs).
+pub async fn fetch_video_id(url: &str) -> Result<String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        bail!("invalid URL scheme: {}", url);
+    }
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("yt-dlp")
+            .args(["--print", "id", "--no-playlist", "--", url])
+            .output(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
+
+    if !output.status.success() {
+        bail!(
+            "yt-dlp failed for {}: {}",
+            url,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if id.is_empty() {
+        bail!("yt-dlp returned empty id for {}", url);
+    }
+    Ok(id)
+}
+
 /// Fetches the duration of a video in seconds via yt-dlp.
 /// Called once when an admin adds a VOD asset so duration is stored in the DB.
 pub async fn fetch_duration_secs(url: &str) -> Result<i64> {
@@ -216,6 +246,14 @@ mod tests {
             live_url_to_watch_url("https://www.youtube.com/watch?v=abc123"),
             None
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires yt-dlp installed and network access — run manually"]
+    async fn test_fetch_video_id_returns_id() {
+        let url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+        let id = fetch_video_id(url).await.unwrap();
+        assert_eq!(id, "dQw4w9WgXcQ");
     }
 
     #[tokio::test]
