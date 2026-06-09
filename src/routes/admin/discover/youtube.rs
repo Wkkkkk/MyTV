@@ -4,7 +4,42 @@ pub struct YoutubeResultRow {
     pub is_live: bool,
     pub duration_secs: i64,
     pub url: String,
+    pub source_kind: String,
     pub form_id: usize,
+}
+
+pub(super) fn build_video_rows(
+    items: &[serde_json::Value],
+    duration_map: &std::collections::HashMap<String, i64>,
+) -> Vec<YoutubeResultRow> {
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, item)| {
+            let video_id = item["id"]["videoId"].as_str()?;
+            let snippet = &item["snippet"];
+            let title = snippet["title"].as_str().unwrap_or("Unknown").to_string();
+            let channel_title = snippet["channelTitle"].as_str().unwrap_or("").to_string();
+            let is_live = snippet["liveBroadcastContent"].as_str() == Some("live");
+            let duration_secs = *duration_map.get(video_id).unwrap_or(&0);
+            let source_kind = if is_live {
+                "youtube_live"
+            } else {
+                "youtube_vod"
+            }
+            .to_string();
+            let url = format!("https://www.youtube.com/watch?v={}", video_id);
+            Some(YoutubeResultRow {
+                title,
+                channel_title,
+                is_live,
+                duration_secs,
+                url,
+                source_kind,
+                form_id: i,
+            })
+        })
+        .collect()
 }
 
 pub fn parse_iso8601_duration(s: &str) -> i64 {
@@ -97,27 +132,7 @@ pub(super) async fn fetch_youtube_results(
         }
     }
 
-    let rows = items
-        .iter()
-        .enumerate()
-        .filter_map(|(i, item)| {
-            let video_id = item["id"]["videoId"].as_str()?;
-            let snippet = &item["snippet"];
-            let title = snippet["title"].as_str().unwrap_or("Unknown").to_string();
-            let channel_title = snippet["channelTitle"].as_str().unwrap_or("").to_string();
-            let is_live = snippet["liveBroadcastContent"].as_str() == Some("live");
-            let duration_secs = *duration_map.get(video_id).unwrap_or(&0);
-            let url = format!("https://www.youtube.com/watch?v={}", video_id);
-            Some(YoutubeResultRow {
-                title,
-                channel_title,
-                is_live,
-                duration_secs,
-                url,
-                form_id: i,
-            })
-        })
-        .collect();
+    let rows = build_video_rows(items, &duration_map);
 
     Ok(rows)
 }
@@ -133,5 +148,30 @@ mod tests {
         assert_eq!(parse_iso8601_duration("PT2H"), 7200);
         assert_eq!(parse_iso8601_duration("PT0S"), 0);
         assert_eq!(parse_iso8601_duration("PT45S"), 45);
+    }
+
+    #[test]
+    fn video_rows_label_vod_when_not_live() {
+        let items = vec![
+            serde_json::json!({
+                "id": {"videoId": "abc"},
+                "snippet": {"title": "A VOD", "channelTitle": "Chan",
+                            "liveBroadcastContent": "none"}
+            }),
+            serde_json::json!({
+                "id": {"videoId": "def"},
+                "snippet": {"title": "A Live", "channelTitle": "Chan",
+                            "liveBroadcastContent": "live"}
+            }),
+        ];
+        let mut dur = std::collections::HashMap::new();
+        dur.insert("abc".to_string(), 253i64);
+        let rows = build_video_rows(&items, &dur);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].source_kind, "youtube_vod");
+        assert!(!rows[0].is_live);
+        assert_eq!(rows[0].duration_secs, 253);
+        assert_eq!(rows[1].source_kind, "youtube_live");
+        assert!(rows[1].is_live);
     }
 }
