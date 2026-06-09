@@ -227,6 +227,7 @@
         currentUrl = url;
         dashErrorFired = false;
         var isDash = url.indexOf('.mpd') >= 0;
+        var isHls  = url.indexOf('.m3u8') >= 0;
         url = proxyUrl(url);
 
         if (isDash) {
@@ -256,7 +257,7 @@
           }
           // autoPlay=true: dash.js calls video.play() internally after manifest load
           dash.initialize(video, url, true);
-        } else {
+        } else if (isHls) {
           if (dash) { dash.reset(); dash = null; }
           if (hls) hls.attachMedia(video);
           if (hls) {
@@ -291,6 +292,21 @@
             } else {
               video.play().catch(function(){});
             }
+          }
+        } else {
+          // Direct MP4 (e.g. YouTube VOD resolved via yt-dlp)
+          if (hls) { hls.stopLoad(); hls.detachMedia(); }
+          if (dash) { dash.reset(); dash = null; }
+          video.onerror = function() { showPlayerError(); };
+          video.src = url;
+          if (offset > 0) {
+            video.addEventListener('loadedmetadata', function onMeta() {
+              video.removeEventListener('loadedmetadata', onMeta);
+              video.currentTime = offset;
+              video.play().catch(function(){});
+            });
+          } else {
+            video.play().catch(function(){});
           }
         }
       }
