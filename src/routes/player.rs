@@ -26,6 +26,7 @@ pub struct TuneResponse {
     pub category: String,
     pub channel_type: String,
     pub skip_proxy: bool,
+    pub ended: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,6 +85,20 @@ fn tune_response(
         category: ch.category.clone(),
         channel_type: ch.r#type.clone(),
         skip_proxy,
+        ended: false,
+    })
+}
+
+fn tune_response_ended(ch: &channel::Channel) -> Json<TuneResponse> {
+    Json(TuneResponse {
+        url: String::new(),
+        start_offset_secs: 0,
+        name: ch.name.clone(),
+        logo_url: ch.logo_url.clone(),
+        category: ch.category.clone(),
+        channel_type: ch.r#type.clone(),
+        skip_proxy: false,
+        ended: true,
     })
 }
 
@@ -102,12 +117,16 @@ async fn next_live(
     {
         match resolver::resolve_url(&src.url).await {
             Ok(url) => {
+                if resolver::is_finished_live(&url) {
+                    spawn_live_to_vod_conversion(state, ch.id, ch.name.clone(), src.url.clone());
+                    return Ok(tune_response_ended(ch));
+                }
                 return Ok(tune_response(
                     ch,
                     url,
                     0,
                     resolver::needs_resolution(&src.url),
-                ))
+                ));
             }
             Err(e) => {
                 tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source")
@@ -121,7 +140,6 @@ async fn next_live(
 /// recording as a playlist item, flip the channel to vod_loop anchored at
 /// `anchor`, and deactivate the (now-finished) live sources. Idempotent: a
 /// channel already in vod_loop is left untouched.
-#[allow(dead_code)]
 async fn convert_channel_to_vod_loop(
     pool: &sqlx::SqlitePool,
     channel_id: i64,
@@ -150,6 +168,46 @@ async fn convert_channel_to_vod_loop(
     channel::set_type_and_anchor(pool, channel_id, ChannelType::VodLoop, Some(anchor)).await?;
     source::deactivate_all_for_channel(pool, channel_id).await?;
     Ok(())
+}
+
+fn spawn_live_to_vod_conversion(
+    state: &AppState,
+    channel_id: i64,
+    channel_name: String,
+    source_url: String,
+) {
+    let pool = state.pool.clone();
+    tokio::spawn(async move {
+        if let Err(e) = live_to_vod_conversion(&pool, channel_id, &channel_name, &source_url).await
+        {
+            tracing::warn!(channel_id, error = %e, "ended-live → VOD conversion failed");
+        }
+    });
+}
+
+async fn live_to_vod_conversion(
+    pool: &sqlx::SqlitePool,
+    channel_id: i64,
+    channel_name: &str,
+    source_url: &str,
+) -> anyhow::Result<()> {
+    let watch_url = match resolver::live_url_to_watch_url(source_url) {
+        Some(u) => u,
+        None => {
+            let id = resolver::fetch_video_id(source_url).await?;
+            format!("https://www.youtube.com/watch?v={id}")
+        }
+    };
+    let duration = resolver::fetch_duration_secs(&watch_url).await?;
+    convert_channel_to_vod_loop(
+        pool,
+        channel_id,
+        channel_name,
+        &watch_url,
+        duration,
+        chrono::Utc::now(),
+    )
+    .await
 }
 
 async fn vod_items_and_index(
