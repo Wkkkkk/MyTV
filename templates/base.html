@@ -126,6 +126,7 @@
       let dash = null;
       let dashErrorFired = false;
       var endedHops = 0;
+      var endedAdvanceGen = 0;
 
       function hashColor(str) {
         var h = 0;
@@ -358,7 +359,9 @@
         var notice = document.getElementById('player-ended');
         if (notice) notice.style.display = 'block';
         var nextId = nextChannelId('down');
+        var gen = ++endedAdvanceGen;
         setTimeout(function() {
+          if (gen !== endedAdvanceGen) return;
           if (notice) notice.style.display = 'none';
           if (nextId) tune(nextId);
           else showPlayerError();
@@ -376,6 +379,9 @@
         currentChannelId = channelId;
         currentUrl = null;
         hidePlayerError();
+        endedAdvanceGen++;
+        var endedNotice = document.getElementById('player-ended');
+        if (endedNotice) endedNotice.style.display = 'none';
         if (hls) hls.stopLoad();
         if (dash) { dash.reset(); dash = null; }
         document.getElementById('player-panel').style.display = 'block';
