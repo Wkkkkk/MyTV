@@ -488,9 +488,9 @@ async fn test_guide_renders_vod_budget_badge_from_cache() {
 #[tokio::test]
 async fn test_source_test_youtube_live_routes_through_resolution() {
     // Source 5 (seed) is a YouTube-live URL -> needs_resolution() is true, so the
-    // handler takes the resolve+probe branch. With yt-dlp unavailable (or unable to
-    // resolve a bogus stream), the probe is a fast no-op and the badge stays blank,
-    // but the handler must still return 200 and re-render the source row partial.
+    // handler takes the resolve+probe branch. Its bogus video id makes yt-dlp fail
+    // fast (or yt-dlp is simply absent), so the probe is a no-op and the badge stays
+    // blank, but the handler must still return 200 and re-render the source row partial.
     let response = app()
         .await
         .oneshot(authed_post("/admin/sources/5/test"))
@@ -501,6 +501,10 @@ async fn test_source_test_youtube_live_routes_through_resolution() {
     assert!(
         body.contains("src-row-5"),
         "response should be the row partial for source 5"
+    );
+    assert!(
+        !body.contains('\u{26A1}') && !body.contains('\u{2601}'),
+        "badge stays blank when resolution of the bogus id yields no probe result"
     );
 }
 
