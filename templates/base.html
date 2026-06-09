@@ -23,6 +23,7 @@
     #player-panel{display:none;background:#000;border-bottom:2px solid #e94560}
     #player-panel video{width:100%;max-height:50vh;display:block}
     #player-error{display:none;padding:32px;text-align:center;color:#e94560;background:#000;font-size:1rem}
+    #player-ended{display:none;padding:32px;text-align:center;color:#fff;background:#000;font-size:1rem}
 
     /* ── player info bar ──────────────────────────────────────────── */
     #player-info{display:none;align-items:center;gap:10px;padding:8px 12px;
@@ -124,6 +125,7 @@
       let currentChannel = null;
       let dash = null;
       let dashErrorFired = false;
+      var endedHops = 0;
 
       function hashColor(str) {
         var h = 0;
@@ -210,7 +212,7 @@
                 if (!r.ok) { showPlayerError(); return; }
                 return r.json();
               })
-              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy); })
+              .then(function(d) { applyTuneResponse(d); })
               .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'failover: ' + err); console.error('failover error:', err); showPlayerError(); });
           }
         });
@@ -242,7 +244,7 @@
             if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
             fetch(nextUrl)
               .then(function(r) { if (!r.ok) { showPlayerError(); return null; } return r.json(); })
-              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy); })
+              .then(function(d) { applyTuneResponse(d); })
               .catch(function(err) {
                 if (typeof debugLog === 'function') debugLog('error', 'DASH failover: ' + err);
                 showPlayerError();
@@ -275,7 +277,7 @@
                   if (!r.ok) { showPlayerError(); return; }
                   return r.json();
                 })
-                .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy); })
+                .then(function(d) { applyTuneResponse(d); })
                 .catch(function(err) {
                   if (typeof debugLog === 'function') debugLog('error', 'native HLS: ' + err);
                   console.error('native hls error:', err);
@@ -302,7 +304,7 @@
             if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
             fetch(nextUrl)
               .then(function(r) { if (!r.ok) { showPlayerError(); return; } return r.json(); })
-              .then(function(d) { if (d && d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy); })
+              .then(function(d) { applyTuneResponse(d); })
               .catch(function() { showPlayerError(); });
           };
           video.src = skipProxy ? currentUrl : url;
@@ -331,6 +333,45 @@
         if (el) el.style.display = 'none';
       }
 
+      function nextChannelId(dir) {
+        var channels = window.epgChannels || [];
+        if (!channels.length || !currentChannelId) return null;
+        var idx = -1;
+        for (var i = 0; i < channels.length; i++) {
+          if (channels[i].id === currentChannelId) { idx = i; break; }
+        }
+        if (idx < 0) idx = 0;
+        var n = dir === 'up'
+          ? (idx - 1 + channels.length) % channels.length
+          : (idx + 1) % channels.length;
+        return channels[n].id;
+      }
+
+      function advanceEndedChannel() {
+        var channels = window.epgChannels || [];
+        endedHops++;
+        if (!channels.length || endedHops > channels.length) {
+          endedHops = 0;
+          showPlayerError();
+          return;
+        }
+        var notice = document.getElementById('player-ended');
+        if (notice) notice.style.display = 'block';
+        var nextId = nextChannelId('down');
+        setTimeout(function() {
+          if (notice) notice.style.display = 'none';
+          if (nextId) tune(nextId);
+          else showPlayerError();
+        }, 1500);
+      }
+
+      function applyTuneResponse(d) {
+        if (!d) return;
+        if (d.ended) { advanceEndedChannel(); return; }
+        endedHops = 0;
+        if (d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy);
+      }
+
       function tune(channelId) {
         currentChannelId = channelId;
         currentUrl = null;
@@ -346,7 +387,7 @@
           .then(function(d) {
             currentChannel = Object.assign({ channel_id: channelId }, d);
             renderInfoBar(currentChannel);
-            _loadSource(d.url, d.start_offset_secs, d.skip_proxy);
+            applyTuneResponse(d);
           })
           .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'tune: ' + err); console.error('tune error:', err); showPlayerError(); });
       }
@@ -359,9 +400,7 @@
               if (!r.ok) throw new Error('next failed: ' + r.status);
               return r.json();
             })
-            .then(function(d) {
-              if (d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy);
-            })
+            .then(function(d) { applyTuneResponse(d); })
             .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'next: ' + err); console.error('next error:', err); showPlayerError(); });
         });
       }
@@ -392,17 +431,8 @@
 
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
           e.preventDefault();
-          var channels = window.epgChannels || [];
-          if (!channels.length || !currentChannelId) return;
-          var idx = -1;
-          for (var i = 0; i < channels.length; i++) {
-            if (channels[i].id === currentChannelId) { idx = i; break; }
-          }
-          if (idx < 0) idx = 0;
-          var next = e.key === 'ArrowDown'
-            ? (idx + 1) % channels.length
-            : (idx - 1 + channels.length) % channels.length;
-          tune(channels[next].id);
+          var nextId = nextChannelId(e.key === 'ArrowUp' ? 'up' : 'down');
+          if (nextId) tune(nextId);
           return;
         }
 
