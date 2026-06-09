@@ -50,11 +50,10 @@ pub(super) fn build_channel_rows(items: &[serde_json::Value]) -> Vec<YoutubeResu
             let channel_id = item["id"]["channelId"].as_str()?;
             let snippet = &item["snippet"];
             let title = snippet["title"].as_str().unwrap_or("Unknown").to_string();
-            let channel_title = snippet["channelTitle"].as_str().unwrap_or("").to_string();
             let url = format!("https://www.youtube.com/channel/{}/live", channel_id);
             Some(YoutubeResultRow {
                 title,
-                channel_title,
+                channel_title: String::new(),
                 is_live: true,
                 duration_secs: 0,
                 url,
@@ -212,6 +211,7 @@ mod tests {
         assert_eq!(rows[0].duration_secs, 0);
         assert_eq!(rows[0].source_kind, "youtube_live");
         assert_eq!(rows[0].title, "NASA");
+        assert_eq!(rows[0].channel_title, "");
     }
 
     #[test]
