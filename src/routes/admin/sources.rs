@@ -95,6 +95,15 @@ pub async fn source_test(
 
     crate::health::probe_source(&state.pool, &state.http_client, &state.cors_cache, &src).await;
 
+    if crate::media::resolver::needs_resolution(&src.url) {
+        crate::health::probe_and_cache_resolved_cors(
+            &state.http_client,
+            &state.cors_cache,
+            &src.url,
+        )
+        .await;
+    }
+
     let updated = source::get(&state.pool, source_id)
         .await
         .map_err(internal_error)?
