@@ -26,6 +26,7 @@ pub struct TuneResponse {
     pub category: String,
     pub channel_type: String,
     pub skip_proxy: bool,
+    pub ended: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,6 +85,20 @@ fn tune_response(
         category: ch.category.clone(),
         channel_type: ch.r#type.clone(),
         skip_proxy,
+        ended: false,
+    })
+}
+
+fn tune_response_ended(ch: &channel::Channel) -> Json<TuneResponse> {
+    Json(TuneResponse {
+        url: String::new(),
+        start_offset_secs: 0,
+        name: ch.name.clone(),
+        logo_url: ch.logo_url.clone(),
+        category: ch.category.clone(),
+        channel_type: ch.r#type.clone(),
+        skip_proxy: false,
+        ended: true,
     })
 }
 
@@ -102,12 +117,16 @@ async fn next_live(
     {
         match resolver::resolve_url(&src.url).await {
             Ok(url) => {
+                if resolver::is_finished_live(&url) {
+                    spawn_live_to_vod_conversion(state, ch.id, ch.name.clone(), src.url.clone());
+                    return Ok(tune_response_ended(ch));
+                }
                 return Ok(tune_response(
                     ch,
                     url,
                     0,
                     resolver::needs_resolution(&src.url),
-                ))
+                ));
             }
             Err(e) => {
                 tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source")
@@ -115,6 +134,80 @@ async fn next_live(
         }
     }
     Err(StatusCode::SERVICE_UNAVAILABLE)
+}
+
+/// DB-only conversion of an ended live channel into a VOD loop: append the
+/// recording as a playlist item, flip the channel to vod_loop anchored at
+/// `anchor`, and deactivate the (now-finished) live sources. Idempotent: a
+/// channel already in vod_loop is left untouched.
+async fn convert_channel_to_vod_loop(
+    pool: &sqlx::SqlitePool,
+    channel_id: i64,
+    title: &str,
+    watch_url: &str,
+    duration_secs: i64,
+    anchor: chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<()> {
+    let Some(ch) = channel::get(pool, channel_id).await? else {
+        anyhow::bail!("channel {channel_id} not found");
+    };
+    if ch.channel_type() == ChannelType::VodLoop {
+        return Ok(());
+    }
+    playlist_item::create(
+        pool,
+        playlist_item::NewPlaylistItem {
+            channel_id,
+            title: title.to_string(),
+            url: watch_url.to_string(),
+            duration_secs,
+            sort_order: 0,
+        },
+    )
+    .await?;
+    channel::set_type_and_anchor(pool, channel_id, ChannelType::VodLoop, Some(anchor)).await?;
+    source::deactivate_all_for_channel(pool, channel_id).await?;
+    Ok(())
+}
+
+fn spawn_live_to_vod_conversion(
+    state: &AppState,
+    channel_id: i64,
+    channel_name: String,
+    source_url: String,
+) {
+    let pool = state.pool.clone();
+    tokio::spawn(async move {
+        if let Err(e) = live_to_vod_conversion(&pool, channel_id, &channel_name, &source_url).await
+        {
+            tracing::warn!(channel_id, error = %e, "ended-live → VOD conversion failed");
+        }
+    });
+}
+
+async fn live_to_vod_conversion(
+    pool: &sqlx::SqlitePool,
+    channel_id: i64,
+    channel_name: &str,
+    source_url: &str,
+) -> anyhow::Result<()> {
+    let watch_url = match resolver::live_url_to_watch_url(source_url) {
+        Some(u) => u,
+        None => {
+            let id = resolver::fetch_video_id(source_url).await?;
+            format!("https://www.youtube.com/watch?v={id}")
+        }
+    };
+    let duration = resolver::fetch_duration_secs(&watch_url).await?;
+    convert_channel_to_vod_loop(
+        pool,
+        channel_id,
+        channel_name,
+        &watch_url,
+        duration,
+        chrono::Utc::now(),
+    )
+    .await
 }
 
 async fn vod_items_and_index(
@@ -890,5 +983,73 @@ mod tests {
             "application/octet-stream",
             "https://cdn.example.com/hls/seg1.ts"
         ));
+    }
+
+    // ── convert_channel_to_vod_loop ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_convert_channel_to_vod_loop() {
+        let state = test_state().await;
+        let ch = make_live_channel(&state).await;
+        source::create(
+            &state.pool,
+            source::NewSource {
+                channel_id: ch.id,
+                kind: source::SourceKind::YoutubeLive,
+                url: "https://www.youtube.com/live/abc123".into(),
+                priority: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        let anchor = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        convert_channel_to_vod_loop(
+            &state.pool,
+            ch.id,
+            "Live Test",
+            "https://www.youtube.com/watch?v=abc123",
+            212,
+            anchor,
+        )
+        .await
+        .unwrap();
+
+        let updated = channel::get(&state.pool, ch.id).await.unwrap().unwrap();
+        assert_eq!(updated.channel_type(), channel::ChannelType::VodLoop);
+        assert_eq!(updated.loop_anchor, Some(anchor));
+
+        let items = playlist_item::list_active_for_channel(&state.pool, ch.id)
+            .await
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].url, "https://www.youtube.com/watch?v=abc123");
+        assert_eq!(items[0].duration_secs, 212);
+        assert_eq!(items[0].title, "Live Test");
+
+        assert!(source::list_active_for_channel(&state.pool, ch.id)
+            .await
+            .unwrap()
+            .is_empty());
+
+        // Idempotent: a second run on an already-converted channel is a no-op.
+        convert_channel_to_vod_loop(
+            &state.pool,
+            ch.id,
+            "Live Test",
+            "https://www.youtube.com/watch?v=abc123",
+            212,
+            anchor,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            playlist_item::list_active_for_channel(&state.pool, ch.id)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "second conversion must not append a duplicate item"
+        );
     }
 }

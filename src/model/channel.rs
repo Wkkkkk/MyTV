@@ -121,6 +121,23 @@ pub async fn update(pool: &SqlitePool, id: i64, input: UpdateChannel) -> Result<
     get(pool, id).await
 }
 
+/// Set a channel's playback type and loop anchor. Used by the ended-live → VOD
+/// conversion to flip a `live` channel into a `vod_loop`.
+pub async fn set_type_and_anchor(
+    pool: &SqlitePool,
+    id: i64,
+    channel_type: ChannelType,
+    loop_anchor: Option<DateTime<Utc>>,
+) -> Result<()> {
+    sqlx::query("UPDATE channels SET type = ?, loop_anchor = ? WHERE id = ?")
+        .bind(channel_type.as_str())
+        .bind(loop_anchor)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Fetch a channel by id.
 pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Channel>> {
     sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = ?")
@@ -272,5 +289,34 @@ mod tests {
         .await
         .unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_set_type_and_anchor_flips_to_vod_loop() {
+        use chrono::TimeZone;
+        let pool = test_pool().await;
+        let ch = create(
+            &pool,
+            NewChannel {
+                name: "X".into(),
+                category: "c".into(),
+                logo_url: None,
+                channel_type: ChannelType::Live,
+                sort_order: 0,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(ch.channel_type(), ChannelType::Live);
+
+        let anchor = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+        set_type_and_anchor(&pool, ch.id, ChannelType::VodLoop, Some(anchor))
+            .await
+            .unwrap();
+
+        let updated = get(&pool, ch.id).await.unwrap().unwrap();
+        assert_eq!(updated.channel_type(), ChannelType::VodLoop);
+        assert_eq!(updated.loop_anchor, Some(anchor));
     }
 }

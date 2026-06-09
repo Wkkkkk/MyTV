@@ -8,6 +8,29 @@ pub fn needs_resolution(url: &str) -> bool {
     url.contains("youtube.com") || url.contains("youtu.be") || url.contains("twitch.tv")
 }
 
+/// Returns true if a resolved YouTube manifest URL belongs to an ended live
+/// broadcast. yt-dlp marks finished live HLS manifests with `force_finished/1`,
+/// which leaves the player on a frozen playlist (black screen).
+pub fn is_finished_live(resolved_url: &str) -> bool {
+    resolved_url.contains("force_finished/1")
+}
+
+/// Rewrites a YouTube *live* URL that embeds a video id into the canonical
+/// `watch?v=<id>` form, which yt-dlp resolves to the recorded MP4 once the
+/// broadcast ends. Returns `None` for forms with no id in the path
+/// (channel/handle `/live`) and for URLs already in `watch?v=` form.
+pub fn live_url_to_watch_url(source_url: &str) -> Option<String> {
+    let tail = source_url
+        .split("youtube.com/live/")
+        .nth(1)
+        .or_else(|| source_url.split("youtu.be/").nth(1))?;
+    let id = tail.split(['?', '&', '/']).next().unwrap_or("").trim();
+    if id.is_empty() {
+        return None;
+    }
+    Some(format!("https://www.youtube.com/watch?v={id}"))
+}
+
 /// Returns a directly playable URL.
 /// HLS/IPTV URLs are returned unchanged. YouTube/Twitch are resolved via yt-dlp.
 pub async fn resolve_url(url: &str) -> Result<String> {
@@ -68,6 +91,36 @@ pub async fn fetch_title(url: &str) -> Result<String> {
         bail!("yt-dlp returned empty title for {}", url);
     }
     Ok(title)
+}
+
+/// Fetches the canonical video id of a YouTube URL via yt-dlp. Used to build a
+/// `watch?v=<id>` URL when an ended live source carries no id in its path
+/// (channel/handle live URLs).
+pub async fn fetch_video_id(url: &str) -> Result<String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        bail!("invalid URL scheme: {}", url);
+    }
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("yt-dlp")
+            .args(["--print", "id", "--no-playlist", "--", url])
+            .output(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
+
+    if !output.status.success() {
+        bail!(
+            "yt-dlp failed for {}: {}",
+            url,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if id.is_empty() {
+        bail!("yt-dlp returned empty id for {}", url);
+    }
+    Ok(id)
 }
 
 /// Fetches the duration of a video in seconds via yt-dlp.
@@ -163,6 +216,44 @@ mod tests {
         assert!(result.is_ok(), "expected duration, got: {:?}", result);
         let secs = result.unwrap();
         assert!(secs > 0, "duration should be positive");
+    }
+
+    #[test]
+    fn test_is_finished_live() {
+        assert!(is_finished_live(
+            "https://r5---sn-x.googlevideo.com/a/force_finished/1/b/index.m3u8"
+        ));
+        assert!(!is_finished_live(
+            "https://r5---sn-x.googlevideo.com/a/id/abc/b/index.m3u8"
+        ));
+    }
+
+    #[test]
+    fn test_live_url_to_watch_url() {
+        assert_eq!(
+            live_url_to_watch_url("https://www.youtube.com/live/abc123"),
+            Some("https://www.youtube.com/watch?v=abc123".to_string())
+        );
+        assert_eq!(
+            live_url_to_watch_url("https://youtu.be/abc123?feature=share"),
+            Some("https://www.youtube.com/watch?v=abc123".to_string())
+        );
+        assert_eq!(
+            live_url_to_watch_url("https://www.youtube.com/@somechannel/live"),
+            None
+        );
+        assert_eq!(
+            live_url_to_watch_url("https://www.youtube.com/watch?v=abc123"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires yt-dlp installed and network access — run manually"]
+    async fn test_fetch_video_id_returns_id() {
+        let url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+        let id = fetch_video_id(url).await.unwrap();
+        assert_eq!(id, "dQw4w9WgXcQ");
     }
 
     #[tokio::test]

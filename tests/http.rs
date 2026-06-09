@@ -15,14 +15,14 @@ fn test_client() -> reqwest::Client {
         .unwrap()
 }
 
-async fn app() -> axum::Router {
+async fn app_with_pool() -> (axum::Router, sqlx::SqlitePool) {
     let pool = db::connect("sqlite::memory:").await.unwrap();
     sqlx::query(include_str!("fixtures/seed.sql"))
         .execute(&pool)
         .await
         .unwrap();
     let state = AppState {
-        pool,
+        pool: pool.clone(),
         config: Arc::new(Config {
             database_url: "sqlite::memory:".to_string(),
             admin_password: "test".to_string(),
@@ -40,7 +40,11 @@ async fn app() -> axum::Router {
         ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         metrics: Arc::new(metrics::Metrics::new()),
     };
-    build_router(state)
+    (build_router(state), pool)
+}
+
+async fn app() -> axum::Router {
+    app_with_pool().await.0
 }
 
 async fn app_for_network() -> axum::Router {
@@ -1117,6 +1121,28 @@ async fn test_tune_skip_proxy_false_for_plain_hls() {
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
     assert_eq!(json["skip_proxy"], false);
+}
+
+#[tokio::test]
+async fn test_tune_finished_live_returns_ended_and_no_url() {
+    let (router, pool) = app_with_pool().await;
+    // A resolved URL containing force_finished/1 marks an ended YouTube live.
+    // Seed it as a plain HLS source so resolve_url passes it through unchanged
+    // (no yt-dlp needed), exercising the ended-detection wiring deterministically.
+    // priority 0 so it is tried before channel 1's existing live source.
+    sqlx::query(
+        "INSERT INTO sources (channel_id, kind, url, priority, is_active) \
+         VALUES (1, 'hls', 'https://stream.example.com/ended.m3u8?force_finished/1', 0, 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let response = router.oneshot(req("/channel/1/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["ended"], serde_json::json!(true));
+    assert_eq!(json["url"], serde_json::json!(""));
 }
 
 #[tokio::test]
