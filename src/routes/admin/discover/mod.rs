@@ -99,6 +99,11 @@ pub struct ManualResolveForm {
 }
 
 #[derive(Deserialize)]
+pub struct ChannelUrlForm {
+    pub url: String,
+}
+
+#[derive(Deserialize)]
 pub struct AddFormQuery {
     pub url: String,
     pub title: String,
@@ -287,6 +292,36 @@ pub async fn discover_youtube_search(
             Html("<p class=\"empty-state\" style=\"color:#f77\">Render error.</p>".to_string())
         }
     }
+}
+
+pub async fn discover_channel_resolve(
+    State(state): State<AppState>,
+    Form(form): Form<ChannelUrlForm>,
+) -> Result<Html<String>, StatusCode> {
+    let normalized =
+        youtube::normalize_channel_url(&form.url).ok_or(StatusCode::UNPROCESSABLE_ENTITY)?;
+    let title = youtube::channel_title_from_url(&normalized);
+    let channels = channel::list(&state.pool)
+        .await
+        .map_err(internal_error)?
+        .into_iter()
+        .map(|ch| DiscoverChannelOption {
+            id: ch.id,
+            name: ch.name,
+            type_str: ch.r#type,
+        })
+        .collect();
+    render(ManualResultTemplate {
+        form_id: "channel".to_string(),
+        url: normalized,
+        title,
+        group: String::new(),
+        is_live: true,
+        duration_secs: 0,
+        source_kind: "youtube_live".to_string(),
+        show_duration_input: false,
+        channels,
+    })
 }
 
 pub async fn discover_manual_resolve(

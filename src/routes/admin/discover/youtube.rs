@@ -1,3 +1,35 @@
+pub(super) fn normalize_channel_url(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(handle) = trimmed.strip_prefix('@') {
+        if handle.is_empty() {
+            return None;
+        }
+        return Some(format!("https://www.youtube.com/@{}/live", handle));
+    }
+    if !trimmed.to_ascii_lowercase().contains("youtube.com") {
+        return None;
+    }
+    let base = trimmed.split(['?', '#']).next().unwrap_or(trimmed);
+    let base = base.trim_end_matches('/');
+    if base.ends_with("/live") {
+        return Some(base.to_string());
+    }
+    Some(format!("{}/live", base))
+}
+
+pub(super) fn channel_title_from_url(url: &str) -> String {
+    let trimmed = url.trim_end_matches("/live").trim_end_matches('/');
+    trimmed
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("YouTube Channel")
+        .to_string()
+}
+
 pub struct YoutubeResultRow {
     pub title: String,
     pub channel_title: String,
@@ -221,6 +253,52 @@ mod tests {
         assert_eq!(parse_iso8601_duration("PT2H"), 7200);
         assert_eq!(parse_iso8601_duration("PT0S"), 0);
         assert_eq!(parse_iso8601_duration("PT45S"), 45);
+    }
+
+    #[test]
+    fn normalize_channel_url_cases() {
+        assert_eq!(
+            normalize_channel_url("https://www.youtube.com/channel/UC123"),
+            Some("https://www.youtube.com/channel/UC123/live".to_string())
+        );
+        assert_eq!(
+            normalize_channel_url("https://www.youtube.com/@NASA"),
+            Some("https://www.youtube.com/@NASA/live".to_string())
+        );
+        assert_eq!(
+            normalize_channel_url("@NASA"),
+            Some("https://www.youtube.com/@NASA/live".to_string())
+        );
+        assert_eq!(
+            normalize_channel_url("https://www.youtube.com/c/NASA/"),
+            Some("https://www.youtube.com/c/NASA/live".to_string())
+        );
+        assert_eq!(
+            normalize_channel_url("https://www.youtube.com/user/NASAtelevision"),
+            Some("https://www.youtube.com/user/NASAtelevision/live".to_string())
+        );
+        assert_eq!(
+            normalize_channel_url("https://www.youtube.com/@NASA/live"),
+            Some("https://www.youtube.com/@NASA/live".to_string())
+        );
+        assert_eq!(
+            normalize_channel_url("https://www.youtube.com/channel/UC123?ab=1"),
+            Some("https://www.youtube.com/channel/UC123/live".to_string())
+        );
+        assert_eq!(normalize_channel_url("https://example.com/foo"), None);
+        assert_eq!(normalize_channel_url(""), None);
+    }
+
+    #[test]
+    fn channel_title_from_url_cases() {
+        assert_eq!(
+            channel_title_from_url("https://www.youtube.com/@NASA/live"),
+            "@NASA"
+        );
+        assert_eq!(
+            channel_title_from_url("https://www.youtube.com/channel/UC123/live"),
+            "UC123"
+        );
     }
 
     #[test]
