@@ -88,6 +88,27 @@ _loadSource(d.url, d.start_offset_secs, d.skip_proxy)
 
 Call sites are at lines 213, 245, 278, 305, 349, 363.
 
+## Budget Badge on Test for yt-dlp VOD Items
+
+When an admin clicks **Test** on a playlist item, `playlist_item_test` runs `probe_playlist_item` (health check) then calls `probe_and_cache_cors`. For YouTube URLs, `probe_and_cache_cors` short-circuits at line 250 (`needs_resolution(url)` → `return None`) and nothing is written to the CORS cache, leaving the budget badge blank.
+
+With `skip_proxy: true`, these items never consume server egress — their budget is effectively Direct (⚡). The Test button should reflect this.
+
+**Change:** In `playlist_item_test` (`src/routes/admin/playlist.rs`), after `probe_playlist_item` completes, if `resolver::needs_resolution(&item.url)` is true, insert the item URL's host into `cors_cache` directly:
+
+```rust
+if crate::media::resolver::needs_resolution(&item.url) {
+    let host = crate::media::hls::extract_manifest_host(&item.url);
+    state.cors_cache.write().await.insert(host, std::time::Instant::now());
+}
+```
+
+This reuses the same CORS cache that `apply_budget` reads (at line 136–138), so the returned row HTML immediately shows ⚡ with no further changes.
+
+The background health checker (`probe_playlist_item` called from the sweep) is **not** changed — it still skips YouTube URLs in `probe_and_cache_cors`. Only the explicit Test button action writes the Direct entry. This is intentional: the badge is set by deliberate admin action, not silently in the background.
+
+**Scope:** playlist items only. Live sources with `needs_resolution` URLs (YouTube live, Twitch) return HLS from yt-dlp and still go through the proxy; the source Test button (`probe_and_cache_cors` path) is unchanged.
+
 ## URL Expiry
 
 YouTube `googlevideo.com` URLs expire after ~6 hours. Without the proxy, expiry behaviour is identical:
@@ -111,4 +132,5 @@ The proxy was a byte relay with no refresh logic. Recovery is identical.
 |---|---|
 | `src/routes/player.rs` | Add `skip_proxy` to `TuneResponse`; add param to `tune_response()`; update 3 call sites |
 | `templates/base.html` | Add `skipProxy` param to `_loadSource`; update `video.src` in else branch; update 6 call sites |
+| `src/routes/admin/playlist.rs` | In `playlist_item_test`: write host to CORS cache when `needs_resolution` is true |
 | `tests/http.rs` | One new integration test for `skip_proxy: false` on plain HLS channel |
