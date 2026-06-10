@@ -1207,3 +1207,30 @@ async fn admin_discover_channel_resolve_rejects_non_youtube() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+#[tokio::test]
+async fn admin_live_status_non_youtube_is_neutral() {
+    let response = app()
+        .await
+        .oneshot(authed(
+            "/admin/live-status?url=https%3A%2F%2Fexample.com%2Ffoo",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("Live status unknown"));
+    assert!(!body.contains("Currently live"));
+}
+
+#[tokio::test]
+async fn admin_live_status_requires_auth() {
+    let response = app()
+        .await
+        .oneshot(req(
+            "/admin/live-status?url=https%3A%2F%2Fexample.com%2Ffoo",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
