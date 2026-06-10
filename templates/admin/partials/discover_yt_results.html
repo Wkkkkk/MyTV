@@ -13,12 +13,12 @@
       <td>
         {% if row.is_live %}
         <span class="badge badge-live">LIVE</span>
-        {% else %}
-        <span class="badge badge-vod">VOD</span>
-        {% endif %}
-        {% if row.is_live %}
+        {% if row.source_kind == "youtube_live" %}
         <span hx-get="/admin/live-status?url={{ row.url|urlencode }}"
               hx-trigger="load" hx-swap="outerHTML" style="color:#666;margin-left:6px">checking…</span>
+        {% endif %}
+        {% else %}
+        <span class="badge badge-vod">VOD</span>
         {% endif %}
       </td>
       <td style="white-space:nowrap;color:#777;font-size:0.8rem">

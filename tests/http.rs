@@ -1303,4 +1303,51 @@ async fn admin_channel_resolve_includes_live_badge() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
     assert!(body.contains("hx-get=\"/admin/live-status?url="));
+    assert!(body.contains("youtube.com/%40NASA/live"));
+}
+
+async fn app_with_youtube_live_source() -> axum::Router {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    sqlx::query(include_str!("fixtures/seed.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO sources (channel_id, kind, url, priority, is_active, consecutive_failures) \
+         VALUES (1, 'youtube_live', 'https://www.youtube.com/@NASA/live', 9, 1, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let state = AppState {
+        pool,
+        config: Arc::new(Config {
+            database_url: "sqlite::memory:".to_string(),
+            admin_password: "test".to_string(),
+            youtube_api_key: None,
+            port: 0,
+        }),
+        http_client: test_client(),
+        proxy_client: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_millis(500))
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap(),
+        cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        metrics: Arc::new(metrics::Metrics::new()),
+        live_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+    };
+    build_router(state)
+}
+
+#[tokio::test]
+async fn admin_channel_detail_shows_live_badge_for_youtube_source() {
+    let app = app_with_youtube_live_source().await;
+    let response = app.oneshot(authed("/admin/channels/1")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("hx-get=\"/admin/live-status?url="));
+    assert!(body.contains("youtube.com/%40NASA/live"));
 }
