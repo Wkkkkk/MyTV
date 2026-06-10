@@ -1,5 +1,7 @@
 use anyhow::Result;
-use mytv::{build_router, config, db, health, metrics, AppState, CorsCache, SsrfCache};
+use mytv::{
+    build_router, config, db, health, metrics, AppState, CorsCache, LiveStatusCache, SsrfCache,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -26,6 +28,7 @@ async fn main() -> Result<()> {
 
     let cors_cache: CorsCache = Arc::new(RwLock::new(HashMap::new()));
     let ssrf_cache: SsrfCache = Arc::new(RwLock::new(HashMap::new()));
+    let live_cache: LiveStatusCache = Arc::new(RwLock::new(HashMap::new()));
 
     let state = AppState {
         pool,
@@ -35,6 +38,7 @@ async fn main() -> Result<()> {
         cors_cache,
         ssrf_cache,
         metrics: Arc::new(metrics::Metrics::new()),
+        live_cache,
     };
 
     health::start(health::HealthClients {

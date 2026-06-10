@@ -10,6 +10,10 @@
     <span style="color:#666">{{ duration_secs }}s</span>
     {% endif %}
     <span style="color:#444">kind: {{ source_kind }}</span>
+    {% if is_live && source_kind == "youtube_live" %}
+    <span hx-get="/admin/live-status?url={{ url|urlencode }}"
+          hx-trigger="load" hx-swap="outerHTML" style="color:#666">checking…</span>
+    {% endif %}
   </div>
 </div>
 {% include "admin/partials/discover_add_form.html" %}

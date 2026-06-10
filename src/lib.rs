@@ -23,6 +23,9 @@ use tokio::sync::RwLock;
 
 /// Shared in-memory cache mapping CDN host → CORS-allows-wildcard.
 pub type CorsCache = Arc<RwLock<HashMap<String, bool>>>;
+/// Shared in-memory cache mapping a source URL → (live status, when probed).
+pub type LiveStatusCache =
+    Arc<RwLock<HashMap<String, (crate::media::resolver::LiveStatus, std::time::Instant)>>>;
 pub use ssrf::SsrfCache;
 
 /// Shared application state cloned into every Axum handler.
@@ -35,6 +38,7 @@ pub struct AppState {
     pub cors_cache: CorsCache,
     pub ssrf_cache: SsrfCache,
     pub metrics: Arc<metrics::Metrics>,
+    pub live_cache: LiveStatusCache,
 }
 
 async fn redirect_trailing_slash(req: Request, next: Next) -> axum::response::Response {
@@ -104,6 +108,7 @@ pub fn build_router(state: AppState) -> Router {
             "/discover/channel/resolve",
             post(routes::admin::discover_channel_resolve),
         )
+        .route("/live-status", get(routes::admin::live_status_badge))
         .route("/metrics", get(routes::admin::metrics_json))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

@@ -34,6 +34,14 @@
     <span class="{{ src.budget_badge_class }}" title="Network budget">{{ src.budget_badge_char }}</span>
     {% endif %}
   </td>
+  <td>
+    {% if src.kind == "youtube_live" %}
+    <span hx-get="/admin/live-status?url={{ src.url|urlencode }}"
+          hx-trigger="load" hx-swap="outerHTML" style="color:#666">checking…</span>
+    {% else %}
+    <span style="color:#444">—</span>
+    {% endif %}
+  </td>
   <td style="white-space:nowrap">
     <form action="/admin/sources/{{ src.id }}/toggle" method="post" style="display:inline-block">
       <button class="btn btn-sm" type="submit">

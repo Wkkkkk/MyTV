@@ -39,6 +39,7 @@ async fn app_with_pool() -> (axum::Router, sqlx::SqlitePool) {
         cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         metrics: Arc::new(metrics::Metrics::new()),
+        live_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
     (build_router(state), pool)
 }
@@ -71,6 +72,7 @@ async fn app_for_network() -> axum::Router {
         cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         metrics: Arc::new(metrics::Metrics::new()),
+        live_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
     build_router(state)
 }
@@ -148,6 +150,45 @@ async fn app_with_ssrf_bypass(host: &str) -> axum::Router {
         cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         ssrf_cache,
         metrics: Arc::new(metrics::Metrics::new()),
+        live_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+    };
+    build_router(state)
+}
+
+async fn app_with_live_status(
+    url: &str,
+    status: mytv::media::resolver::LiveStatus,
+) -> axum::Router {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    sqlx::query(include_str!("fixtures/seed.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let live_cache: mytv::LiveStatusCache =
+        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+    live_cache
+        .write()
+        .await
+        .insert(url.to_string(), (status, std::time::Instant::now()));
+    let state = AppState {
+        pool,
+        config: Arc::new(Config {
+            database_url: "sqlite::memory:".to_string(),
+            admin_password: "test".to_string(),
+            youtube_api_key: None,
+            port: 0,
+        }),
+        http_client: test_client(),
+        proxy_client: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_millis(500))
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap(),
+        cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        metrics: Arc::new(metrics::Metrics::new()),
+        live_cache,
     };
     build_router(state)
 }
@@ -178,6 +219,7 @@ async fn app_with_cors(host: &str, direct: bool) -> axum::Router {
         cors_cache,
         ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         metrics: Arc::new(metrics::Metrics::new()),
+        live_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
     build_router(state)
 }
@@ -1202,4 +1244,110 @@ async fn admin_discover_channel_resolve_rejects_non_youtube() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn admin_live_status_non_youtube_is_neutral() {
+    let response = app()
+        .await
+        .oneshot(authed(
+            "/admin/live-status?url=https%3A%2F%2Fexample.com%2Ffoo",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("Live status unknown"));
+    assert!(!body.contains("Currently live"));
+}
+
+#[tokio::test]
+async fn admin_live_status_requires_auth() {
+    let response = app()
+        .await
+        .oneshot(req(
+            "/admin/live-status?url=https%3A%2F%2Fexample.com%2Ffoo",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn admin_live_status_youtube_returns_cached_status() {
+    use mytv::media::resolver::LiveStatus;
+    let url = "https://www.youtube.com/@LofiGirl/live";
+    let app = app_with_live_status(url, LiveStatus::Live).await;
+    let encoded = "https%3A%2F%2Fwww.youtube.com%2F%40LofiGirl%2Flive";
+    let response = app
+        .oneshot(authed(&format!("/admin/live-status?url={encoded}")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    // The YouTube URL passes needs_resolution, so cached_live_status is consulted
+    // and returns the pre-seeded Live status — no yt-dlp invocation.
+    assert!(body.contains("Currently live"));
+}
+
+#[tokio::test]
+async fn admin_channel_resolve_includes_live_badge() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/discover/channel/resolve",
+            "url=%40NASA",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("hx-get=\"/admin/live-status?url="));
+    assert!(body.contains("youtube.com/%40NASA/live"));
+}
+
+async fn app_with_youtube_live_source() -> axum::Router {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    sqlx::query(include_str!("fixtures/seed.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO sources (channel_id, kind, url, priority, is_active, consecutive_failures) \
+         VALUES (1, 'youtube_live', 'https://www.youtube.com/@NASA/live', 9, 1, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let state = AppState {
+        pool,
+        config: Arc::new(Config {
+            database_url: "sqlite::memory:".to_string(),
+            admin_password: "test".to_string(),
+            youtube_api_key: None,
+            port: 0,
+        }),
+        http_client: test_client(),
+        proxy_client: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_millis(500))
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap(),
+        cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        metrics: Arc::new(metrics::Metrics::new()),
+        live_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+    };
+    build_router(state)
+}
+
+#[tokio::test]
+async fn admin_channel_detail_shows_live_badge_for_youtube_source() {
+    let app = app_with_youtube_live_source().await;
+    let response = app.oneshot(authed("/admin/channels/1")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("hx-get=\"/admin/live-status?url="));
+    assert!(body.contains("youtube.com/%40NASA/live"));
 }

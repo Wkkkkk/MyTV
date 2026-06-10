@@ -1,5 +1,6 @@
 pub mod channels;
 pub mod discover;
+pub mod live_status;
 pub mod metrics;
 pub mod playlist;
 pub mod sources;
@@ -13,6 +14,7 @@ pub use discover::{
     discover_add, discover_add_form, discover_channel_resolve, discover_m3u_search,
     discover_manual_resolve, discover_page, discover_youtube_search,
 };
+pub use live_status::live_status_badge;
 pub use metrics::metrics_json;
 pub use playlist::{
     playlist_item_create, playlist_item_delete, playlist_item_test, playlist_item_toggle,
