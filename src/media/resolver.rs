@@ -1,6 +1,25 @@
 use anyhow::{bail, Result};
 use std::time::Duration;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
+
+/// Global cap on concurrent `yt-dlp` subprocesses. Each yt-dlp invocation holds
+/// ~73 MB; on the 256 MB production VM, an unbounded fan-out of live-status
+/// probes OOMs the box. Two permits bounds peak yt-dlp memory to ~150 MB.
+fn yt_dlp_semaphore() -> &'static Semaphore {
+    static SEM: Semaphore = Semaphore::const_new(2);
+    &SEM
+}
+
+/// Acquires a yt-dlp permit (waiting if the cap is reached), then awaits `f`.
+/// The permit is held for the duration of `f` and released when it completes.
+async fn run_under_cap<F: std::future::Future>(sem: &Semaphore, f: F) -> F::Output {
+    let _permit = sem
+        .acquire()
+        .await
+        .expect("yt-dlp semaphore is never closed");
+    f.await
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiveStatus {
@@ -29,11 +48,14 @@ pub async fn probe_live(url: &str) -> LiveStatus {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return LiveStatus::Unknown;
     }
-    let result = tokio::time::timeout(
-        Duration::from_secs(8),
-        Command::new("yt-dlp")
-            .args(["--print", "is_live", "--no-playlist", "--", url])
-            .output(),
+    let result = run_under_cap(
+        yt_dlp_semaphore(),
+        tokio::time::timeout(
+            Duration::from_secs(8),
+            Command::new("yt-dlp")
+                .args(["--print", "is_live", "--no-playlist", "--", url])
+                .output(),
+        ),
     )
     .await;
     match result {
@@ -107,11 +129,14 @@ pub async fn resolve_url(url: &str) -> Result<String> {
     if !needs_resolution(url) {
         return Ok(url.to_string());
     }
-    let output = tokio::time::timeout(
-        Duration::from_secs(30),
-        Command::new("yt-dlp")
-            .args(["-g", "--no-playlist", "-f", "b[ext=mp4]/b", "--", url])
-            .output(),
+    let output = run_under_cap(
+        yt_dlp_semaphore(),
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            Command::new("yt-dlp")
+                .args(["-g", "--no-playlist", "-f", "b[ext=mp4]/b", "--", url])
+                .output(),
+        ),
     )
     .await
     .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
@@ -137,11 +162,14 @@ pub async fn fetch_title(url: &str) -> Result<String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         bail!("invalid URL scheme: {}", url);
     }
-    let output = tokio::time::timeout(
-        Duration::from_secs(30),
-        Command::new("yt-dlp")
-            .args(["--print", "title", "--no-playlist", "--", url])
-            .output(),
+    let output = run_under_cap(
+        yt_dlp_semaphore(),
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            Command::new("yt-dlp")
+                .args(["--print", "title", "--no-playlist", "--", url])
+                .output(),
+        ),
     )
     .await
     .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
@@ -167,11 +195,14 @@ pub async fn fetch_video_id(url: &str) -> Result<String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         bail!("invalid URL scheme: {}", url);
     }
-    let output = tokio::time::timeout(
-        Duration::from_secs(30),
-        Command::new("yt-dlp")
-            .args(["--print", "id", "--no-playlist", "--", url])
-            .output(),
+    let output = run_under_cap(
+        yt_dlp_semaphore(),
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            Command::new("yt-dlp")
+                .args(["--print", "id", "--no-playlist", "--", url])
+                .output(),
+        ),
     )
     .await
     .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
@@ -196,11 +227,14 @@ pub async fn fetch_duration_secs(url: &str) -> Result<i64> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         bail!("invalid URL scheme: {}", url);
     }
-    let output = tokio::time::timeout(
-        Duration::from_secs(30),
-        Command::new("yt-dlp")
-            .args(["--print", "duration", "--no-playlist", "--", url])
-            .output(),
+    let output = run_under_cap(
+        yt_dlp_semaphore(),
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            Command::new("yt-dlp")
+                .args(["--print", "duration", "--no-playlist", "--", url])
+                .output(),
+        ),
     )
     .await
     .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
@@ -226,6 +260,22 @@ pub async fn fetch_duration_secs(url: &str) -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn run_under_cap_runs_when_permit_available() {
+        let sem = tokio::sync::Semaphore::new(1);
+        assert_eq!(run_under_cap(&sem, async { 42 }).await, 42);
+    }
+
+    #[tokio::test]
+    async fn run_under_cap_blocks_when_no_permits() {
+        let sem = tokio::sync::Semaphore::new(1);
+        let _held = sem.acquire().await.unwrap(); // exhaust the only permit
+        let blocked =
+            tokio::time::timeout(Duration::from_millis(50), run_under_cap(&sem, async { 42 }))
+                .await;
+        assert!(blocked.is_err(), "run_under_cap must wait for a permit");
+    }
 
     #[test]
     fn test_youtube_needs_resolution() {
