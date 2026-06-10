@@ -132,7 +132,7 @@ pub enum LiveStatus {
 /// is Unknown.
 pub fn interpret_live_status(success: bool, stdout: &str, stderr: &str) -> LiveStatus {
     if success {
-        let out = stdout.trim();
+        let out = stdout.lines().next().unwrap_or("").trim();
         let (status, ts) = out.split_once('|').unwrap_or((out, "NA"));
         return match status {
             "is_live" => LiveStatus::Live,
@@ -491,6 +491,10 @@ mod tests {
         assert_eq!(interpret_live_status(true, "is_live|NA\n", ""), Live);
         assert_eq!(
             interpret_live_status(true, "is_upcoming|1781287200\n", ""),
+            Upcoming(Some(1781287200))
+        );
+        assert_eq!(
+            interpret_live_status(true, "is_upcoming|1781287200\nis_upcoming|999\n", ""),
             Upcoming(Some(1781287200))
         );
         assert_eq!(

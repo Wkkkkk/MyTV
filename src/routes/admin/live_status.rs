@@ -35,6 +35,7 @@ fn badge_parts(status: LiveStatus) -> LiveStatusBadgeTemplate {
         },
         LiveStatus::Upcoming(ts) => {
             let title = ts
+                .filter(|t| *t > 0)
                 .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
                 .map(|dt| format!("Scheduled — starts {}", crate::media::format_utc_short(dt)))
                 .unwrap_or_else(|| "Scheduled, start time unknown".to_string());
@@ -79,7 +80,7 @@ fn badge_parts(status: LiveStatus) -> LiveStatusBadgeTemplate {
 }
 
 /// `GET /admin/live-status?url=<source-url>` — HTMX lazy-load endpoint returning
-/// a small badge partial (● live / ○ offline / · ?). Source rows and discovery
+/// a small badge partial (● live / ◷ upcoming / ◌ ended / ◉ recorded / ▶ vod / ○ offline / · ?). Source rows and discovery
 /// results render a "checking…" placeholder with `hx-trigger="load"` pointing
 /// here, so the page itself never blocks on yt-dlp. Probes go through
 /// `cached_live_status` (60s TTL, 10s for Unknown) and the global yt-dlp
@@ -110,6 +111,10 @@ mod tests {
         assert_eq!(up.title, "Scheduled — starts Jun 12 18:00 UTC");
         assert_eq!(
             badge_parts(LiveStatus::Upcoming(None)).title,
+            "Scheduled, start time unknown"
+        );
+        assert_eq!(
+            badge_parts(LiveStatus::Upcoming(Some(-100))).title,
             "Scheduled, start time unknown"
         );
 
