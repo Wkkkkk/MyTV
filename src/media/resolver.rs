@@ -46,6 +46,25 @@ pub async fn probe_live(url: &str) -> LiveStatus {
     }
 }
 
+/// Returns a cached live status if probed within the last 60s, otherwise probes
+/// via `probe_live`, stores the result, and returns it.
+pub async fn cached_live_status(cache: &crate::LiveStatusCache, url: &str) -> LiveStatus {
+    {
+        let map = cache.read().await;
+        if let Some((status, at)) = map.get(url) {
+            if at.elapsed() < Duration::from_secs(60) {
+                return *status;
+            }
+        }
+    }
+    let status = probe_live(url).await;
+    cache
+        .write()
+        .await
+        .insert(url.to_string(), (status, std::time::Instant::now()));
+    status
+}
+
 /// Returns true if the URL requires yt-dlp to obtain a playable stream.
 /// Direct HLS and plain IPTV stream URLs are used as-is.
 pub fn needs_resolution(url: &str) -> bool {

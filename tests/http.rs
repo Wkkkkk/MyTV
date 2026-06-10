@@ -39,6 +39,7 @@ async fn app_with_pool() -> (axum::Router, sqlx::SqlitePool) {
         cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         metrics: Arc::new(metrics::Metrics::new()),
+        live_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
     (build_router(state), pool)
 }
@@ -71,6 +72,7 @@ async fn app_for_network() -> axum::Router {
         cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         metrics: Arc::new(metrics::Metrics::new()),
+        live_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
     build_router(state)
 }
@@ -148,6 +150,7 @@ async fn app_with_ssrf_bypass(host: &str) -> axum::Router {
         cors_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         ssrf_cache,
         metrics: Arc::new(metrics::Metrics::new()),
+        live_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
     build_router(state)
 }
@@ -178,6 +181,7 @@ async fn app_with_cors(host: &str, direct: bool) -> axum::Router {
         cors_cache,
         ssrf_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         metrics: Arc::new(metrics::Metrics::new()),
+        live_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
     build_router(state)
 }

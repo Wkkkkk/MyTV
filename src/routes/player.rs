@@ -494,6 +494,9 @@ mod tests {
                 std::collections::HashMap::new(),
             )),
             metrics: std::sync::Arc::new(crate::metrics::Metrics::new()),
+            live_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 
