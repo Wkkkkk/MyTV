@@ -34,7 +34,10 @@ pub struct YoutubeResultRow {
     pub title: String,
     pub channel_title: String,
     pub is_live: bool,
+    pub is_upcoming: bool,
     pub duration_secs: i64,
+    pub scheduled_start: String,
+    pub thumbnail_url: String,
     pub url: String,
     pub source_kind: String,
     pub form_id: usize,
@@ -43,6 +46,7 @@ pub struct YoutubeResultRow {
 pub(super) fn build_video_rows(
     items: &[serde_json::Value],
     duration_map: &std::collections::HashMap<String, i64>,
+    scheduled_map: &std::collections::HashMap<String, String>,
 ) -> Vec<YoutubeResultRow> {
     items
         .iter()
@@ -52,9 +56,23 @@ pub(super) fn build_video_rows(
             let snippet = &item["snippet"];
             let title = snippet["title"].as_str().unwrap_or("Unknown").to_string();
             let channel_title = snippet["channelTitle"].as_str().unwrap_or("").to_string();
-            let is_live = snippet["liveBroadcastContent"].as_str() == Some("live");
+            let broadcast = snippet["liveBroadcastContent"].as_str().unwrap_or("none");
+            let is_live = broadcast == "live";
+            let is_upcoming = broadcast == "upcoming";
             let duration_secs = *duration_map.get(video_id).unwrap_or(&0);
-            let source_kind = if is_live {
+            let scheduled_start = if is_upcoming {
+                scheduled_map
+                    .get(video_id)
+                    .map(|ts| format_scheduled_start(ts))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let thumbnail_url = snippet["thumbnails"]["default"]["url"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            let source_kind = if is_live || is_upcoming {
                 "youtube_live"
             } else {
                 "youtube_vod"
@@ -65,7 +83,10 @@ pub(super) fn build_video_rows(
                 title,
                 channel_title,
                 is_live,
+                is_upcoming,
                 duration_secs,
+                scheduled_start,
+                thumbnail_url,
                 url,
                 source_kind,
                 form_id: i,
@@ -82,12 +103,19 @@ pub(super) fn build_channel_rows(items: &[serde_json::Value]) -> Vec<YoutubeResu
             let channel_id = item["id"]["channelId"].as_str()?;
             let snippet = &item["snippet"];
             let title = snippet["title"].as_str().unwrap_or("Unknown").to_string();
+            let thumbnail_url = snippet["thumbnails"]["default"]["url"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
             let url = format!("https://www.youtube.com/channel/{}/live", channel_id);
             Some(YoutubeResultRow {
                 title,
                 channel_title: String::new(),
                 is_live: true,
+                is_upcoming: false,
                 duration_secs: 0,
+                scheduled_start: String::new(),
+                thumbnail_url,
                 url,
                 source_kind: "youtube_live".to_string(),
                 form_id: i,
@@ -207,7 +235,7 @@ pub(super) async fn fetch_youtube_results(
     let details_resp: serde_json::Value = client
         .get("https://www.googleapis.com/youtube/v3/videos")
         .query(&[
-            ("part", "contentDetails"),
+            ("part", "contentDetails,liveStreamingDetails"),
             ("id", ids_joined.as_str()),
             ("key", api_key),
         ])
@@ -217,17 +245,21 @@ pub(super) async fn fetch_youtube_results(
         .await?;
 
     let mut duration_map = std::collections::HashMap::<String, i64>::new();
+    let mut scheduled_map = std::collections::HashMap::<String, String>::new();
     if let Some(detail_items) = details_resp["items"].as_array() {
         for item in detail_items {
             let id = item["id"].as_str().unwrap_or("").to_string();
             let dur_str = item["contentDetails"]["duration"]
                 .as_str()
                 .unwrap_or("PT0S");
-            duration_map.insert(id, parse_iso8601_duration(dur_str));
+            duration_map.insert(id.clone(), parse_iso8601_duration(dur_str));
+            if let Some(ts) = item["liveStreamingDetails"]["scheduledStartTime"].as_str() {
+                scheduled_map.insert(id, ts.to_string());
+            }
         }
     }
 
-    let rows = build_video_rows(items, &duration_map);
+    let rows = build_video_rows(items, &duration_map, &scheduled_map);
 
     Ok(rows)
 }
@@ -240,7 +272,8 @@ mod tests {
     fn channel_rows_build_live_urls() {
         let items = vec![serde_json::json!({
             "id": {"channelId": "UC123"},
-            "snippet": {"title": "NASA", "channelTitle": "NASA"}
+            "snippet": {"title": "NASA", "channelTitle": "NASA",
+                        "thumbnails": {"default": {"url": "https://yt3.ggpht.com/nasa.jpg"}}}
         })];
         let rows = build_channel_rows(&items);
         assert_eq!(rows.len(), 1);
@@ -250,6 +283,8 @@ mod tests {
         assert_eq!(rows[0].source_kind, "youtube_live");
         assert_eq!(rows[0].title, "NASA");
         assert_eq!(rows[0].channel_title, "");
+        assert!(!rows[0].is_upcoming);
+        assert_eq!(rows[0].thumbnail_url, "https://yt3.ggpht.com/nasa.jpg");
     }
 
     #[test]
@@ -323,7 +358,7 @@ mod tests {
         ];
         let mut dur = std::collections::HashMap::new();
         dur.insert("abc".to_string(), 253i64);
-        let rows = build_video_rows(&items, &dur);
+        let rows = build_video_rows(&items, &dur, &std::collections::HashMap::new());
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].source_kind, "youtube_vod");
         assert!(!rows[0].is_live);
@@ -345,5 +380,43 @@ mod tests {
         );
         assert_eq!(format_scheduled_start("not-a-date"), "");
         assert_eq!(format_scheduled_start(""), "");
+    }
+
+    #[test]
+    fn video_rows_mark_upcoming_as_live_source_with_schedule() {
+        let items = vec![serde_json::json!({
+            "id": {"videoId": "up1"},
+            "snippet": {"title": "Launch", "channelTitle": "SpaceX",
+                        "liveBroadcastContent": "upcoming",
+                        "thumbnails": {"default": {"url": "https://i.ytimg.com/vi/up1/default.jpg"}}}
+        })];
+        let dur = std::collections::HashMap::new();
+        let mut sched = std::collections::HashMap::new();
+        sched.insert("up1".to_string(), "2026-06-12T18:00:00Z".to_string());
+        let rows = build_video_rows(&items, &dur, &sched);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].is_upcoming);
+        assert!(!rows[0].is_live);
+        assert_eq!(rows[0].source_kind, "youtube_live");
+        assert_eq!(rows[0].scheduled_start, "Jun 12 18:00 UTC");
+        assert_eq!(
+            rows[0].thumbnail_url,
+            "https://i.ytimg.com/vi/up1/default.jpg"
+        );
+    }
+
+    #[test]
+    fn rows_without_thumbnails_get_empty_thumbnail_url() {
+        let items = vec![serde_json::json!({
+            "id": {"videoId": "abc"},
+            "snippet": {"title": "A VOD", "channelTitle": "Chan",
+                        "liveBroadcastContent": "none"}
+        })];
+        let dur = std::collections::HashMap::new();
+        let sched = std::collections::HashMap::new();
+        let rows = build_video_rows(&items, &dur, &sched);
+        assert_eq!(rows[0].thumbnail_url, "");
+        assert_eq!(rows[0].scheduled_start, "");
+        assert!(!rows[0].is_upcoming);
     }
 }
