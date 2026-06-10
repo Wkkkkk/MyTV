@@ -93,13 +93,14 @@ pub(super) async fn build_guide_data(
         });
 
     let all_playlist_items: std::collections::HashMap<i64, Vec<playlist_item::PlaylistItem>> =
-        playlist_item::list_all(pool).await?.into_iter().fold(
-            std::collections::HashMap::new(),
-            |mut acc, item| {
+        playlist_item::list_all(pool)
+            .await?
+            .into_iter()
+            .filter(|item| item.is_active)
+            .fold(std::collections::HashMap::new(), |mut acc, item| {
                 acc.entry(item.channel_id).or_default().push(item);
                 acc
-            },
-        );
+            });
 
     let mut rows = Vec::new();
     for ch in &channels {

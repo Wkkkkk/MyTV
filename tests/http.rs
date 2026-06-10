@@ -532,6 +532,24 @@ async fn test_guide_renders_vod_budget_badge_from_cache() {
 }
 
 #[tokio::test]
+async fn test_guide_excludes_inactive_playlist_items() {
+    // Channel 4 (VOD Has Items) has two active items and one inactive YouTube item
+    // (seed.sql: "YT Episode", is_active=0). The guide schedule must never include
+    // the inactive item regardless of wall-clock time.
+    let response = app().await.oneshot(req("/guide")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        !body.contains("YT Episode"),
+        "guide must not render the inactive playlist item title"
+    );
+    assert!(
+        !body.contains("dQw4w9WgXcQ"),
+        "guide must not render the inactive playlist item URL marker"
+    );
+}
+
+#[tokio::test]
 async fn test_source_test_youtube_live_routes_through_resolution() {
     // Source 5 (seed) is a YouTube-live URL -> needs_resolution() is true, so the
     // handler takes the resolve+probe branch. Its bogus video id makes yt-dlp fail
