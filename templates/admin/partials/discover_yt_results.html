@@ -16,6 +16,10 @@
         {% else %}
         <span class="badge badge-vod">VOD</span>
         {% endif %}
+        {% if row.is_live %}
+        <span hx-get="/admin/live-status?url={{ row.url|urlencode }}"
+              hx-trigger="load" hx-swap="outerHTML" style="color:#666;margin-left:6px">checking…</span>
+        {% endif %}
       </td>
       <td style="white-space:nowrap;color:#777;font-size:0.8rem">
         {% if row.duration_secs > 0 %}{{ row.duration_secs }}s{% else %}—{% endif %}

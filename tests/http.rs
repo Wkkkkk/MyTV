@@ -1289,3 +1289,18 @@ async fn admin_live_status_youtube_returns_cached_status() {
     // and returns the pre-seeded Live status — no yt-dlp invocation.
     assert!(body.contains("Currently live"));
 }
+
+#[tokio::test]
+async fn admin_channel_resolve_includes_live_badge() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/discover/channel/resolve",
+            "url=%40NASA",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("hx-get=\"/admin/live-status?url="));
+}
