@@ -109,45 +109,69 @@ async fn yt_dlp_print(field: &str, url: &str) -> Result<String> {
     Ok(value)
 }
 
-/// Result of probing whether a source URL is currently broadcasting.
+/// Result of probing a source URL's broadcast lifecycle state, mirroring
+/// yt-dlp's `live_status` field. `Upcoming` carries the scheduled start
+/// (`release_timestamp`, unix epoch) when yt-dlp reports one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiveStatus {
     Live,
+    Upcoming(Option<i64>),
+    PostLive,
+    WasLive,
+    NotLive,
     Offline,
     Unknown,
 }
 
-/// Maps `yt-dlp --print is_live` output to a `LiveStatus`. On success, stdout is
-/// authoritative (`True`/`False`; anything else — e.g. `None` for VODs — is
-/// Unknown). On failure, a "not currently live" stderr means Offline (yt-dlp
-/// exits non-zero for channels with no active broadcast); any other failure is
-/// Unknown.
-pub fn interpret_is_live(success: bool, stdout: &str, stderr: &str) -> LiveStatus {
-    let out = stdout.trim();
-    if success && out == "True" {
-        return LiveStatus::Live;
+/// Maps `yt-dlp --print "%(live_status)s|%(release_timestamp)s"` output to a
+/// `LiveStatus`. On success, stdout is authoritative; `NA`/`None` (extractors
+/// without a live_status) are Unknown. On failure, "not currently live" stderr
+/// means Offline (yt-dlp exits non-zero for channels with no active broadcast)
+/// and "live event will begin" means Upcoming (fallback in case
+/// --ignore-no-formats-error does not suppress the error); any other failure
+/// is Unknown.
+pub fn interpret_live_status(success: bool, stdout: &str, stderr: &str) -> LiveStatus {
+    if success {
+        let out = stdout.trim();
+        let (status, ts) = out.split_once('|').unwrap_or((out, "NA"));
+        return match status {
+            "is_live" => LiveStatus::Live,
+            "is_upcoming" => LiveStatus::Upcoming(ts.parse::<i64>().ok()),
+            "post_live" => LiveStatus::PostLive,
+            "was_live" => LiveStatus::WasLive,
+            "not_live" => LiveStatus::NotLive,
+            _ => LiveStatus::Unknown,
+        };
     }
-    if success && out == "False" {
+    let err = stderr.to_ascii_lowercase();
+    if err.contains("not currently live") {
         return LiveStatus::Offline;
     }
-    if !success && stderr.to_ascii_lowercase().contains("not currently live") {
-        return LiveStatus::Offline;
+    if err.contains("live event will begin") {
+        return LiveStatus::Upcoming(None);
     }
     LiveStatus::Unknown
 }
 
-/// Probes whether a YouTube/Twitch live URL is currently broadcasting.
-/// Times out after 8s; any spawn or timeout failure yields `Unknown`.
+/// Probes a YouTube/Twitch URL's broadcast lifecycle state.
+/// `--ignore-no-formats-error` lets yt-dlp print metadata for upcoming streams,
+/// which have no formats yet. Times out after 8s; any spawn or timeout failure
+/// yields `Unknown`.
 pub async fn probe_live(url: &str) -> LiveStatus {
     match yt_dlp_output(
-        &["--print", "is_live", "--no-playlist"],
+        &[
+            "--print",
+            "%(live_status)s|%(release_timestamp)s",
+            "--ignore-no-formats-error",
+            "--no-playlist",
+        ],
         url,
         Duration::from_secs(8),
         Duration::from_secs(8),
     )
     .await
     {
-        Ok(output) => interpret_is_live(
+        Ok(output) => interpret_live_status(
             output.status.success(),
             &String::from_utf8_lossy(&output.stdout),
             &String::from_utf8_lossy(&output.stderr),
@@ -462,29 +486,63 @@ mod tests {
     }
 
     #[test]
-    fn interpret_is_live_maps_all_cases() {
-        assert_eq!(interpret_is_live(true, "True\n", ""), LiveStatus::Live);
-        assert_eq!(interpret_is_live(true, "False\n", ""), LiveStatus::Offline);
+    fn interpret_live_status_maps_all_cases() {
+        use LiveStatus::*;
+        assert_eq!(interpret_live_status(true, "is_live|NA\n", ""), Live);
         assert_eq!(
-            interpret_is_live(
+            interpret_live_status(true, "is_upcoming|1781287200\n", ""),
+            Upcoming(Some(1781287200))
+        );
+        assert_eq!(
+            interpret_live_status(true, "is_upcoming|NA\n", ""),
+            Upcoming(None)
+        );
+        assert_eq!(interpret_live_status(true, "post_live|NA\n", ""), PostLive);
+        assert_eq!(interpret_live_status(true, "was_live|NA\n", ""), WasLive);
+        assert_eq!(interpret_live_status(true, "not_live|NA\n", ""), NotLive);
+        assert_eq!(interpret_live_status(true, "NA|NA\n", ""), Unknown);
+        assert_eq!(interpret_live_status(true, "None|None\n", ""), Unknown);
+        assert_eq!(interpret_live_status(true, "", ""), Unknown);
+        assert_eq!(
+            interpret_live_status(
                 false,
                 "",
-                "ERROR: [youtube:tab] UCxx: The channel is not currently live"
+                "ERROR: [youtube] xyz: The channel is not currently live"
             ),
-            LiveStatus::Offline
+            Offline
         );
         assert_eq!(
-            interpret_is_live(false, "", "ERROR: network unreachable"),
-            LiveStatus::Unknown
+            interpret_live_status(
+                false,
+                "",
+                "ERROR: [youtube] xyz: This live event will begin in 3 hours"
+            ),
+            Upcoming(None)
         );
-        assert_eq!(interpret_is_live(true, "", ""), LiveStatus::Unknown);
-        // success=true with a "not currently live" stderr is still Unknown (stdout is authoritative on success)
         assert_eq!(
-            interpret_is_live(true, "", "not currently live"),
-            LiveStatus::Unknown
+            interpret_live_status(false, "", "ERROR: network unreachable"),
+            Unknown
         );
-        // yt-dlp prints "None" for a null is_live field → Unknown
-        assert_eq!(interpret_is_live(true, "None\n", ""), LiveStatus::Unknown);
+    }
+
+    #[tokio::test]
+    async fn cached_live_status_upcoming_is_determinate_60s_ttl() {
+        // Inserted 30s ago: within the 60s determinate TTL, outside the 10s
+        // Unknown TTL. If Upcoming were treated as Unknown, this would re-probe
+        // (spawning yt-dlp) and not return the cached value.
+        let cache: crate::LiveStatusCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let thirty_secs_ago = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(30))
+            .expect("system uptime > 30s");
+        cache.write().await.insert(
+            "https://www.youtube.com/watch?v=up".to_string(),
+            (LiveStatus::Upcoming(Some(1781287200)), thirty_secs_ago),
+        );
+        assert_eq!(
+            cached_live_status(&cache, "https://www.youtube.com/watch?v=up").await,
+            LiveStatus::Upcoming(Some(1781287200))
+        );
     }
 
     #[tokio::test]

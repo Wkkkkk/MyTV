@@ -22,7 +22,7 @@ struct LiveStatusBadgeTemplate {
     symbol: &'static str,
     color: &'static str,
     label: &'static str,
-    title: &'static str,
+    title: String,
 }
 
 fn badge_parts(status: LiveStatus) -> LiveStatusBadgeTemplate {
@@ -31,19 +31,49 @@ fn badge_parts(status: LiveStatus) -> LiveStatusBadgeTemplate {
             symbol: "●",
             color: "#4caf50",
             label: "live",
-            title: "Currently live",
+            title: "Currently live".to_string(),
+        },
+        LiveStatus::Upcoming(ts) => {
+            let title = ts
+                .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                .map(|dt| format!("Scheduled — starts {}", crate::media::format_utc_short(dt)))
+                .unwrap_or_else(|| "Scheduled, start time unknown".to_string());
+            LiveStatusBadgeTemplate {
+                symbol: "◷",
+                color: "#db4",
+                label: "upcoming",
+                title,
+            }
+        }
+        LiveStatus::PostLive => LiveStatusBadgeTemplate {
+            symbol: "◌",
+            color: "#f77",
+            label: "ended",
+            title: "Broadcast just ended (still processing)".to_string(),
+        },
+        LiveStatus::WasLive => LiveStatusBadgeTemplate {
+            symbol: "◉",
+            color: "#88f",
+            label: "recorded",
+            title: "Finished broadcast — recording available".to_string(),
+        },
+        LiveStatus::NotLive => LiveStatusBadgeTemplate {
+            symbol: "▶",
+            color: "#88f",
+            label: "vod",
+            title: "Regular video (never live)".to_string(),
         },
         LiveStatus::Offline => LiveStatusBadgeTemplate {
             symbol: "○",
             color: "#888",
             label: "offline",
-            title: "Not currently live",
+            title: "Not currently live".to_string(),
         },
         LiveStatus::Unknown => LiveStatusBadgeTemplate {
             symbol: "·",
             color: "#666",
             label: "?",
-            title: "Live status unknown",
+            title: "Live status unknown".to_string(),
         },
     }
 }
@@ -65,4 +95,28 @@ pub async fn live_status_badge(
         LiveStatus::Unknown
     };
     render(badge_parts(status))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn badge_parts_maps_every_state() {
+        assert_eq!(badge_parts(LiveStatus::Live).label, "live");
+
+        let up = badge_parts(LiveStatus::Upcoming(Some(1781287200)));
+        assert_eq!(up.label, "upcoming");
+        assert_eq!(up.title, "Scheduled — starts Jun 12 18:00 UTC");
+        assert_eq!(
+            badge_parts(LiveStatus::Upcoming(None)).title,
+            "Scheduled, start time unknown"
+        );
+
+        assert_eq!(badge_parts(LiveStatus::PostLive).label, "ended");
+        assert_eq!(badge_parts(LiveStatus::WasLive).label, "recorded");
+        assert_eq!(badge_parts(LiveStatus::NotLive).label, "vod");
+        assert_eq!(badge_parts(LiveStatus::Offline).label, "offline");
+        assert_eq!(badge_parts(LiveStatus::Unknown).label, "?");
+    }
 }
