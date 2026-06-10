@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-10
 **Idea:** docs/IDEAS.md #35 (+ state foundation for #38/#39)
-**Status:** Draft — rewritten to add yt-dlp `live_status` coverage; pending review
+**Status:** Implemented — 2026-06-10
 
 ## Context
 

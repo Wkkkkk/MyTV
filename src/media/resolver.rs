@@ -570,6 +570,9 @@ mod tests {
         // "Me at the zoo" — a regular upload that was never a live broadcast.
         // Pins that the new probe args (--print "%(live_status)s|%(release_timestamp)s"
         // --ignore-no-formats-error) produce parseable output end-to-end.
+        // A VOD stands in for an upcoming stream (those URLs are ephemeral);
+        // if yt-dlp exits non-zero for upcoming despite the flag, the stderr
+        // fallback still yields Upcoming(None).
         let status = probe_live("https://www.youtube.com/watch?v=jNQXAC9IVRw").await;
         assert_eq!(status, LiveStatus::NotLive);
     }
