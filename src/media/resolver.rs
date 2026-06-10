@@ -2,6 +2,50 @@ use anyhow::{bail, Result};
 use std::time::Duration;
 use tokio::process::Command;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveStatus {
+    Live,
+    Offline,
+    Unknown,
+}
+
+pub fn interpret_is_live(success: bool, stdout: &str, stderr: &str) -> LiveStatus {
+    let out = stdout.trim();
+    if success && out == "True" {
+        return LiveStatus::Live;
+    }
+    if success && out == "False" {
+        return LiveStatus::Offline;
+    }
+    if stderr.to_ascii_lowercase().contains("not currently live") {
+        return LiveStatus::Offline;
+    }
+    LiveStatus::Unknown
+}
+
+/// Probes whether a YouTube/Twitch live URL is currently broadcasting.
+/// Times out after 8s; any spawn/timeout/parse failure yields `Unknown`.
+pub async fn probe_live(url: &str) -> LiveStatus {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return LiveStatus::Unknown;
+    }
+    let result = tokio::time::timeout(
+        Duration::from_secs(8),
+        Command::new("yt-dlp")
+            .args(["--print", "is_live", "--no-playlist", "--", url])
+            .output(),
+    )
+    .await;
+    match result {
+        Ok(Ok(output)) => interpret_is_live(
+            output.status.success(),
+            &String::from_utf8_lossy(&output.stdout),
+            &String::from_utf8_lossy(&output.stderr),
+        ),
+        _ => LiveStatus::Unknown,
+    }
+}
+
 /// Returns true if the URL requires yt-dlp to obtain a playable stream.
 /// Direct HLS and plain IPTV stream URLs are used as-is.
 pub fn needs_resolution(url: &str) -> bool {
@@ -254,6 +298,25 @@ mod tests {
         let url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
         let id = fetch_video_id(url).await.unwrap();
         assert_eq!(id, "dQw4w9WgXcQ");
+    }
+
+    #[test]
+    fn interpret_is_live_maps_all_cases() {
+        assert_eq!(interpret_is_live(true, "True\n", ""), LiveStatus::Live);
+        assert_eq!(interpret_is_live(true, "False\n", ""), LiveStatus::Offline);
+        assert_eq!(
+            interpret_is_live(
+                false,
+                "",
+                "ERROR: [youtube:tab] UCxx: The channel is not currently live"
+            ),
+            LiveStatus::Offline
+        );
+        assert_eq!(
+            interpret_is_live(false, "", "ERROR: network unreachable"),
+            LiveStatus::Unknown
+        );
+        assert_eq!(interpret_is_live(true, "", ""), LiveStatus::Unknown);
     }
 
     #[tokio::test]
