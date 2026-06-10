@@ -21,7 +21,7 @@ Live instance: https://kunstv.fly.dev/
 
 ```bash
 cargo build            # compile
-cargo test             # 295 tests: 232 unit + 63 integration (5 ignored — need yt-dlp/network)
+cargo test             # 313 tests: 243 unit + 70 integration (5 ignored — need yt-dlp/network)
 cargo fmt              # format (ALWAYS run before committing)
 cargo clippy           # lint (CI runs with -D warnings)
 cargo run              # start server on :3000
@@ -48,8 +48,8 @@ src/
     player.rs     # /channel/:id/tune, /channel/:id/next, /stream-proxy
     guide/        # /guide, /guide/partial — layout, badges, data aggregation
     health.rs     # /health
-    admin/        # /admin/** — channel/source/playlist CRUD, discovery, /admin/metrics
-  media/          # yt-dlp resolution, HLS manifest helpers, M3U parsing
+    admin/        # /admin/** — channel/source/playlist CRUD, discovery, live-status badge, /admin/metrics
+  media/          # yt-dlp resolution + live-status probe (capped concurrency), HLS helpers, M3U parsing
 benches/
   hot_paths.rs    # criterion benches (epg, hls rewrite, m3u parse, budget)
 scripts/perf/     # load-test scripts + profiling recipes
@@ -75,6 +75,8 @@ tests/
 **Ended live → VOD**: when a resolved live manifest contains `force_finished/1` (`resolver::is_finished_live`), the handler returns `{ ended: true, url: "" }` and fires a detached `tokio::spawn` (`convert_channel_to_vod_loop`) that appends the recording as a `playlist_item`, flips the channel to `vod_loop`, and deactivates the sources. Idempotent; no migration (recording URL lives on the playlist_item). See `docs/architecture/tune-flow.md`.
 
 **VOD position**: `tune_vod_at` computes current playlist position using `Utc::now()` and the channel's `loop_anchor`. The returned URL depends on current time — tests assert `url.contains(...)` rather than exact equality.
+
+**Live-status badges**: `GET /admin/live-status?url=...` returns a small badge partial; source rows and discovery results lazy-load it via HTMX (`hx-trigger="load"`), so admin pages never block on yt-dlp. Results are cached in `AppState.live_cache` (60s TTL; 10s for Unknown). All yt-dlp subprocesses — probes and resolvers alike — go through `resolver::run_under_cap`, a global 2-permit semaphore with a bounded wait that load-sheds instead of queueing indefinitely (each yt-dlp process holds ~73 MB; the production VM has 256 MB — see `docs/bug-logs/2026-06-10-live-status-badge-ytdlp-oom.md`).
 
 **Health checker**: `health::start(pool, client)` spawns a detached Tokio task. It uses `MissedTickBehavior::Skip` on a 15-minute interval. Sources are auto-disabled after consecutive failures and re-enabled after a cooldown.
 

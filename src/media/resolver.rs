@@ -29,6 +29,7 @@ where
     Some(f().await)
 }
 
+/// Result of probing whether a source URL is currently broadcasting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiveStatus {
     Live,
@@ -36,6 +37,11 @@ pub enum LiveStatus {
     Unknown,
 }
 
+/// Maps `yt-dlp --print is_live` output to a `LiveStatus`. On success, stdout is
+/// authoritative (`True`/`False`; anything else — e.g. `None` for VODs — is
+/// Unknown). On failure, a "not currently live" stderr means Offline (yt-dlp
+/// exits non-zero for channels with no active broadcast); any other failure is
+/// Unknown.
 pub fn interpret_is_live(success: bool, stdout: &str, stderr: &str) -> LiveStatus {
     let out = stdout.trim();
     if success && out == "True" {

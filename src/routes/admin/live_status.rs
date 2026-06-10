@@ -10,6 +10,7 @@ use crate::media::resolver::{self, LiveStatus};
 use crate::routes::render;
 use crate::AppState;
 
+/// Query string for `GET /admin/live-status` — the source URL to probe.
 #[derive(Deserialize)]
 pub struct LiveStatusQuery {
     pub url: String,
@@ -47,6 +48,13 @@ fn badge_parts(status: LiveStatus) -> LiveStatusBadgeTemplate {
     }
 }
 
+/// `GET /admin/live-status?url=<source-url>` — HTMX lazy-load endpoint returning
+/// a small badge partial (● live / ○ offline / · ?). Source rows and discovery
+/// results render a "checking…" placeholder with `hx-trigger="load"` pointing
+/// here, so the page itself never blocks on yt-dlp. Probes go through
+/// `cached_live_status` (60s TTL, 10s for Unknown) and the global yt-dlp
+/// concurrency cap; URLs that yt-dlp can't resolve render as Unknown without
+/// spawning a probe.
 pub async fn live_status_badge(
     State(state): State<AppState>,
     Query(q): Query<LiveStatusQuery>,
