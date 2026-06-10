@@ -78,7 +78,7 @@ fn yt_dlp_anyhow(err: YtDlpError, url: &str) -> anyhow::Error {
         YtDlpError::Busy => {
             anyhow::anyhow!("yt-dlp resolver busy (no free slot) for {}", url)
         }
-        YtDlpError::Timeout => anyhow::anyhow!("yt-dlp timed out after 30s for {}", url),
+        YtDlpError::Timeout => anyhow::anyhow!("yt-dlp timed out for {}", url),
         YtDlpError::Spawn(e) => e.into(),
     }
 }
@@ -331,6 +331,38 @@ mod tests {
     #[tokio::test]
     async fn probe_live_non_http_is_unknown() {
         assert_eq!(probe_live("not-a-url").await, LiveStatus::Unknown);
+    }
+
+    #[tokio::test]
+    async fn resolve_url_rejects_non_http_scheme_before_passthrough() {
+        // The leading scheme check must run BEFORE the needs_resolution
+        // passthrough — without it, a non-YouTube ftp:// URL would be
+        // returned as-is instead of rejected.
+        let err = resolve_url("ftp://example.com/stream.m3u8")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("invalid URL scheme"));
+    }
+
+    #[test]
+    fn yt_dlp_anyhow_maps_all_variants() {
+        let url = "https://example.com/x";
+        assert_eq!(
+            yt_dlp_anyhow(YtDlpError::InvalidScheme, url).to_string(),
+            "invalid URL scheme: https://example.com/x"
+        );
+        assert_eq!(
+            yt_dlp_anyhow(YtDlpError::Busy, url).to_string(),
+            "yt-dlp resolver busy (no free slot) for https://example.com/x"
+        );
+        assert_eq!(
+            yt_dlp_anyhow(YtDlpError::Timeout, url).to_string(),
+            "yt-dlp timed out for https://example.com/x"
+        );
+        let spawn_err = std::io::Error::new(std::io::ErrorKind::NotFound, "no yt-dlp binary");
+        assert!(yt_dlp_anyhow(YtDlpError::Spawn(spawn_err), url)
+            .to_string()
+            .contains("no yt-dlp binary"));
     }
 
     #[test]
