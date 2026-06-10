@@ -406,6 +406,21 @@ mod tests {
     }
 
     #[test]
+    fn upcoming_row_without_schedule_entry_degrades_to_empty() {
+        let items = vec![serde_json::json!({
+            "id": {"videoId": "up2"},
+            "snippet": {"title": "Launch", "channelTitle": "SpaceX",
+                        "liveBroadcastContent": "upcoming"}
+        })];
+        let dur = std::collections::HashMap::new();
+        let sched = std::collections::HashMap::new();
+        let rows = build_video_rows(&items, &dur, &sched);
+        assert!(rows[0].is_upcoming);
+        assert_eq!(rows[0].scheduled_start, "");
+        assert_eq!(rows[0].source_kind, "youtube_live");
+    }
+
+    #[test]
     fn rows_without_thumbnails_get_empty_thumbnail_url() {
         let items = vec![serde_json::json!({
             "id": {"videoId": "abc"},
