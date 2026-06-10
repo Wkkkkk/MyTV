@@ -17,14 +17,14 @@ pub fn interpret_is_live(success: bool, stdout: &str, stderr: &str) -> LiveStatu
     if success && out == "False" {
         return LiveStatus::Offline;
     }
-    if stderr.to_ascii_lowercase().contains("not currently live") {
+    if !success && stderr.to_ascii_lowercase().contains("not currently live") {
         return LiveStatus::Offline;
     }
     LiveStatus::Unknown
 }
 
 /// Probes whether a YouTube/Twitch live URL is currently broadcasting.
-/// Times out after 8s; any spawn/timeout/parse failure yields `Unknown`.
+/// Times out after 8s; any spawn or timeout failure yields `Unknown`.
 pub async fn probe_live(url: &str) -> LiveStatus {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return LiveStatus::Unknown;
@@ -317,6 +317,13 @@ mod tests {
             LiveStatus::Unknown
         );
         assert_eq!(interpret_is_live(true, "", ""), LiveStatus::Unknown);
+        // success=true with a "not currently live" stderr is still Unknown (stdout is authoritative on success)
+        assert_eq!(
+            interpret_is_live(true, "", "not currently live"),
+            LiveStatus::Unknown
+        );
+        // yt-dlp prints "None" for a null is_live field → Unknown
+        assert_eq!(interpret_is_live(true, "None\n", ""), LiveStatus::Unknown);
     }
 
     #[tokio::test]
