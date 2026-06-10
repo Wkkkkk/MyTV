@@ -3,15 +3,26 @@
 {% else %}
 <table>
   <thead>
-    <tr><th>Title</th><th>Channel</th><th>Type</th><th>Duration</th><th></th></tr>
+    <tr><th></th><th>Title</th><th>Channel</th><th>Type</th><th>Duration</th><th></th></tr>
   </thead>
   <tbody>
     {% for row in rows %}
     <tr>
+      <td style="width:88px">
+        {% if !row.thumbnail_url.is_empty() %}
+        <img src="{{ row.thumbnail_url }}" width="80" loading="lazy" alt=""
+             style="display:block;border-radius:3px">
+        {% endif %}
+      </td>
       <td>{{ row.title }}</td>
       <td style="color:#777;font-size:0.8rem">{{ row.channel_title }}</td>
       <td>
-        {% if row.is_live %}
+        {% if row.is_upcoming %}
+        <span class="badge badge-upcoming">UPCOMING</span>
+        {% if !row.scheduled_start.is_empty() %}
+        <span style="color:#777;font-size:0.75rem;margin-left:6px">{{ row.scheduled_start }}</span>
+        {% endif %}
+        {% else if row.is_live %}
         <span class="badge badge-live">LIVE</span>
         {% if row.source_kind == "youtube_live" %}
         <span hx-get="/admin/live-status?url={{ row.url|urlencode }}"
@@ -31,7 +42,7 @@
               style="display:inline">
           <input type="hidden" name="url" value="{{ row.url }}">
           <input type="hidden" name="title" value="{{ row.title }}">
-          <input type="hidden" name="is_live" value="{% if row.is_live %}true{% else %}false{% endif %}">
+          <input type="hidden" name="is_live" value="{% if row.is_live || row.is_upcoming %}true{% else %}false{% endif %}">
           <input type="hidden" name="duration_secs" value="{{ row.duration_secs }}">
           <input type="hidden" name="source_kind" value="{{ row.source_kind }}">
           <input type="hidden" name="form_id" value="yt{{ row.form_id }}">
@@ -40,7 +51,7 @@
       </td>
     </tr>
     <tr>
-      <td colspan="5" style="padding:0">
+      <td colspan="6" style="padding:0">
         <div id="yt-add-form-{{ row.form_id }}" style="padding:10px 14px;background:#080810"></div>
       </td>
     </tr>
