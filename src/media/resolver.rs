@@ -565,6 +565,16 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires yt-dlp and network"]
+    async fn probe_live_real_vod_is_not_live() {
+        // "Me at the zoo" — a regular upload that was never a live broadcast.
+        // Pins that the new probe args (--print "%(live_status)s|%(release_timestamp)s"
+        // --ignore-no-formats-error) produce parseable output end-to-end.
+        let status = probe_live("https://www.youtube.com/watch?v=jNQXAC9IVRw").await;
+        assert_eq!(status, LiveStatus::NotLive);
+    }
+
+    #[tokio::test]
     #[ignore = "requires yt-dlp installed and network access — run manually"]
     async fn test_resolve_youtube_vod_returns_single_line_mp4_url() {
         let url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
