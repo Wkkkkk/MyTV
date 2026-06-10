@@ -29,6 +29,86 @@ where
     Some(f().await)
 }
 
+/// Why a yt-dlp invocation produced no usable `Output`.
+#[derive(Debug)]
+enum YtDlpError {
+    InvalidScheme,
+    /// No permit free within the wait — load-shed, not queued.
+    Busy,
+    /// Permit held, but the command exceeded its timeout.
+    Timeout,
+    Spawn(std::io::Error),
+}
+
+/// Single entry point for spawning yt-dlp. Owns the invariants every caller
+/// must uphold: the URL scheme check, the global concurrency cap
+/// (`run_under_cap`), the command timeout, `kill_on_drop` (a timed-out or
+/// cancelled invocation must not leave an orphaned ~73 MB process behind),
+/// and the `--` argument guard. A non-zero exit is `Ok` — callers inspect
+/// `status`/`stderr` (`probe_live` reads stderr of failed runs).
+async fn yt_dlp_output(
+    args: &[&str],
+    url: &str,
+    wait: Duration,
+    cmd_timeout: Duration,
+) -> Result<std::process::Output, YtDlpError> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(YtDlpError::InvalidScheme);
+    }
+    run_under_cap(yt_dlp_semaphore(), wait, || {
+        tokio::time::timeout(
+            cmd_timeout,
+            Command::new("yt-dlp")
+                .kill_on_drop(true)
+                .args(args)
+                .args(["--", url])
+                .output(),
+        )
+    })
+    .await
+    .ok_or(YtDlpError::Busy)?
+    .map_err(|_| YtDlpError::Timeout)?
+    .map_err(YtDlpError::Spawn)
+}
+
+/// Maps a `YtDlpError` to the error strings the admin UI already shows.
+fn yt_dlp_anyhow(err: YtDlpError, url: &str) -> anyhow::Error {
+    match err {
+        YtDlpError::InvalidScheme => anyhow::anyhow!("invalid URL scheme: {}", url),
+        YtDlpError::Busy => {
+            anyhow::anyhow!("yt-dlp resolver busy (no free slot) for {}", url)
+        }
+        YtDlpError::Timeout => anyhow::anyhow!("yt-dlp timed out after 30s for {}", url),
+        YtDlpError::Spawn(e) => e.into(),
+    }
+}
+
+/// Runs `yt-dlp --print <field>` under the cap and returns trimmed,
+/// non-empty stdout. Shared body of `fetch_title`, `fetch_video_id`,
+/// and `fetch_duration_secs`.
+async fn yt_dlp_print(field: &str, url: &str) -> Result<String> {
+    let output = yt_dlp_output(
+        &["--print", field, "--no-playlist"],
+        url,
+        Duration::from_secs(15),
+        Duration::from_secs(30),
+    )
+    .await
+    .map_err(|e| yt_dlp_anyhow(e, url))?;
+    if !output.status.success() {
+        bail!(
+            "yt-dlp failed for {}: {}",
+            url,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        bail!("yt-dlp returned empty output for {}", url);
+    }
+    Ok(value)
+}
+
 /// Result of probing whether a source URL is currently broadcasting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiveStatus {
@@ -59,25 +139,20 @@ pub fn interpret_is_live(success: bool, stdout: &str, stderr: &str) -> LiveStatu
 /// Probes whether a YouTube/Twitch live URL is currently broadcasting.
 /// Times out after 8s; any spawn or timeout failure yields `Unknown`.
 pub async fn probe_live(url: &str) -> LiveStatus {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return LiveStatus::Unknown;
-    }
-    let result = run_under_cap(yt_dlp_semaphore(), Duration::from_secs(8), || {
-        tokio::time::timeout(
-            Duration::from_secs(8),
-            Command::new("yt-dlp")
-                .args(["--print", "is_live", "--no-playlist", "--", url])
-                .output(),
-        )
-    })
-    .await;
-    match result {
-        Some(Ok(Ok(output))) => interpret_is_live(
+    match yt_dlp_output(
+        &["--print", "is_live", "--no-playlist"],
+        url,
+        Duration::from_secs(8),
+        Duration::from_secs(8),
+    )
+    .await
+    {
+        Ok(output) => interpret_is_live(
             output.status.success(),
             &String::from_utf8_lossy(&output.stdout),
             &String::from_utf8_lossy(&output.stderr),
         ),
-        _ => LiveStatus::Unknown,
+        Err(_) => LiveStatus::Unknown,
     }
 }
 
@@ -142,18 +217,14 @@ pub async fn resolve_url(url: &str) -> Result<String> {
     if !needs_resolution(url) {
         return Ok(url.to_string());
     }
-    let output = run_under_cap(yt_dlp_semaphore(), Duration::from_secs(15), || {
-        tokio::time::timeout(
-            Duration::from_secs(30),
-            Command::new("yt-dlp")
-                .args(["-g", "--no-playlist", "-f", "b[ext=mp4]/b", "--", url])
-                .output(),
-        )
-    })
+    let output = yt_dlp_output(
+        &["-g", "--no-playlist", "-f", "b[ext=mp4]/b"],
+        url,
+        Duration::from_secs(15),
+        Duration::from_secs(30),
+    )
     .await
-    .ok_or_else(|| anyhow::anyhow!("yt-dlp resolver busy (no free slot) for {}", url))?
-    .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
-
+    .map_err(|e| yt_dlp_anyhow(e, url))?;
     if !output.status.success() {
         bail!(
             "yt-dlp failed for {}: {}",
@@ -172,98 +243,23 @@ pub async fn resolve_url(url: &str) -> Result<String> {
 /// Fetches the title of a video via yt-dlp.
 /// Used to pre-populate the channel name field in the manual URL resolve flow.
 pub async fn fetch_title(url: &str) -> Result<String> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        bail!("invalid URL scheme: {}", url);
-    }
-    let output = run_under_cap(yt_dlp_semaphore(), Duration::from_secs(15), || {
-        tokio::time::timeout(
-            Duration::from_secs(30),
-            Command::new("yt-dlp")
-                .args(["--print", "title", "--no-playlist", "--", url])
-                .output(),
-        )
-    })
-    .await
-    .ok_or_else(|| anyhow::anyhow!("yt-dlp resolver busy (no free slot) for {}", url))?
-    .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
-
-    if !output.status.success() {
-        bail!(
-            "yt-dlp failed for {}: {}",
-            url,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    let title = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if title.is_empty() {
-        bail!("yt-dlp returned empty title for {}", url);
-    }
-    Ok(title)
+    yt_dlp_print("title", url).await
 }
 
 /// Fetches the canonical video id of a YouTube URL via yt-dlp. Used to build a
 /// `watch?v=<id>` URL when an ended live source carries no id in its path
 /// (channel/handle live URLs).
 pub async fn fetch_video_id(url: &str) -> Result<String> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        bail!("invalid URL scheme: {}", url);
-    }
-    let output = run_under_cap(yt_dlp_semaphore(), Duration::from_secs(15), || {
-        tokio::time::timeout(
-            Duration::from_secs(30),
-            Command::new("yt-dlp")
-                .args(["--print", "id", "--no-playlist", "--", url])
-                .output(),
-        )
-    })
-    .await
-    .ok_or_else(|| anyhow::anyhow!("yt-dlp resolver busy (no free slot) for {}", url))?
-    .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
-
-    if !output.status.success() {
-        bail!(
-            "yt-dlp failed for {}: {}",
-            url,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if id.is_empty() {
-        bail!("yt-dlp returned empty id for {}", url);
-    }
-    Ok(id)
+    yt_dlp_print("id", url).await
 }
 
 /// Fetches the duration of a video in seconds via yt-dlp.
 /// Called once when an admin adds a VOD asset so duration is stored in the DB.
 pub async fn fetch_duration_secs(url: &str) -> Result<i64> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        bail!("invalid URL scheme: {}", url);
-    }
-    let output = run_under_cap(yt_dlp_semaphore(), Duration::from_secs(15), || {
-        tokio::time::timeout(
-            Duration::from_secs(30),
-            Command::new("yt-dlp")
-                .args(["--print", "duration", "--no-playlist", "--", url])
-                .output(),
-        )
-    })
-    .await
-    .ok_or_else(|| anyhow::anyhow!("yt-dlp resolver busy (no free slot) for {}", url))?
-    .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
-
-    if !output.status.success() {
-        bail!(
-            "yt-dlp failed for {}: {}",
-            url,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
-    let trimmed = raw.trim();
-    let duration: f64 = trimmed
+    let raw = yt_dlp_print("duration", url).await?;
+    let duration: f64 = raw
         .parse()
-        .map_err(|_| anyhow::anyhow!("could not parse yt-dlp duration: {:?}", trimmed))?;
+        .map_err(|_| anyhow::anyhow!("could not parse yt-dlp duration: {:?}", raw))?;
     if !duration.is_finite() || duration < 0.0 {
         bail!("yt-dlp returned invalid duration: {}", duration);
     }
@@ -309,6 +305,32 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         drop(held); // free the permit well within the 500ms wait
         assert_eq!(task.await.unwrap(), Some(7));
+    }
+
+    #[tokio::test]
+    async fn yt_dlp_output_rejects_non_http_scheme() {
+        let err = yt_dlp_output(
+            &["--print", "title", "--no-playlist"],
+            "ftp://example.com/video",
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, YtDlpError::InvalidScheme));
+    }
+
+    #[tokio::test]
+    async fn yt_dlp_print_maps_invalid_scheme_to_existing_message() {
+        let err = yt_dlp_print("title", "ftp://example.com/video")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("invalid URL scheme"));
+    }
+
+    #[tokio::test]
+    async fn probe_live_non_http_is_unknown() {
+        assert_eq!(probe_live("not-a-url").await, LiveStatus::Unknown);
     }
 
     #[test]
