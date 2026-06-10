@@ -165,8 +165,8 @@ determinate → 60 s.)
 | Live | ● | #4caf50 | live | Currently live |
 | Upcoming(Some(ts)) | ◷ | #db4 | upcoming | Scheduled — starts Jun 12 18:00 UTC |
 | Upcoming(None) | ◷ | #db4 | upcoming | Scheduled, start time unknown |
-| PostLive | ◌ | #f77 | ended | Broadcast just ended (processing) |
-| WasLive | ◌ | #f77 | ended | Finished broadcast (recording available) |
+| PostLive | ◌ | #f77 | ended | Broadcast just ended (still processing) |
+| WasLive | ◉ | #88f | recorded | Finished broadcast — recording available |
 | NotLive | ▶ | #88f | vod | Regular video (never live) |
 | Offline | ○ | #888 | offline | Not currently live |
 | Unknown | · | #666 | ? | Live status unknown |
