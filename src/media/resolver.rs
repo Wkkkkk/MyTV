@@ -11,20 +11,22 @@ fn yt_dlp_semaphore() -> &'static Semaphore {
     &SEM
 }
 
-/// Acquires a yt-dlp permit (waiting if the cap is reached), then builds and
-/// awaits the future via `f`. `f` is a closure (not a ready future) so the
-/// wrapped `timeout` clock starts only AFTER the permit is held — a queued
-/// caller never burns its timeout budget while waiting for a slot.
-async fn run_under_cap<F, Fut>(sem: &Semaphore, f: F) -> Fut::Output
+/// Waits up to `wait` for a yt-dlp permit, then builds and awaits the future via
+/// `f`. Returns `None` if no permit becomes free within `wait` (load-shed: the
+/// caller is not parked indefinitely on a busy box). `f` is a closure so the
+/// future it builds — typically a `timeout` around the yt-dlp command — starts
+/// only AFTER the permit is held, so a queued caller never burns its own command
+/// timeout budget while waiting for a slot.
+async fn run_under_cap<F, Fut>(sem: &Semaphore, wait: Duration, f: F) -> Option<Fut::Output>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future,
 {
-    let _permit = sem
-        .acquire()
-        .await
-        .expect("yt-dlp semaphore is never closed");
-    f().await
+    let _permit = match tokio::time::timeout(wait, sem.acquire()).await {
+        Ok(Ok(permit)) => permit,
+        _ => return None, // no slot within `wait`, or semaphore closed (never)
+    };
+    Some(f().await)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +56,7 @@ pub async fn probe_live(url: &str) -> LiveStatus {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return LiveStatus::Unknown;
     }
-    let result = run_under_cap(yt_dlp_semaphore(), || {
+    let result = run_under_cap(yt_dlp_semaphore(), Duration::from_secs(8), || {
         tokio::time::timeout(
             Duration::from_secs(8),
             Command::new("yt-dlp")
@@ -64,7 +66,7 @@ pub async fn probe_live(url: &str) -> LiveStatus {
     })
     .await;
     match result {
-        Ok(Ok(output)) => interpret_is_live(
+        Some(Ok(Ok(output))) => interpret_is_live(
             output.status.success(),
             &String::from_utf8_lossy(&output.stdout),
             &String::from_utf8_lossy(&output.stderr),
@@ -134,7 +136,7 @@ pub async fn resolve_url(url: &str) -> Result<String> {
     if !needs_resolution(url) {
         return Ok(url.to_string());
     }
-    let output = run_under_cap(yt_dlp_semaphore(), || {
+    let output = run_under_cap(yt_dlp_semaphore(), Duration::from_secs(15), || {
         tokio::time::timeout(
             Duration::from_secs(30),
             Command::new("yt-dlp")
@@ -143,6 +145,7 @@ pub async fn resolve_url(url: &str) -> Result<String> {
         )
     })
     .await
+    .ok_or_else(|| anyhow::anyhow!("yt-dlp resolver busy (no free slot) for {}", url))?
     .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
 
     if !output.status.success() {
@@ -166,7 +169,7 @@ pub async fn fetch_title(url: &str) -> Result<String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         bail!("invalid URL scheme: {}", url);
     }
-    let output = run_under_cap(yt_dlp_semaphore(), || {
+    let output = run_under_cap(yt_dlp_semaphore(), Duration::from_secs(15), || {
         tokio::time::timeout(
             Duration::from_secs(30),
             Command::new("yt-dlp")
@@ -175,6 +178,7 @@ pub async fn fetch_title(url: &str) -> Result<String> {
         )
     })
     .await
+    .ok_or_else(|| anyhow::anyhow!("yt-dlp resolver busy (no free slot) for {}", url))?
     .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
 
     if !output.status.success() {
@@ -198,7 +202,7 @@ pub async fn fetch_video_id(url: &str) -> Result<String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         bail!("invalid URL scheme: {}", url);
     }
-    let output = run_under_cap(yt_dlp_semaphore(), || {
+    let output = run_under_cap(yt_dlp_semaphore(), Duration::from_secs(15), || {
         tokio::time::timeout(
             Duration::from_secs(30),
             Command::new("yt-dlp")
@@ -207,6 +211,7 @@ pub async fn fetch_video_id(url: &str) -> Result<String> {
         )
     })
     .await
+    .ok_or_else(|| anyhow::anyhow!("yt-dlp resolver busy (no free slot) for {}", url))?
     .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
 
     if !output.status.success() {
@@ -229,7 +234,7 @@ pub async fn fetch_duration_secs(url: &str) -> Result<i64> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         bail!("invalid URL scheme: {}", url);
     }
-    let output = run_under_cap(yt_dlp_semaphore(), || {
+    let output = run_under_cap(yt_dlp_semaphore(), Duration::from_secs(15), || {
         tokio::time::timeout(
             Duration::from_secs(30),
             Command::new("yt-dlp")
@@ -238,6 +243,7 @@ pub async fn fetch_duration_secs(url: &str) -> Result<i64> {
         )
     })
     .await
+    .ok_or_else(|| anyhow::anyhow!("yt-dlp resolver busy (no free slot) for {}", url))?
     .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 30s for {}", url))??;
 
     if !output.status.success() {
@@ -265,35 +271,38 @@ mod tests {
     #[tokio::test]
     async fn run_under_cap_runs_when_permit_available() {
         let sem = tokio::sync::Semaphore::new(1);
-        assert_eq!(run_under_cap(&sem, || async { 42 }).await, 42);
+        let out = run_under_cap(&sem, Duration::from_secs(1), || async { 42 }).await;
+        assert_eq!(out, Some(42));
     }
 
     #[tokio::test]
-    async fn run_under_cap_blocks_when_no_permits() {
+    async fn run_under_cap_returns_none_when_no_permit_within_wait() {
         let sem = tokio::sync::Semaphore::new(1);
         let _held = sem.acquire().await.unwrap(); // exhaust the only permit
-        let blocked = tokio::time::timeout(
-            Duration::from_millis(50),
-            run_under_cap(&sem, || async { 42 }),
-        )
-        .await;
-        assert!(blocked.is_err(), "run_under_cap must wait for a permit");
+        let out = run_under_cap(&sem, Duration::from_millis(20), || async { 42 }).await;
+        assert_eq!(out, None, "must shed (None) when no permit within the wait");
     }
 
     #[tokio::test]
-    async fn run_under_cap_allows_two_then_blocks_third() {
+    async fn run_under_cap_returns_none_when_both_permits_held() {
         let sem = tokio::sync::Semaphore::new(2);
         let _p1 = sem.acquire().await.unwrap();
-        let _p2 = sem.acquire().await.unwrap(); // both permits held
-        let blocked = tokio::time::timeout(
-            Duration::from_millis(50),
-            run_under_cap(&sem, || async { 42 }),
-        )
-        .await;
-        assert!(
-            blocked.is_err(),
-            "a third caller must wait when 2 permits are held"
-        );
+        let _p2 = sem.acquire().await.unwrap();
+        let out = run_under_cap(&sem, Duration::from_millis(20), || async { 42 }).await;
+        assert_eq!(out, None, "third caller sheds when 2 permits are held");
+    }
+
+    #[tokio::test]
+    async fn run_under_cap_acquires_when_permit_frees_within_wait() {
+        let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+        let held = sem.clone().acquire_owned().await.unwrap();
+        let sem2 = sem.clone();
+        let task = tokio::spawn(async move {
+            run_under_cap(sem2.as_ref(), Duration::from_millis(500), || async { 7 }).await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(held); // free the permit well within the 500ms wait
+        assert_eq!(task.await.unwrap(), Some(7));
     }
 
     #[test]
