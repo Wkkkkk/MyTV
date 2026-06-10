@@ -66,6 +66,7 @@ pub async fn probe_live(url: &str) -> LiveStatus {
         tokio::time::timeout(
             Duration::from_secs(8),
             Command::new("yt-dlp")
+                .kill_on_drop(true)
                 .args(["--print", "is_live", "--no-playlist", "--", url])
                 .output(),
         )
@@ -146,6 +147,7 @@ pub async fn resolve_url(url: &str) -> Result<String> {
         tokio::time::timeout(
             Duration::from_secs(30),
             Command::new("yt-dlp")
+                .kill_on_drop(true)
                 .args(["-g", "--no-playlist", "-f", "b[ext=mp4]/b", "--", url])
                 .output(),
         )
@@ -179,6 +181,7 @@ pub async fn fetch_title(url: &str) -> Result<String> {
         tokio::time::timeout(
             Duration::from_secs(30),
             Command::new("yt-dlp")
+                .kill_on_drop(true)
                 .args(["--print", "title", "--no-playlist", "--", url])
                 .output(),
         )
@@ -212,6 +215,7 @@ pub async fn fetch_video_id(url: &str) -> Result<String> {
         tokio::time::timeout(
             Duration::from_secs(30),
             Command::new("yt-dlp")
+                .kill_on_drop(true)
                 .args(["--print", "id", "--no-playlist", "--", url])
                 .output(),
         )
@@ -244,6 +248,7 @@ pub async fn fetch_duration_secs(url: &str) -> Result<i64> {
         tokio::time::timeout(
             Duration::from_secs(30),
             Command::new("yt-dlp")
+                .kill_on_drop(true)
                 .args(["--print", "duration", "--no-playlist", "--", url])
                 .output(),
         )
