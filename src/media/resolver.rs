@@ -52,7 +52,11 @@ pub async fn cached_live_status(cache: &crate::LiveStatusCache, url: &str) -> Li
     {
         let map = cache.read().await;
         if let Some((status, at)) = map.get(url) {
-            if at.elapsed() < Duration::from_secs(60) {
+            let ttl = match status {
+                LiveStatus::Unknown => Duration::from_secs(10),
+                _ => Duration::from_secs(60),
+            };
+            if at.elapsed() < ttl {
                 return *status;
             }
         }
@@ -343,6 +347,21 @@ mod tests {
         );
         // yt-dlp prints "None" for a null is_live field → Unknown
         assert_eq!(interpret_is_live(true, "None\n", ""), LiveStatus::Unknown);
+    }
+
+    #[tokio::test]
+    async fn cached_live_status_returns_fresh_cache_hit() {
+        let cache: crate::LiveStatusCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        cache.write().await.insert(
+            "https://www.youtube.com/@x/live".to_string(),
+            (LiveStatus::Live, std::time::Instant::now()),
+        );
+        // A fresh cache hit returns immediately without invoking yt-dlp.
+        assert_eq!(
+            cached_live_status(&cache, "https://www.youtube.com/@x/live").await,
+            LiveStatus::Live
+        );
     }
 
     #[tokio::test]
