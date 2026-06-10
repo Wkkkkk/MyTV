@@ -131,6 +131,12 @@ pub(super) async fn fetch_youtube_channels(
     Ok(build_channel_rows(items))
 }
 
+pub(super) fn format_scheduled_start(rfc3339: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(rfc3339)
+        .map(|dt| crate::media::format_utc_short(dt.with_timezone(&chrono::Utc)))
+        .unwrap_or_default()
+}
+
 pub fn parse_iso8601_duration(s: &str) -> i64 {
     let s = s.strip_prefix("PT").unwrap_or(s);
     let mut total = 0i64;
@@ -324,5 +330,20 @@ mod tests {
         assert_eq!(rows[0].duration_secs, 253);
         assert_eq!(rows[1].source_kind, "youtube_live");
         assert!(rows[1].is_live);
+    }
+
+    #[test]
+    fn format_scheduled_start_cases() {
+        assert_eq!(
+            format_scheduled_start("2026-06-12T18:00:00Z"),
+            "Jun 12 18:00 UTC"
+        );
+        // offset timestamps are normalized to UTC
+        assert_eq!(
+            format_scheduled_start("2026-06-12T20:30:00+02:00"),
+            "Jun 12 18:30 UTC"
+        );
+        assert_eq!(format_scheduled_start("not-a-date"), "");
+        assert_eq!(format_scheduled_start(""), "");
     }
 }

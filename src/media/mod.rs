@@ -30,6 +30,12 @@ pub(crate) fn resolve_url(url: &str, base_url: &str) -> String {
     }
 }
 
+/// Formats a UTC time as e.g. "Jun 12 18:00 UTC" — used by the discover
+/// results (scheduled streams) and the live-status badge.
+pub(crate) fn format_utc_short(dt: chrono::DateTime<chrono::Utc>) -> String {
+    dt.format("%b %d %H:%M UTC").to_string()
+}
+
 /// Fetches the duration (seconds) for a VOD URL.
 /// Uses yt-dlp for YouTube, MPD parsing for DASH, HLS manifest parsing otherwise.
 pub async fn fetch_duration(client: &reqwest::Client, url: &str) -> anyhow::Result<i64> {
@@ -95,5 +101,12 @@ mod tests {
             resolve_url("./", "https://cdn.example.com/path/stream.mpd"),
             "https://cdn.example.com/path/"
         );
+    }
+
+    #[test]
+    fn format_utc_short_formats_epoch() {
+        // 1_781_287_200 = 2026-06-12T18:00:00Z
+        let dt = chrono::DateTime::from_timestamp(1_781_287_200, 0).unwrap();
+        assert_eq!(format_utc_short(dt), "Jun 12 18:00 UTC");
     }
 }
