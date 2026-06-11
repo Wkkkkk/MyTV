@@ -3,8 +3,10 @@ use std::time::Duration;
 
 use sqlx::SqlitePool;
 
+use crate::media::resolver::{self, LiveStatus};
 use crate::model::source::{self, Source};
 use crate::CorsCache;
+use crate::LiveStatusCache;
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -21,6 +23,7 @@ pub struct HealthClients {
     pub pool: SqlitePool,
     pub http_client: reqwest::Client,
     pub cors_cache: CorsCache,
+    pub live_cache: LiveStatusCache,
 }
 
 pub fn start(clients: HealthClients) {
@@ -30,12 +33,23 @@ pub fn start(clients: HealthClients) {
         interval.tick().await;
         loop {
             interval.tick().await;
-            check_all(&clients.pool, &clients.http_client, &clients.cors_cache).await;
+            check_all(
+                &clients.pool,
+                &clients.http_client,
+                &clients.cors_cache,
+                &clients.live_cache,
+            )
+            .await;
         }
     });
 }
 
-async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &CorsCache) {
+async fn check_all(
+    pool: &SqlitePool,
+    client: &reqwest::Client,
+    cors_cache: &CorsCache,
+    live_cache: &LiveStatusCache,
+) {
     let mut probed_hosts: HashSet<String> = HashSet::new();
 
     let sources = match source::list_all(pool).await {
@@ -46,7 +60,7 @@ async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &Cor
         }
     };
     for src in sources {
-        let ok = check_source(pool, client, &src).await;
+        let ok = check_source(pool, client, live_cache, &src).await;
         if ok {
             let host = crate::media::hls::extract_manifest_host(&src.url);
             if probed_hosts.insert(host) {
@@ -73,6 +87,7 @@ async fn check_all(pool: &SqlitePool, client: &reqwest::Client, cors_cache: &Cor
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_check<F, Fut>(
     client: &reqwest::Client,
     url: &str,
@@ -80,13 +95,14 @@ async fn run_check<F, Fut>(
     is_active: bool,
     consecutive_failures: i64,
     manage_lifecycle: bool,
+    live_cache: Option<&LiveStatusCache>,
     update: F,
 ) -> bool
 where
     F: FnOnce(&'static str, Option<String>, i64, Option<bool>) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<()>>,
 {
-    let (ok, reason) = do_http_check(client, url, kind).await;
+    let (ok, reason) = do_http_check(client, url, kind, live_cache).await;
     let (new_failures, action) = process_result(is_active, consecutive_failures, ok);
     let is_active_change = if manage_lifecycle {
         match action {
@@ -155,6 +171,7 @@ pub async fn probe_source(
     pool: &SqlitePool,
     client: &reqwest::Client,
     cors_cache: &CorsCache,
+    live_cache: &LiveStatusCache,
     src: &Source,
 ) {
     let ok = run_check(
@@ -164,6 +181,7 @@ pub async fn probe_source(
         src.is_active,
         src.consecutive_failures,
         false,
+        Some(live_cache),
         |status, reason, failures, is_active_change| async move {
             source::update_health(
                 pool,
@@ -183,7 +201,12 @@ pub async fn probe_source(
     }
 }
 
-async fn check_source(pool: &SqlitePool, client: &reqwest::Client, src: &Source) -> bool {
+async fn check_source(
+    pool: &SqlitePool,
+    client: &reqwest::Client,
+    live_cache: &LiveStatusCache,
+    src: &Source,
+) -> bool {
     run_check(
         client,
         &src.url,
@@ -191,6 +214,7 @@ async fn check_source(pool: &SqlitePool, client: &reqwest::Client, src: &Source)
         src.is_active,
         src.consecutive_failures,
         true,
+        Some(live_cache),
         |status, reason, failures, is_active_change| async move {
             source::update_health(
                 pool,
@@ -219,6 +243,7 @@ async fn check_playlist_item(
         item.is_active,
         item.consecutive_failures,
         true,
+        None,
         |status, reason, failures, is_active_change| async move {
             crate::model::playlist_item::update_health(
                 pool,
@@ -250,6 +275,7 @@ pub async fn probe_playlist_item(
         item.is_active,
         item.consecutive_failures,
         false,
+        None,
         |status, reason, failures, is_active_change| async move {
             crate::model::playlist_item::update_health(
                 pool,
@@ -337,7 +363,22 @@ pub async fn probe_and_cache_resolved_cors(
     Some(cors)
 }
 
-async fn do_http_check(client: &reqwest::Client, url: &str, kind: &str) -> (bool, Option<String>) {
+async fn do_http_check(
+    client: &reqwest::Client,
+    url: &str,
+    kind: &str,
+    live_cache: Option<&LiveStatusCache>,
+) -> (bool, Option<String>) {
+    if kind == "youtube_live" {
+        let (ok, reason) = match live_cache {
+            Some(c) => live_status_health(resolver::cached_live_status(c, url).await),
+            // No live-status cache (playlist-item checks): a youtube_live-detected
+            // VOD item isn't a live broadcast, so don't spend a yt-dlp probe on it.
+            None => (true, None),
+        };
+        return (ok, reason.map(|s| s.to_string()));
+    }
+
     let mut resp = match client.get(url).timeout(HTTP_TIMEOUT).send().await {
         Ok(r) => r,
         Err(e) => return (false, Some(format!("request failed: {e}"))),
@@ -348,10 +389,6 @@ async fn do_http_check(client: &reqwest::Client, url: &str, kind: &str) -> (bool
         return (false, Some(format!("HTTP {}", status.as_u16())));
     }
 
-    if kind == "youtube_live" {
-        return (true, None);
-    }
-
     // reqwest's per-request `.timeout(HTTP_TIMEOUT)` is a total deadline covering
     // the body read, so this `chunk()` can't hang past HTTP_TIMEOUT even on a stream
     // that connects then stalls.
@@ -359,6 +396,17 @@ async fn do_http_check(client: &reqwest::Client, url: &str, kind: &str) -> (bool
         Ok(Some(_)) => (true, None),
         Ok(None) => (false, Some("stream returned no data".to_string())),
         Err(e) => (false, Some(format!("read failed: {e}"))),
+    }
+}
+
+/// Maps a probed live status to a `(healthy, reason)` health result for a
+/// `youtube_live` source. `Upcoming`/`Unknown` never penalize (a scheduled
+/// stream isn't broken; `Unknown` is a load-shed or extractor gap).
+fn live_status_health(status: LiveStatus) -> (bool, Option<&'static str>) {
+    match status {
+        LiveStatus::Live | LiveStatus::Upcoming(_) | LiveStatus::Unknown => (true, None),
+        LiveStatus::Offline | LiveStatus::NotLive => (false, Some("not currently live")),
+        LiveStatus::WasLive | LiveStatus::PostLive => (false, Some("broadcast ended")),
     }
 }
 
@@ -377,6 +425,31 @@ fn process_result(is_active: bool, consecutive_failures: i64, ok: bool) -> (i64,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_live_status_health_mapping() {
+        use crate::media::resolver::LiveStatus::*;
+        assert_eq!(live_status_health(Live), (true, None));
+        assert_eq!(live_status_health(Upcoming(None)), (true, None));
+        assert_eq!(live_status_health(Upcoming(Some(1_000_000))), (true, None));
+        assert_eq!(live_status_health(Unknown), (true, None));
+        assert_eq!(
+            live_status_health(Offline),
+            (false, Some("not currently live"))
+        );
+        assert_eq!(
+            live_status_health(NotLive),
+            (false, Some("not currently live"))
+        );
+        assert_eq!(
+            live_status_health(WasLive),
+            (false, Some("broadcast ended"))
+        );
+        assert_eq!(
+            live_status_health(PostLive),
+            (false, Some("broadcast ended"))
+        );
+    }
 
     #[test]
     fn test_process_result_ok_resets_failures() {
@@ -573,9 +646,11 @@ mod tests {
             .unwrap();
         let cors_cache: crate::CorsCache =
             std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let live_cache: LiveStatusCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
         // probe_source is the manual Test-button path — must never change is_active.
-        probe_source(&pool, &client, &cors_cache, &src).await;
+        probe_source(&pool, &client, &cors_cache, &live_cache, &src).await;
 
         let updated = crate::model::source::get(&pool, src.id)
             .await
@@ -688,6 +763,7 @@ mod tests {
             false, // is_active: currently disabled
             3,     // consecutive_failures
             false, // manage_lifecycle: probe mode
+            None,  // live_cache: not needed for hls
             |_status, _reason, _failures, is_active_change| async move {
                 assert!(
                     is_active_change.is_none(),
@@ -834,12 +910,14 @@ mod tests {
 
         let cors_cache: crate::CorsCache =
             std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let live_cache: LiveStatusCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(2))
             .build()
             .unwrap();
 
-        check_all(&pool, &client, &cors_cache).await;
+        check_all(&pool, &client, &cors_cache, &live_cache).await;
 
         // Both items must have been health-checked independently
         let updated1 = crate::model::playlist_item::get(&pool, it1.id)

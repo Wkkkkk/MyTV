@@ -45,6 +45,7 @@ async fn main() -> Result<()> {
         pool: state.pool.clone(),
         http_client: state.http_client.clone(),
         cors_cache: state.cors_cache.clone(),
+        live_cache: state.live_cache.clone(),
     });
 
     let app = build_router(state);
