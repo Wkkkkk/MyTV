@@ -27,6 +27,7 @@ pub struct TuneResponse {
     pub channel_type: String,
     pub skip_proxy: bool,
     pub ended: bool,
+    pub waiting: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +87,7 @@ fn tune_response(
         channel_type: ch.r#type.clone(),
         skip_proxy,
         ended: false,
+        waiting: false,
     })
 }
 
@@ -99,6 +101,21 @@ fn tune_response_ended(ch: &channel::Channel) -> Json<TuneResponse> {
         channel_type: ch.r#type.clone(),
         skip_proxy: false,
         ended: true,
+        waiting: false,
+    })
+}
+
+fn tune_response_waiting(ch: &channel::Channel) -> Json<TuneResponse> {
+    Json(TuneResponse {
+        url: String::new(),
+        start_offset_secs: 0,
+        name: ch.name.clone(),
+        logo_url: ch.logo_url.clone(),
+        category: ch.category.clone(),
+        channel_type: ch.r#type.clone(),
+        skip_proxy: false,
+        ended: false,
+        waiting: true,
     })
 }
 
