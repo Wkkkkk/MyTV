@@ -163,6 +163,16 @@ pub fn interpret_live_status(success: bool, stdout: &str, stderr: &str) -> LiveS
     LiveStatus::Unknown
 }
 
+/// Classifies a failed yt-dlp resolve. Returns `Some(status)` when the failure
+/// is a recoverable broadcast state the player should wait on (`Offline` /
+/// `Upcoming`), or `None` when it is a genuine error that should propagate.
+pub fn recoverable_status(stderr: &str) -> Option<LiveStatus> {
+    match interpret_live_status(false, "", stderr) {
+        s @ (LiveStatus::Offline | LiveStatus::Upcoming(_)) => Some(s),
+        _ => None,
+    }
+}
+
 /// Probes a YouTube/Twitch URL's broadcast lifecycle state.
 /// `--ignore-no-formats-error` lets yt-dlp print metadata for upcoming streams,
 /// which have no formats yet. Times out after 8s; any spawn or timeout failure
@@ -283,11 +293,13 @@ pub async fn resolve_url_with_status(url: &str) -> Result<(String, LiveStatus)> 
     .await
     .map_err(|e| yt_dlp_anyhow(e, url))?;
     if !output.status.success() {
-        bail!(
-            "yt-dlp failed for {}: {}",
-            url,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if let Some(status) = recoverable_status(&stderr) {
+            // INVARIANT: empty URL here means "not playable, but live_status is
+            // known (Offline/Upcoming)"; callers must check url.is_empty().
+            return Ok((String::new(), status));
+        }
+        bail!("yt-dlp failed for {}: {}", url, stderr.trim());
     }
     parse_status_and_url(&String::from_utf8_lossy(&output.stdout))
         .ok_or_else(|| anyhow::anyhow!("yt-dlp returned empty output for {}", url))
@@ -296,7 +308,11 @@ pub async fn resolve_url_with_status(url: &str) -> Result<(String, LiveStatus)> 
 /// Returns a directly playable URL.
 /// HLS/IPTV URLs are returned unchanged. YouTube/Twitch are resolved via yt-dlp.
 pub async fn resolve_url(url: &str) -> Result<String> {
-    Ok(resolve_url_with_status(url).await?.0)
+    let (resolved, _) = resolve_url_with_status(url).await?;
+    if resolved.is_empty() {
+        bail!("no playable URL for {url} (stream offline or upcoming)");
+    }
+    Ok(resolved)
 }
 
 /// Fetches the title of a video via yt-dlp.
@@ -651,6 +667,22 @@ mod tests {
     fn parse_status_and_url_missing_url_line_is_none() {
         assert_eq!(parse_status_and_url("was_live\n"), None);
         assert_eq!(parse_status_and_url(""), None);
+    }
+
+    #[test]
+    fn test_recoverable_status_offline_and_upcoming() {
+        use LiveStatus::*;
+        assert_eq!(
+            recoverable_status("ERROR: ... This live event is not currently live ..."),
+            Some(Offline)
+        );
+        assert_eq!(
+            recoverable_status("ERROR: ... this live event will begin in 2 hours ..."),
+            Some(Upcoming(None))
+        );
+        // genuine failures do not become a recoverable status
+        assert_eq!(recoverable_status("ERROR: HTTP Error 404: Not Found"), None);
+        assert_eq!(recoverable_status(""), None);
     }
 
     #[tokio::test]
