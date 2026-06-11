@@ -21,7 +21,7 @@ Live instance: https://kunstv.fly.dev/
 
 ```bash
 cargo build            # compile
-cargo test             # 318 tests: 248 unit + 70 integration (5 ignored — need yt-dlp/network)
+cargo test             # 329 tests: 259 unit + 70 integration (7 ignored — need yt-dlp/network)
 cargo fmt              # format (ALWAYS run before committing)
 cargo clippy           # lint (CI runs with -D warnings)
 cargo run              # start server on :3000
@@ -72,7 +72,7 @@ tests/
 
 **Player routes return JSON**: `/channel/:id/tune` and `/channel/:id/next` return `Json<TuneResponse>` with HTTP 200 on success or HTTP 503 on failure. They do not redirect. `TuneResponse` carries two booleans beyond the metadata: `skip_proxy` (player uses the unproxied resolved URL for `<video src>` — set for resolved YouTube VOD direct MP4s) and `ended` (the live broadcast finished; client auto-advances).
 
-**Ended live → VOD**: when a resolved live manifest contains `force_finished/1` (`resolver::is_finished_live`), the handler returns `{ ended: true, url: "" }` and fires a detached `tokio::spawn` (`convert_channel_to_vod_loop`) that appends the recording as a `playlist_item`, flips the channel to `vod_loop`, and deactivates the sources. Idempotent; no migration (recording URL lives on the playlist_item). See `docs/architecture/tune-flow.md`.
+**Ended live → VOD**: `next_live` calls `resolver::resolve_url_with_status` (one yt-dlp subprocess that prints `live_status` + URL). When the returned status is `WasLive` or `PostLive`, or the resolved URL contains `force_finished/1` (fallback for extractors that don't set `live_status`), the handler returns `{ ended: true, url: "" }` and fires a detached `tokio::spawn` (`convert_channel_to_vod_loop`) that appends the recording as a `playlist_item`, flips the channel to `vod_loop`, and deactivates the sources. Idempotent; no migration (recording URL lives on the playlist_item). See `docs/architecture/tune-flow.md`.
 
 **VOD position**: `tune_vod_at` computes current playlist position using `Utc::now()` and the channel's `loop_anchor`. The returned URL depends on current time — tests assert `url.contains(...)` rather than exact equality.
 
