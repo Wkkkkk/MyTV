@@ -325,7 +325,18 @@
         }
       }
 
+      function stopPlayback() {
+        if (!video) return;
+        video.pause();
+        video.onerror = null; // avoid a stale onerror firing a spurious failover as we tear down
+        if (hls) { hls.stopLoad(); hls.detachMedia(); }
+        if (dash) { dash.reset(); dash = null; }
+        video.removeAttribute('src');
+        video.load();
+      }
+
       function showPlayerError() {
+        stopPlayback();
         if (video) video.style.display = 'none';
         var el = document.getElementById('player-error');
         if (el) el.style.display = 'block';
@@ -373,6 +384,7 @@
       }
 
       function enterWaitingState() {
+        stopPlayback();
         if (video) video.style.display = 'none';
         currentUrl = null; // avoid stale ?failed_url= if a late onerror fires while waiting
         var el = document.getElementById('player-waiting');
@@ -419,8 +431,7 @@
         if (video) video.style.display = '';
         var endedNotice = document.getElementById('player-ended');
         if (endedNotice) endedNotice.style.display = 'none';
-        if (hls) hls.stopLoad();
-        if (dash) { dash.reset(); dash = null; }
+        stopPlayback();
         document.getElementById('player-panel').style.display = 'block';
         fetch('/channel/' + channelId + '/tune')
           .then(function(r) {
