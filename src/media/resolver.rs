@@ -242,17 +242,40 @@ pub fn live_url_to_watch_url(source_url: &str) -> Option<String> {
     Some(format!("https://www.youtube.com/watch?v={id}"))
 }
 
-/// Returns a directly playable URL.
-/// HLS/IPTV URLs are returned unchanged. YouTube/Twitch are resolved via yt-dlp.
-pub async fn resolve_url(url: &str) -> Result<String> {
+/// Parses `--print live_status --print urls` stdout: line 1 is the status
+/// token, line 2 the first playable URL (later lines are additional formats,
+/// e.g. separate audio — the first-URL rule matches the old `-g` behavior).
+fn parse_status_and_url(stdout: &str) -> Option<(String, LiveStatus)> {
+    let mut lines = stdout.lines();
+    let status = live_status_from_str(lines.next().unwrap_or("").trim());
+    let url = lines.next().unwrap_or("").trim();
+    if url.is_empty() {
+        return None;
+    }
+    Some((url.to_string(), status))
+}
+
+/// Returns a directly playable URL plus the stream's lifecycle state.
+/// HLS/IPTV URLs are returned unchanged (status Unknown, no yt-dlp spawn).
+/// YouTube/Twitch are resolved via a single yt-dlp call that also reports
+/// `live_status` — `next_live` uses it to detect ended broadcasts.
+pub async fn resolve_url_with_status(url: &str) -> Result<(String, LiveStatus)> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         bail!("invalid URL scheme: {}", url);
     }
     if !needs_resolution(url) {
-        return Ok(url.to_string());
+        return Ok((url.to_string(), LiveStatus::Unknown));
     }
     let output = yt_dlp_output(
-        &["-g", "--no-playlist", "-f", "b[ext=mp4]/b"],
+        &[
+            "--print",
+            "live_status",
+            "--print",
+            "urls",
+            "--no-playlist",
+            "-f",
+            "b[ext=mp4]/b",
+        ],
         url,
         Duration::from_secs(15),
         Duration::from_secs(30),
@@ -266,12 +289,14 @@ pub async fn resolve_url(url: &str) -> Result<String> {
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    let resolved = String::from_utf8_lossy(&output.stdout).into_owned();
-    let first_line = resolved.lines().next().unwrap_or("").trim().to_string();
-    if first_line.is_empty() {
-        bail!("yt-dlp returned empty output for {}", url);
-    }
-    Ok(first_line)
+    parse_status_and_url(&String::from_utf8_lossy(&output.stdout))
+        .ok_or_else(|| anyhow::anyhow!("yt-dlp returned empty output for {}", url))
+}
+
+/// Returns a directly playable URL.
+/// HLS/IPTV URLs are returned unchanged. YouTube/Twitch are resolved via yt-dlp.
+pub async fn resolve_url(url: &str) -> Result<String> {
+    Ok(resolve_url_with_status(url).await?.0)
 }
 
 /// Fetches the title of a video via yt-dlp.
@@ -597,6 +622,63 @@ mod tests {
         // if yt-dlp exits non-zero for upcoming despite the flag, the stderr
         // fallback still yields Upcoming(None).
         let status = probe_live("https://www.youtube.com/watch?v=jNQXAC9IVRw").await;
+        assert_eq!(status, LiveStatus::NotLive);
+    }
+
+    #[test]
+    fn parse_status_and_url_two_lines() {
+        let (url, status) = parse_status_and_url("was_live\nhttps://example.com/v.mp4\n").unwrap();
+        assert_eq!(url, "https://example.com/v.mp4");
+        assert_eq!(status, LiveStatus::WasLive);
+    }
+
+    #[test]
+    fn parse_status_and_url_three_lines_takes_first_url() {
+        let (url, status) =
+            parse_status_and_url("is_live\nhttps://a.test/video\nhttps://a.test/audio\n").unwrap();
+        assert_eq!(url, "https://a.test/video");
+        assert_eq!(status, LiveStatus::Live);
+    }
+
+    #[test]
+    fn parse_status_and_url_na_status_is_unknown() {
+        let (url, status) = parse_status_and_url("NA\nhttps://a.test/v.m3u8\n").unwrap();
+        assert_eq!(status, LiveStatus::Unknown);
+        assert_eq!(url, "https://a.test/v.m3u8");
+    }
+
+    #[test]
+    fn parse_status_and_url_missing_url_line_is_none() {
+        assert_eq!(parse_status_and_url("was_live\n"), None);
+        assert_eq!(parse_status_and_url(""), None);
+    }
+
+    #[tokio::test]
+    async fn resolve_url_with_status_passthrough_for_hls() {
+        let (url, status) = resolve_url_with_status("https://example.com/stream.m3u8")
+            .await
+            .unwrap();
+        assert_eq!(url, "https://example.com/stream.m3u8");
+        assert_eq!(status, LiveStatus::Unknown);
+    }
+
+    #[tokio::test]
+    async fn resolve_url_with_status_rejects_non_http_scheme() {
+        let err = resolve_url_with_status("ftp://example.com/stream.m3u8")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("invalid URL scheme"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires yt-dlp and network"]
+    async fn resolve_url_with_status_real_vod_is_not_live() {
+        // "Me at the zoo" — pins the two-line `--print live_status --print urls`
+        // output shape and print ordering against real yt-dlp.
+        let (url, status) = resolve_url_with_status("https://www.youtube.com/watch?v=jNQXAC9IVRw")
+            .await
+            .unwrap();
+        assert!(url.starts_with("http"), "got: {url}");
         assert_eq!(status, LiveStatus::NotLive);
     }
 
