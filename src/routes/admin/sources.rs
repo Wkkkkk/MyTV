@@ -93,7 +93,14 @@ pub async fn source_test(
         .map_err(internal_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    crate::health::probe_source(&state.pool, &state.http_client, &state.cors_cache, &src).await;
+    crate::health::probe_source(
+        &state.pool,
+        &state.http_client,
+        &state.cors_cache,
+        &state.live_cache,
+        &src,
+    )
+    .await;
 
     // Unlike playlist_item_test (VOD items skip the proxy entirely, so their host is
     // marked Direct outright), a live source still proxies its manifest and only loads
