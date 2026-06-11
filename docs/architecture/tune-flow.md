@@ -15,8 +15,8 @@ flowchart TD
 
     live --> src["list_active_for_channel\nordered by priority ASC"]
     src --> iter{"for each source"}
-    iter --> res1["resolver::resolve_url(src.url)"]
-    res1 -->|ok| fin{"is_finished_live?"}
+    iter --> res1["resolver::resolve_url_with_status(src.url)"]
+    res1 -->|ok| fin{"is_ended_live?"}
     fin -->|no| ok1(["200 { …, skip_proxy, ended: false }"])
     fin -->|yes| conv["spawn live→VOD conversion"]
     conv --> okE(["200 { url: '', …, ended: true }"])
@@ -60,8 +60,8 @@ flowchart TD
 
     nlive --> src["list_active_for_channel\nfilter out failed_url"]
     src --> iter{"for each remaining source"}
-    iter --> res1["resolver::resolve_url"]
-    res1 -->|ok| fin{"is_finished_live?"}
+    iter --> res1["resolver::resolve_url_with_status"]
+    res1 -->|ok| fin{"is_ended_live?"}
     fin -->|no| ok1(["200 { …, ended: false }"])
     fin -->|yes| conv["spawn live→VOD conversion"]
     conv --> okE(["200 { url: '', …, ended: true }"])
@@ -77,7 +77,7 @@ flowchart TD
 
 ## Ended Live → VOD Conversion
 
-When `resolve_url` succeeds but `resolver::is_finished_live` detects a `force_finished/1` manifest (a YouTube live broadcast that has ended), the handler does **not** return the dead manifest. Instead it:
+Resolution returns the URL plus yt-dlp's `live_status`; the handler treats the broadcast as ended when the status is `was_live` (recording processed) or `post_live` (just ended), or — as a fallback for extractors without `live_status` — when `resolver::is_finished_live` detects a `force_finished/1` manifest. In any of these cases, the handler does **not** return the dead manifest. Instead it:
 
 1. Fires a detached `tokio::spawn` task (`spawn_live_to_vod_conversion`) and returns `TuneResponse { ended: true, url: "" }` immediately.
 2. The frontend shows a brief "Stream ended — switching…" overlay and auto-advances to the next channel in the lineup (loop-guarded, cancelled on a manual tune).
