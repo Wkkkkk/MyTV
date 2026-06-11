@@ -130,6 +130,29 @@ fn is_ended_live(status: resolver::LiveStatus, resolved_url: &str) -> bool {
     ) || resolver::is_finished_live(resolved_url)
 }
 
+enum LiveOutcome {
+    Play,
+    Ended,
+    Waiting,
+}
+
+/// Maps a resolver result to the action `next_live` takes. `None` means "not
+/// usable" (a genuine failure, or an empty URL whose status is not
+/// offline/upcoming) — the caller should try the next source.
+fn classify_live_outcome(url: &str, status: resolver::LiveStatus) -> Option<LiveOutcome> {
+    if is_ended_live(status, url) {
+        return Some(LiveOutcome::Ended);
+    }
+    if url.is_empty() {
+        return matches!(
+            status,
+            resolver::LiveStatus::Offline | resolver::LiveStatus::Upcoming(_)
+        )
+        .then_some(LiveOutcome::Waiting);
+    }
+    Some(LiveOutcome::Play)
+}
+
 async fn next_live(
     state: &AppState,
     ch: &channel::Channel,
@@ -139,30 +162,51 @@ async fn next_live(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let mut saw_waiting = false;
     for src in sources
         .iter()
         .filter(|s| Some(s.url.as_str()) != failed_url)
     {
         match resolver::resolve_url_with_status(&src.url).await {
-            Ok((url, status)) => {
-                if is_ended_live(status, &url) {
+            Ok((url, status)) => match classify_live_outcome(&url, status) {
+                Some(LiveOutcome::Ended) => {
                     spawn_live_to_vod_conversion(state, ch.id, ch.name.clone(), src.url.clone());
                     return Ok(tune_response_ended(ch));
                 }
-                return Ok(tune_response(
-                    ch,
-                    url,
-                    0,
-                    resolver::needs_resolution(&src.url),
-                ));
-            }
+                Some(LiveOutcome::Play) => {
+                    crate::health::record_source_liveness(&state.pool, src, true).await;
+                    return Ok(tune_response(
+                        ch,
+                        url,
+                        0,
+                        resolver::needs_resolution(&src.url),
+                    ));
+                }
+                Some(LiveOutcome::Waiting) => {
+                    saw_waiting = true;
+                    // Offline = was live, now stopped → counts as a liveness failure.
+                    // Upcoming = scheduled, not yet started → not a fault, no health write.
+                    if status == resolver::LiveStatus::Offline {
+                        crate::health::record_source_liveness(&state.pool, src, false).await;
+                    }
+                }
+                None => {
+                    tracing::warn!(url = %src.url, ?status, "resolver returned no usable URL")
+                }
+            },
             Err(e) => {
-                // Idea #38 seam: Upcoming/Offline sources fail resolution and land here.
+                // Hard resolver errors (timeout, unrecognized failure) are not fed to
+                // liveness — only a clean Offline status penalizes a source.
                 tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source")
             }
         }
     }
-    Err(StatusCode::SERVICE_UNAVAILABLE)
+
+    if saw_waiting {
+        Ok(tune_response_waiting(ch))
+    } else {
+        Err(StatusCode::SERVICE_UNAVAILABLE)
+    }
 }
 
 /// DB-only conversion of an ended live channel into a VOD loop: append the
@@ -921,6 +965,48 @@ mod tests {
 
         let err = tune_vod_at(&state, &ch, 1000).await.unwrap_err();
         assert_eq!(err, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn classify_live_outcome_decision() {
+        use crate::media::resolver::LiveStatus::*;
+        assert!(matches!(
+            classify_live_outcome("https://x/v.m3u8", Live),
+            Some(LiveOutcome::Play)
+        ));
+        assert!(matches!(
+            classify_live_outcome("https://x/v.m3u8", Unknown),
+            Some(LiveOutcome::Play)
+        ));
+        assert!(matches!(
+            classify_live_outcome("https://x/v.mp4", WasLive),
+            Some(LiveOutcome::Ended)
+        ));
+        assert!(matches!(
+            classify_live_outcome("https://x/a/force_finished/1/i.m3u8", Unknown),
+            Some(LiveOutcome::Ended)
+        ));
+        assert!(matches!(
+            classify_live_outcome("https://x/v.m3u8", NotLive),
+            Some(LiveOutcome::Play)
+        ));
+        assert!(matches!(
+            classify_live_outcome("https://x/v.mp4", PostLive),
+            Some(LiveOutcome::Ended)
+        ));
+        assert!(matches!(
+            classify_live_outcome("", Offline),
+            Some(LiveOutcome::Waiting)
+        ));
+        assert!(matches!(
+            classify_live_outcome("", Upcoming(None)),
+            Some(LiveOutcome::Waiting)
+        ));
+        assert!(matches!(
+            classify_live_outcome("", Upcoming(Some(1234))),
+            Some(LiveOutcome::Waiting)
+        ));
+        assert!(classify_live_outcome("", Unknown).is_none());
     }
 
     #[test]
