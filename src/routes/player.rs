@@ -183,20 +183,21 @@ async fn next_live(
                     ));
                 }
                 Some(LiveOutcome::Waiting) => {
+                    // Offline/Upcoming: keep the source ACTIVE so the backoff poll can
+                    // resume it the moment the stream returns. Persisting "offline" to
+                    // source health (and the eventual auto-disable) is owned by the
+                    // liveness-aware background checker — disabling here would drop the
+                    // source from list_active_for_channel and break resume mid-backoff.
                     saw_waiting = true;
-                    // Offline = was live, now stopped → counts as a liveness failure.
-                    // Upcoming = scheduled, not yet started → not a fault, no health write.
-                    if status == resolver::LiveStatus::Offline {
-                        crate::health::record_source_liveness(&state.pool, src, false).await;
-                    }
                 }
                 None => {
                     tracing::warn!(url = %src.url, ?status, "resolver returned no usable URL")
                 }
             },
             Err(e) => {
-                // Hard resolver errors (timeout, unrecognized failure) are not fed to
-                // liveness — only a clean Offline status penalizes a source.
+                // Liveness lifecycle (disable/re-enable) is owned by the background
+                // health checker; the tune path only ever confirms liveness, never
+                // penalizes — so a hard resolver error just skips to the next source.
                 tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source")
             }
         }
