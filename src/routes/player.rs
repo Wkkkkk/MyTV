@@ -102,6 +102,17 @@ fn tune_response_ended(ch: &channel::Channel) -> Json<TuneResponse> {
     })
 }
 
+/// A live source is "ended" when yt-dlp reports the broadcast finished
+/// (was_live: recording processed; post_live: just ended) or, as a fallback
+/// for extractors without live_status, when the resolved manifest carries the
+/// force_finished marker.
+fn is_ended_live(status: resolver::LiveStatus, resolved_url: &str) -> bool {
+    matches!(
+        status,
+        resolver::LiveStatus::WasLive | resolver::LiveStatus::PostLive
+    ) || resolver::is_finished_live(resolved_url)
+}
+
 async fn next_live(
     state: &AppState,
     ch: &channel::Channel,
@@ -115,9 +126,9 @@ async fn next_live(
         .iter()
         .filter(|s| Some(s.url.as_str()) != failed_url)
     {
-        match resolver::resolve_url(&src.url).await {
-            Ok(url) => {
-                if resolver::is_finished_live(&url) {
+        match resolver::resolve_url_with_status(&src.url).await {
+            Ok((url, status)) => {
+                if is_ended_live(status, &url) {
                     spawn_live_to_vod_conversion(state, ch.id, ch.name.clone(), src.url.clone());
                     return Ok(tune_response_ended(ch));
                 }
@@ -129,6 +140,7 @@ async fn next_live(
                 ));
             }
             Err(e) => {
+                // Idea #38 seam: Upcoming/Offline sources fail resolution and land here.
                 tracing::warn!(url = %src.url, error = %e, "resolver failed, trying next source")
             }
         }
@@ -891,6 +903,20 @@ mod tests {
 
         let err = tune_vod_at(&state, &ch, 1000).await.unwrap_err();
         assert_eq!(err, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn is_ended_live_decision() {
+        use crate::media::resolver::LiveStatus::*;
+        assert!(is_ended_live(WasLive, "https://x.test/v.mp4"));
+        assert!(is_ended_live(PostLive, "https://x.test/v.m3u8"));
+        assert!(!is_ended_live(Live, "https://x.test/v.m3u8"));
+        assert!(!is_ended_live(NotLive, "https://x.test/v.mp4"));
+        assert!(!is_ended_live(Unknown, "https://x.test/v.m3u8"));
+        assert!(is_ended_live(
+            Unknown,
+            "https://r5---sn.googlevideo.com/a/force_finished/1/b/index.m3u8"
+        ));
     }
 
     // ── resolve_location ─────────────────────────────────────────────────────
