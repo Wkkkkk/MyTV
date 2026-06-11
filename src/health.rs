@@ -119,6 +119,36 @@ where
     ok
 }
 
+/// Records a single liveness probe result against a source's health, reusing
+/// the same disable/re-enable lifecycle as the background checker. `ok = true`
+/// means the stream is playable (resets failures, re-enables); `ok = false`
+/// means offline/ended (counts toward the auto-disable threshold). Used by the
+/// interactive tune path so an active poll doubles as a liveness signal.
+pub async fn record_source_liveness(pool: &SqlitePool, src: &Source, ok: bool) {
+    let (new_failures, action) = process_result(src.is_active, src.consecutive_failures, ok);
+    let is_active_change = match action {
+        HealthAction::Disable => Some(false),
+        HealthAction::Reenable => Some(true),
+        HealthAction::None => None,
+    };
+    let status: &'static str = if ok { "ok" } else { "error" };
+    let reason = if ok { None } else { Some("not currently live") };
+    let url = &src.url;
+    if let Err(e) =
+        source::update_health(pool, src.id, status, reason, new_failures, is_active_change).await
+    {
+        tracing::error!("health: failed to record liveness for {url}: {e}");
+        return;
+    }
+    match action {
+        HealthAction::Disable => {
+            tracing::warn!("health: {url} auto-disabled after {new_failures} offline probes")
+        }
+        HealthAction::Reenable => tracing::info!("health: {url} re-enabled (live again)"),
+        HealthAction::None => {}
+    }
+}
+
 /// Probes a source's health and updates stats without touching `is_active`.
 /// Used by the admin Test button — respects the admin's manual enable/disable choice.
 pub async fn probe_source(
@@ -699,6 +729,48 @@ mod tests {
             "ep3: different CDN host must not be deduplicated"
         );
         assert_eq!(probed_hosts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_record_source_liveness_disables_then_reenables() {
+        use crate::model::{channel, source};
+        let pool = crate::db::connect("sqlite::memory:").await.unwrap();
+        let ch = channel::create(
+            &pool,
+            channel::NewChannel {
+                name: "T".into(),
+                category: "t".into(),
+                logo_url: None,
+                channel_type: channel::ChannelType::Live,
+                sort_order: 0,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap();
+        let mut src = source::create(
+            &pool,
+            source::NewSource {
+                channel_id: ch.id,
+                kind: source::SourceKind::YoutubeLive,
+                url: "https://youtube.com/watch?v=x".into(),
+                priority: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        for _ in 0..FAILURE_THRESHOLD {
+            record_source_liveness(&pool, &src, false).await;
+            src = source::get(&pool, src.id).await.unwrap().unwrap();
+        }
+        assert!(!src.is_active, "disabled after threshold offline probes");
+        assert_eq!(src.consecutive_failures, FAILURE_THRESHOLD);
+
+        record_source_liveness(&pool, &src, true).await;
+        let after = source::get(&pool, src.id).await.unwrap().unwrap();
+        assert!(after.is_active, "re-enabled when live again");
+        assert_eq!(after.consecutive_failures, 0);
     }
 
     #[tokio::test]
