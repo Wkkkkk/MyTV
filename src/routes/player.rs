@@ -160,10 +160,12 @@ async fn convert_channel_to_vod_loop(
     duration_secs: i64,
     anchor: chrono::DateTime<chrono::Utc>,
 ) -> anyhow::Result<()> {
-    let Some(ch) = channel::get(pool, channel_id).await? else {
-        anyhow::bail!("channel {channel_id} not found");
-    };
-    if ch.channel_type() == ChannelType::VodLoop {
+    // Atomic claim first: only the caller that flips live→vod_loop proceeds to
+    // append the recording. A concurrent or repeat tune (two tunes can both
+    // observe the ended broadcast before either converts) loses the claim and
+    // exits here, so the recording is never inserted twice. The flip is also the
+    // idempotency gate — an already-converted channel is left untouched.
+    if !channel::set_type_and_anchor_if_live(pool, channel_id, anchor).await? {
         return Ok(());
     }
     playlist_item::create(
@@ -177,7 +179,6 @@ async fn convert_channel_to_vod_loop(
         },
     )
     .await?;
-    channel::set_type_and_anchor(pool, channel_id, ChannelType::VodLoop, Some(anchor)).await?;
     source::deactivate_all_for_channel(pool, channel_id).await?;
     Ok(())
 }
@@ -1079,6 +1080,54 @@ mod tests {
                 .len(),
             1,
             "second conversion must not append a duplicate item"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_convert_channel_to_vod_loop_concurrent_appends_once() {
+        let state = test_state().await;
+        let ch = make_live_channel(&state).await;
+        source::create(
+            &state.pool,
+            source::NewSource {
+                channel_id: ch.id,
+                kind: source::SourceKind::YoutubeLive,
+                url: "https://www.youtube.com/live/abc123".into(),
+                priority: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        let anchor = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let (a, b) = tokio::join!(
+            convert_channel_to_vod_loop(
+                &state.pool,
+                ch.id,
+                "Live Test",
+                "https://www.youtube.com/watch?v=abc123",
+                212,
+                anchor,
+            ),
+            convert_channel_to_vod_loop(
+                &state.pool,
+                ch.id,
+                "Live Test",
+                "https://www.youtube.com/watch?v=abc123",
+                212,
+                anchor,
+            ),
+        );
+        a.unwrap();
+        b.unwrap();
+
+        let items = playlist_item::list_active_for_channel(&state.pool, ch.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            items.len(),
+            1,
+            "two racing conversions must append exactly one item"
         );
     }
 }

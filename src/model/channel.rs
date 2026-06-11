@@ -138,6 +138,28 @@ pub async fn set_type_and_anchor(
     Ok(())
 }
 
+/// Atomically flip a channel from `live` to `vod_loop`, setting the loop anchor.
+/// Returns `true` only for the caller that performs the transition; a channel
+/// that is already `vod_loop` (a concurrent or repeat conversion) yields
+/// `false` and is left untouched. SQLite serializes the conditional `UPDATE`,
+/// so this is the gate that keeps an ended-live channel — and its recording —
+/// from being converted more than once.
+pub async fn set_type_and_anchor_if_live(
+    pool: &SqlitePool,
+    id: i64,
+    loop_anchor: DateTime<Utc>,
+) -> Result<bool> {
+    let rows = sqlx::query(
+        "UPDATE channels SET type = 'vod_loop', loop_anchor = ? WHERE id = ? AND type = 'live'",
+    )
+    .bind(loop_anchor)
+    .bind(id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(rows == 1)
+}
+
 /// Fetch a channel by id.
 pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Channel>> {
     sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = ?")
@@ -318,5 +340,47 @@ mod tests {
         let updated = get(&pool, ch.id).await.unwrap().unwrap();
         assert_eq!(updated.channel_type(), ChannelType::VodLoop);
         assert_eq!(updated.loop_anchor, Some(anchor));
+    }
+
+    #[tokio::test]
+    async fn test_set_type_and_anchor_if_live_claims_exactly_once() {
+        use chrono::TimeZone;
+        let pool = test_pool().await;
+        let ch = create(&pool, live("Race", "c")).await.unwrap();
+
+        let anchor = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+        assert!(
+            set_type_and_anchor_if_live(&pool, ch.id, anchor)
+                .await
+                .unwrap(),
+            "first claim on a live channel must win"
+        );
+        let after = get(&pool, ch.id).await.unwrap().unwrap();
+        assert_eq!(after.channel_type(), ChannelType::VodLoop);
+        assert_eq!(after.loop_anchor, Some(anchor));
+
+        let later = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        assert!(
+            !set_type_and_anchor_if_live(&pool, ch.id, later)
+                .await
+                .unwrap(),
+            "second claim on an already-converted channel must lose"
+        );
+        let unchanged = get(&pool, ch.id).await.unwrap().unwrap();
+        assert_eq!(
+            unchanged.loop_anchor,
+            Some(anchor),
+            "a lost claim must not move the anchor"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_type_and_anchor_if_live_missing_channel_is_false() {
+        use chrono::TimeZone;
+        let pool = test_pool().await;
+        let anchor = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+        assert!(!set_type_and_anchor_if_live(&pool, 9999, anchor)
+            .await
+            .unwrap());
     }
 }
