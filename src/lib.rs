@@ -8,6 +8,7 @@ pub mod metrics;
 pub mod model;
 mod routes;
 pub mod ssrf;
+pub mod status;
 
 use axum::{
     extract::Request,
