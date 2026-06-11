@@ -123,6 +123,20 @@ pub enum LiveStatus {
     Unknown,
 }
 
+/// Maps a yt-dlp `live_status` token to a `LiveStatus`. Carries no timestamp —
+/// `is_upcoming` maps to `Upcoming(None)`; callers that also have a
+/// `release_timestamp` attach it themselves.
+pub fn live_status_from_str(token: &str) -> LiveStatus {
+    match token {
+        "is_live" => LiveStatus::Live,
+        "is_upcoming" => LiveStatus::Upcoming(None),
+        "post_live" => LiveStatus::PostLive,
+        "was_live" => LiveStatus::WasLive,
+        "not_live" => LiveStatus::NotLive,
+        _ => LiveStatus::Unknown,
+    }
+}
+
 /// Maps `yt-dlp --print "%(live_status)s|%(release_timestamp)s"` output to a
 /// `LiveStatus`. On success, stdout is authoritative; `NA`/`None` (extractors
 /// without a live_status) are Unknown. On failure, "not currently live" stderr
@@ -134,13 +148,9 @@ pub fn interpret_live_status(success: bool, stdout: &str, stderr: &str) -> LiveS
     if success {
         let out = stdout.lines().next().unwrap_or("").trim();
         let (status, ts) = out.split_once('|').unwrap_or((out, "NA"));
-        return match status {
-            "is_live" => LiveStatus::Live,
-            "is_upcoming" => LiveStatus::Upcoming(ts.parse::<i64>().ok()),
-            "post_live" => LiveStatus::PostLive,
-            "was_live" => LiveStatus::WasLive,
-            "not_live" => LiveStatus::NotLive,
-            _ => LiveStatus::Unknown,
+        return match live_status_from_str(status) {
+            LiveStatus::Upcoming(_) => LiveStatus::Upcoming(ts.parse::<i64>().ok()),
+            other => other,
         };
     }
     let err = stderr.to_ascii_lowercase();
@@ -483,6 +493,19 @@ mod tests {
         let url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
         let id = fetch_video_id(url).await.unwrap();
         assert_eq!(id, "dQw4w9WgXcQ");
+    }
+
+    #[test]
+    fn live_status_from_str_maps_tokens() {
+        use LiveStatus::*;
+        assert_eq!(live_status_from_str("is_live"), Live);
+        assert_eq!(live_status_from_str("is_upcoming"), Upcoming(None));
+        assert_eq!(live_status_from_str("post_live"), PostLive);
+        assert_eq!(live_status_from_str("was_live"), WasLive);
+        assert_eq!(live_status_from_str("not_live"), NotLive);
+        assert_eq!(live_status_from_str("NA"), Unknown);
+        assert_eq!(live_status_from_str("None"), Unknown);
+        assert_eq!(live_status_from_str(""), Unknown);
     }
 
     #[test]
