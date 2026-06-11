@@ -24,6 +24,7 @@
     #player-panel video{width:100%;max-height:50vh;display:block}
     #player-error{display:none;padding:32px;text-align:center;color:#e94560;background:#000;font-size:1rem}
     #player-ended{display:none;padding:32px;text-align:center;color:#fff;background:#000;font-size:1rem}
+    #player-waiting{display:none;padding:32px;text-align:center;color:#fff;background:#000;font-size:1rem}
 
     /* ── player info bar ──────────────────────────────────────────── */
     #player-info{display:none;align-items:center;gap:10px;padding:8px 12px;
@@ -127,6 +128,9 @@
       let dashErrorFired = false;
       var endedHops = 0;
       var endedAdvanceGen = 0;
+      var waitingGen = 0;
+      var waitingStep = 0;
+      var WAITING_BACKOFF = [15, 30, 60, 120];
 
       function hashColor(str) {
         var h = 0;
@@ -368,8 +372,36 @@
         }, 1500);
       }
 
+      function enterWaitingState() {
+        if (video) video.style.display = 'none';
+        currentUrl = null; // avoid stale ?failed_url= if a late onerror fires while waiting
+        var el = document.getElementById('player-waiting');
+        if (waitingStep >= WAITING_BACKOFF.length) {
+          if (el) { el.textContent = 'Channel offline'; el.style.display = 'block'; }
+          return;
+        }
+        if (el) { el.textContent = 'Waiting for stream…'; el.style.display = 'block'; }
+        var delay = WAITING_BACKOFF[waitingStep];
+        waitingStep++;
+        var gen = ++waitingGen;
+        if (typeof debugLog === 'function') debugLog('info', 'waiting for stream, retry in ' + delay + 's');
+        setTimeout(function() {
+          if (gen !== waitingGen || !currentChannelId) return;
+          fetch('/channel/' + currentChannelId + '/tune')
+            .then(function(r) { if (!r.ok) { showPlayerError(); return null; } return r.json(); })
+            .then(function(d) { if (gen === waitingGen) applyTuneResponse(d); })
+            .catch(function() { showPlayerError(); });
+        }, delay * 1000);
+      }
+
       function applyTuneResponse(d) {
         if (!d) return;
+        if (d.waiting) { enterWaitingState(); return; }
+        waitingStep = 0;
+        waitingGen++;
+        var wEl = document.getElementById('player-waiting');
+        if (wEl) wEl.style.display = 'none';
+        if (video) video.style.display = '';
         if (d.ended) { advanceEndedChannel(); return; }
         endedHops = 0;
         if (d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy);
@@ -380,6 +412,11 @@
         currentUrl = null;
         hidePlayerError();
         endedAdvanceGen++;
+        waitingGen++;
+        waitingStep = 0;
+        var waitingNotice = document.getElementById('player-waiting');
+        if (waitingNotice) waitingNotice.style.display = 'none';
+        if (video) video.style.display = '';
         var endedNotice = document.getElementById('player-ended');
         if (endedNotice) endedNotice.style.display = 'none';
         if (hls) hls.stopLoad();
