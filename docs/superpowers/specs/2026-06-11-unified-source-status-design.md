@@ -103,7 +103,11 @@ The unified Status badge presents both lanes with one vocabulary; only the *gati
   - `youtube_live` *active* rows keep **lazy-loading** the Status via the repurposed `GET /admin/live-status?url=...` endpoint (now returns the unified Status badge), so yt-dlp never blocks page render.
   - `youtube_live` *disabled* rows render ⏸ Disabled inline — no probe.
 - **VOD playlist-item row** (`templates/admin/partials/playlist_item_row.html`): same single Status column (Disabled / OK / Down / Unchecked).
-- **Guide** (`templates/partials/epg_content.html`, `routes/guide/badges.rs`, `routes/guide/data.rs`): channel row shows one aggregated **Status** + Budget. Aggregate = the status of the highest-priority **tunable** source (i.e. what you'd get if you tuned); all sources down → Down; all disabled → Disabled. The guide reads **only persisted health + warm caches and never probes** (preserves today's non-blocking guide). For `youtube_live` the aggregate uses the warm `LiveStatus` cache; a cold cache yields · Unchecked (never Down).
+- **Guide** (`templates/partials/epg_content.html`, `routes/guide/badges.rs`, `routes/guide/data.rs`): channel row shows one aggregated **Status** + Budget. Aggregate = the **most optimistic** status across the channel's sources (best-case wins), by this order (best → worst):
+
+  `Live` = `OK` > `Upcoming` > `Recorded` > `Offline` > `Unchecked` > `Down` > `Disabled`
+
+  So a channel with one Live source and one Down source shows ● Live; all-down → ✕ Down; all-disabled → ⏸ Disabled; no sources → · Unchecked. The guide reads **only persisted health + warm caches and never probes** (preserves today's non-blocking guide). For `youtube_live` the per-source status uses the warm `LiveStatus` cache; a cold cache yields · Unchecked (never Down).
 
 ## Data model
 
