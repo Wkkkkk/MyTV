@@ -50,11 +50,15 @@ pub struct AdminSourceRow {
     pub url: String,
     pub priority: i64,
     pub is_active: bool,
-    pub last_status: Option<String>,
-    pub consecutive_failures: i64,
     pub failure_reason: Option<String>,
     pub budget_badge_class: &'static str,
     pub budget_badge_char: &'static str,
+    pub status_color: &'static str,
+    pub status_glyph: &'static str,
+    pub status_title: String,
+    /// True only for an active `youtube_live` source: the row lazy-loads its
+    /// Status from `/admin/live-status` (yt-dlp probe) instead of rendering inline.
+    pub status_lazy: bool,
 }
 
 pub struct AdminPlaylistItemRow {
@@ -107,17 +111,30 @@ impl From<source::Source> for AdminSourceRow {
     fn from(s: source::Source) -> Self {
         let (budget_badge_class, budget_badge_char) =
             crate::budget::budget_badge(crate::budget::BudgetStatus::Unknown);
+        let status_lazy = s.is_active && s.kind == "youtube_live";
+        // Inline status for non-lazy rows (disabled, or non-youtube). Lazy rows
+        // ignore these fields and fetch the badge via HTMX.
+        let status = crate::status::compute(
+            s.is_active,
+            &s.kind,
+            s.last_status.as_deref(),
+            s.failure_reason.as_deref(),
+            None,
+        );
+        let badge = crate::status::status_badge(&status);
         Self {
             id: s.id,
             kind: s.kind,
             url: s.url,
             priority: s.priority,
             is_active: s.is_active,
-            last_status: s.last_status,
-            consecutive_failures: s.consecutive_failures,
             failure_reason: s.failure_reason,
             budget_badge_class,
             budget_badge_char,
+            status_color: badge.color,
+            status_glyph: badge.glyph,
+            status_title: badge.title,
+            status_lazy,
         }
     }
 }

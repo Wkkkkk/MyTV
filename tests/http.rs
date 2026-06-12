@@ -968,6 +968,22 @@ async fn channel_detail_returns_200_with_budget_badge() {
     );
 }
 
+#[tokio::test]
+async fn channel_detail_renders_status_column() {
+    let response = app()
+        .await
+        .oneshot(authed("/admin/channels/1"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("<th>Status</th>"),
+        "source table has a Status header"
+    );
+    assert!(!body.contains("<th>Live</th>"), "old Live header removed");
+}
+
 // Discover page
 
 #[tokio::test]
