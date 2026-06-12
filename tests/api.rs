@@ -465,6 +465,7 @@ async fn discover_resolve_bad_url_is_422() {
         .await
         .unwrap();
     assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body_json(r).await["error"], "invalid or unresolvable URL");
 }
 
 #[tokio::test]
@@ -496,6 +497,10 @@ async fn discover_channel_non_youtube_is_422() {
         .await
         .unwrap();
     assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body_json(r).await["error"],
+        "not a recognized YouTube channel URL"
+    );
 }
 
 #[tokio::test]
