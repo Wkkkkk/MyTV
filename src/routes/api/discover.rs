@@ -235,9 +235,11 @@ pub async fn add(
 fn map_add_status(status: StatusCode) -> ApiError {
     match status {
         StatusCode::NOT_FOUND => ApiError::NotFound,
-        StatusCode::UNPROCESSABLE_ENTITY => {
-            ApiError::Validation("invalid discover-add request".into())
-        }
+        StatusCode::UNPROCESSABLE_ENTITY => ApiError::Validation(
+            "invalid discover-add request: check url (must be http/https), source_kind, \
+             and (for a new channel) a non-empty name and a valid type"
+                .into(),
+        ),
         _ => ApiError::Internal,
     }
 }
