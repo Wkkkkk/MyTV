@@ -203,6 +203,107 @@ async fn scenario_crud(client: &ApiClient, token: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Create a live channel, attach a source with a harmless fake URL, tune, and
+/// assert the returned `source_id`/`source_url` match the source we created
+/// (Spec 1 observability). `tune` does not probe the stream — a non-YouTube
+/// https URL resolves to itself with status Unknown — so this is deterministic
+/// and needs no real stream. Hard-fail.
+async fn scenario_tune(client: &ApiClient, token: &str) -> Result<(), String> {
+    use reqwest::Method;
+    let name = e2e_name("tune", token);
+    let fake_url = "https://example.invalid/__e2e__.m3u8";
+
+    // Create live channel
+    let resp = client
+        .send(
+            Method::POST,
+            "/api/admin/channels",
+            Some(serde_json::json!({
+                "name": name, "category": "__e2e__", "type": "live", "sort_order": 0
+            })),
+        )
+        .await
+        .map_err(|e| format!("create channel: {e}"))?;
+    if resp.status().as_u16() != 201 {
+        return Err(format!("create channel: got {}", resp.status()));
+    }
+    let ch: mytv::model::channel::Channel = resp
+        .json()
+        .await
+        .map_err(|e| format!("channel decode: {e}"))?;
+    let cid = ch.id;
+
+    // Helper to guarantee channel cleanup before returning an error.
+    async fn cleanup(client: &ApiClient, cid: i64) {
+        let _ = client
+            .send(
+                reqwest::Method::DELETE,
+                &format!("/api/admin/channels/{cid}"),
+                None,
+            )
+            .await;
+    }
+
+    // Attach a source
+    let resp = match client
+        .send(
+            Method::POST,
+            &format!("/api/admin/channels/{cid}/sources"),
+            Some(serde_json::json!({ "url": fake_url })),
+        )
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            cleanup(client, cid).await;
+            return Err(format!("create source: {e}"));
+        }
+    };
+    if resp.status().as_u16() != 201 {
+        let s = resp.status();
+        cleanup(client, cid).await;
+        return Err(format!("create source: got {s}"));
+    }
+    let src: mytv::model::source::Source = match resp.json().await {
+        Ok(s) => s,
+        Err(e) => {
+            cleanup(client, cid).await;
+            return Err(format!("source decode: {e}"));
+        }
+    };
+
+    // Tune (public player route) and assert source_id / source_url
+    let result: Result<(), String> = async {
+        let resp = client
+            .send(Method::GET, &format!("/channel/{cid}/tune"), None)
+            .await
+            .map_err(|e| format!("tune: {e}"))?;
+        if resp.status().as_u16() != 200 {
+            return Err(format!("tune: expected 200, got {}", resp.status()));
+        }
+        let body: serde_json::Value = resp.json().await.map_err(|e| format!("tune decode: {e}"))?;
+        if body["source_id"].as_i64() != Some(src.id) {
+            return Err(format!(
+                "tune: source_id {:?} != created {}",
+                body["source_id"], src.id
+            ));
+        }
+        if body["source_url"].as_str() != Some(fake_url) {
+            return Err(format!(
+                "tune: source_url {:?} != {fake_url}",
+                body["source_url"]
+            ));
+        }
+        Ok(())
+    }
+    .await;
+
+    cleanup(client, cid).await;
+    result?;
+    println!("✓ scenario 2: tune asserts source_id");
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "e2e against prod — run manually"]
 async fn e2e_smoke() {
@@ -221,6 +322,9 @@ async fn e2e_smoke() {
     let mut auth: Result<(), String> = Ok(());
     if auth.is_ok() {
         auth = scenario_crud(&client, &token).await;
+    }
+    if auth.is_ok() {
+        auth = scenario_tune(&client, &token).await;
     }
 
     let post = sweep(&client).await.unwrap_or(0);
