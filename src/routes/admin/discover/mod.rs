@@ -3,12 +3,8 @@ mod m3u;
 mod youtube;
 
 pub use add::{do_discover_add, DiscoverAddParams};
-// Shared discover internals re-exported for the forthcoming JSON API (later
-// tasks); the row types are already consumed by the HTML template structs.
-#[allow(unused_imports)]
-pub(crate) use m3u::{search as m3u_search, M3uResultRow};
-#[allow(unused_imports)]
-pub(crate) use youtube::{fetch_youtube_channels, fetch_youtube_results, YoutubeResultRow};
+pub(crate) use m3u::M3uResultRow;
+pub(crate) use youtube::YoutubeResultRow;
 
 use askama::Template;
 use axum::{
