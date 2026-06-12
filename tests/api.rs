@@ -542,6 +542,11 @@ async fn discover_youtube_requires_auth() {
     assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
 }
 
+// No equivalent live test for `/discover/youtube`: unlike M3U search (network
+// only), YouTube search also requires a real YOUTUBE_API_KEY, which the test
+// harness intentionally leaves unset (the no-key → 503 path is covered by
+// `discover_youtube_without_api_key_is_503`). Exercise the live YouTube path
+// manually with a configured key.
 #[tokio::test]
 #[ignore = "requires network access — run manually"]
 async fn discover_m3u_live_search() {
