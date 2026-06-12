@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{Html, IntoResponse, Redirect},
 };
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::Utc;
 use serde::Deserialize;
 
 use super::{AdminChannelRow, AdminPlaylistItemRow, AdminSourceRow};
@@ -70,14 +70,15 @@ pub struct ChannelForm {
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-pub(crate) fn parse_loop_anchor(s: &str) -> Option<DateTime<Utc>> {
+fn parse_sort_order(s: &str) -> Result<i64, StatusCode> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
-        return None;
+        Ok(0)
+    } else {
+        trimmed
+            .parse()
+            .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)
     }
-    NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M")
-        .ok()
-        .map(|dt| DateTime::from_naive_utc_and_offset(dt, Utc))
 }
 
 // ── handlers ───────────────────────────────────────────────────────────────
@@ -109,45 +110,21 @@ pub async fn channel_create(
     State(state): State<AppState>,
     Form(form): Form<ChannelForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let channel_type = form
-        .channel_type
-        .parse::<channel::ChannelType>()
-        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-    if form.name.trim().is_empty() || form.category.trim().is_empty() {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    let sort_order = parse_sort_order(&form.sort_order)?;
+    let new = channel::ChannelInput {
+        name: form.name,
+        category: form.category,
+        channel_type: form.channel_type,
+        sort_order,
+        logo_url: Some(form.logo_url),
+        loop_anchor: Some(form.loop_anchor),
     }
-    let sort_order: i64 = if form.sort_order.trim().is_empty() {
-        0
-    } else {
-        form.sort_order
-            .trim()
-            .parse()
-            .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?
-    };
-    let logo_url = if form.logo_url.trim().is_empty() {
-        None
-    } else {
-        Some(form.logo_url.trim().to_string())
-    };
-    let loop_anchor = if channel_type == channel::ChannelType::VodLoop {
-        parse_loop_anchor(&form.loop_anchor).or_else(|| Some(Utc::now()))
-    } else {
-        None
-    };
+    .validate_new()
+    .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
 
-    channel::create(
-        &state.pool,
-        channel::NewChannel {
-            name: form.name.trim().to_string(),
-            category: form.category.trim().to_string(),
-            logo_url,
-            channel_type,
-            sort_order,
-            loop_anchor,
-        },
-    )
-    .await
-    .map_err(internal_error)?;
+    channel::create(&state.pool, new)
+        .await
+        .map_err(internal_error)?;
 
     Ok(Redirect::to("/admin/channels"))
 }
@@ -181,53 +158,26 @@ pub async fn channel_update(
     Path(id): Path<i64>,
     Form(form): Form<ChannelForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let channel_type = form
-        .channel_type
-        .parse::<channel::ChannelType>()
-        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-    if form.name.trim().is_empty() || form.category.trim().is_empty() {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
     let existing = channel::get(&state.pool, id)
         .await
         .map_err(internal_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let sort_order: i64 = if form.sort_order.trim().is_empty() {
-        0
-    } else {
-        form.sort_order
-            .trim()
-            .parse()
-            .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?
-    };
-    let logo_url = if form.logo_url.trim().is_empty() {
-        None
-    } else {
-        Some(form.logo_url.trim().to_string())
-    };
-    let loop_anchor = if channel_type == channel::ChannelType::VodLoop {
-        parse_loop_anchor(&form.loop_anchor)
-            .or(existing.loop_anchor)
-            .or_else(|| Some(Utc::now()))
-    } else {
-        None
-    };
+    let sort_order = parse_sort_order(&form.sort_order)?;
+    let upd = channel::ChannelInput {
+        name: form.name,
+        category: form.category,
+        channel_type: form.channel_type,
+        sort_order,
+        logo_url: Some(form.logo_url),
+        loop_anchor: Some(form.loop_anchor),
+    }
+    .validate_update(existing.loop_anchor)
+    .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
 
-    channel::update(
-        &state.pool,
-        id,
-        channel::UpdateChannel {
-            name: form.name.trim().to_string(),
-            category: form.category.trim().to_string(),
-            logo_url,
-            channel_type,
-            sort_order,
-            loop_anchor,
-        },
-    )
-    .await
-    .map_err(internal_error)?;
+    channel::update(&state.pool, id, upd)
+        .await
+        .map_err(internal_error)?;
 
     Ok(Redirect::to("/admin/channels"))
 }
