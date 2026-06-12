@@ -100,9 +100,7 @@ pub async fn source_test(
         .map_err(internal_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let cors = state.cors_cache.read().await.clone();
-    let mut row: AdminSourceRow = updated.into();
-    row.apply_budget(&cors);
+    let row: AdminSourceRow = super::build_row(updated, &state.cors_cache).await;
 
     render(SourceRowTemplate { src: row })
 }

@@ -29,9 +29,11 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 
+use std::collections::HashMap;
+
 use crate::{
     model::{channel, playlist_item, source},
-    AppState,
+    AppState, CorsCache,
 };
 
 // ── display types ──────────────────────────────────────────────────────────
@@ -76,16 +78,14 @@ pub struct AdminPlaylistItemRow {
     pub status_title: String,
 }
 
-impl AdminPlaylistItemRow {
-    /// Fills the budget badge fields from a CORS-cache snapshot, keyed by this item's URL host.
-    pub fn apply_budget(&mut self, cors_cache: &std::collections::HashMap<String, bool>) {
-        let (class, glyph) = crate::budget::badge_for_url(&self.url, cors_cache);
-        self.budget_badge_class = class;
-        self.budget_badge_char = glyph;
-    }
+/// Admin display rows that derive a network-budget badge from their URL.
+/// `from_model` is the *only* construction path, so a row can never exist
+/// without its badge filled — there is no half-built state to forget.
+pub(crate) trait BudgetRow<T>: Sized {
+    fn from_model(item: T, cors_cache: &HashMap<String, bool>) -> Self;
 }
 
-// ── From impls ─────────────────────────────────────────────────────────────
+// ── From impl ──────────────────────────────────────────────────────────────
 
 impl From<channel::Channel> for AdminChannelRow {
     fn from(ch: channel::Channel) -> Self {
@@ -99,19 +99,10 @@ impl From<channel::Channel> for AdminChannelRow {
     }
 }
 
-impl AdminSourceRow {
-    /// Fills the budget badge fields from a CORS-cache snapshot, keyed by this source's URL host.
-    pub fn apply_budget(&mut self, cors_cache: &std::collections::HashMap<String, bool>) {
-        let (class, glyph) = crate::budget::badge_for_url(&self.url, cors_cache);
-        self.budget_badge_class = class;
-        self.budget_badge_char = glyph;
-    }
-}
-
-impl From<source::Source> for AdminSourceRow {
-    fn from(s: source::Source) -> Self {
+impl BudgetRow<source::Source> for AdminSourceRow {
+    fn from_model(s: source::Source, cors_cache: &HashMap<String, bool>) -> Self {
         let (budget_badge_class, budget_badge_char) =
-            crate::budget::budget_badge(crate::budget::BudgetStatus::Unknown);
+            crate::budget::badge_for_url(&s.url, cors_cache);
         let status_lazy = s.is_active && s.kind == "youtube_live";
         // Inline status for non-lazy rows (disabled, or non-youtube). Lazy rows
         // ignore these fields and fetch the badge via HTMX.
@@ -140,10 +131,10 @@ impl From<source::Source> for AdminSourceRow {
     }
 }
 
-impl From<playlist_item::PlaylistItem> for AdminPlaylistItemRow {
-    fn from(i: playlist_item::PlaylistItem) -> Self {
+impl BudgetRow<playlist_item::PlaylistItem> for AdminPlaylistItemRow {
+    fn from_model(i: playlist_item::PlaylistItem, cors_cache: &HashMap<String, bool>) -> Self {
         let (budget_badge_class, budget_badge_char) =
-            crate::budget::budget_badge(crate::budget::BudgetStatus::Unknown);
+            crate::budget::badge_for_url(&i.url, cors_cache);
         let status = crate::status::compute(
             i.is_active,
             "hls", // playlist items use health only — never the youtube_live live branch
@@ -167,6 +158,29 @@ impl From<playlist_item::PlaylistItem> for AdminPlaylistItemRow {
             status_title: badge.title,
         }
     }
+}
+
+/// Reads the CORS-cache snapshot once and builds a budget-badged row per item.
+/// Callers never touch the cache or fill a badge — `from_model` does both.
+pub(crate) async fn build_rows<R, T, I>(items: I, cors_cache: &CorsCache) -> Vec<R>
+where
+    I: IntoIterator<Item = T>,
+    R: BudgetRow<T>,
+{
+    let cors = cors_cache.read().await.clone();
+    items
+        .into_iter()
+        .map(|it| R::from_model(it, &cors))
+        .collect()
+}
+
+/// Single-row variant of [`build_rows`].
+pub(crate) async fn build_row<R, T>(item: T, cors_cache: &CorsCache) -> R
+where
+    R: BudgetRow<T>,
+{
+    let cors = cors_cache.read().await.clone();
+    R::from_model(item, &cors)
 }
 
 // ── auth ───────────────────────────────────────────────────────────────────
@@ -211,6 +225,117 @@ pub async fn basic_auth(State(state): State<AppState>, request: Request, next: N
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::media::hls::extract_manifest_host;
+    use crate::model::{playlist_item::PlaylistItem, source::Source};
+    use std::collections::HashMap;
+
+    fn sample_source(url: &str) -> Source {
+        Source {
+            id: 1,
+            channel_id: 1,
+            kind: "hls".to_string(),
+            url: url.to_string(),
+            priority: 0,
+            is_active: true,
+            last_checked_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            failure_reason: None,
+        }
+    }
+
+    fn sample_item(url: &str) -> PlaylistItem {
+        PlaylistItem {
+            id: 1,
+            channel_id: 1,
+            title: "ep".to_string(),
+            url: url.to_string(),
+            duration_secs: 60,
+            sort_order: 0,
+            is_active: true,
+            last_checked_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            failure_reason: None,
+        }
+    }
+
+    #[test]
+    fn from_model_source_cache_hit_true_is_direct() {
+        let url = "https://cdn.example.com/live/stream.m3u8";
+        let mut cache = HashMap::new();
+        cache.insert(extract_manifest_host(url), true);
+        let row = AdminSourceRow::from_model(sample_source(url), &cache);
+        assert_eq!(row.budget_badge_class, "budget-direct");
+        assert_eq!(row.budget_badge_char, "⚡");
+    }
+
+    #[test]
+    fn from_model_source_cache_hit_false_is_proxied() {
+        let url = "https://cdn.example.com/live/stream.m3u8";
+        let mut cache = HashMap::new();
+        cache.insert(extract_manifest_host(url), false);
+        let row = AdminSourceRow::from_model(sample_source(url), &cache);
+        assert_eq!(row.budget_badge_class, "budget-proxied");
+        assert_eq!(row.budget_badge_char, "☁");
+    }
+
+    #[test]
+    fn from_model_source_cache_miss_is_unknown() {
+        let url = "https://cdn.example.com/live/stream.m3u8";
+        let row = AdminSourceRow::from_model(sample_source(url), &HashMap::new());
+        assert_eq!(row.budget_badge_class, "budget-unknown");
+        assert_eq!(row.budget_badge_char, "");
+    }
+
+    #[test]
+    fn from_model_playlist_item_cache_hit_true_is_direct() {
+        let url = "https://cdn.example.com/vod/ep1.m3u8";
+        let mut cache = HashMap::new();
+        cache.insert(extract_manifest_host(url), true);
+        let row = AdminPlaylistItemRow::from_model(sample_item(url), &cache);
+        assert_eq!(row.budget_badge_class, "budget-direct");
+        assert_eq!(row.budget_badge_char, "⚡");
+    }
+
+    #[test]
+    fn from_model_playlist_item_cache_miss_is_unknown() {
+        let url = "https://cdn.example.com/vod/ep1.m3u8";
+        let row = AdminPlaylistItemRow::from_model(sample_item(url), &HashMap::new());
+        assert_eq!(row.budget_badge_class, "budget-unknown");
+        assert_eq!(row.budget_badge_char, "");
+    }
+
+    #[tokio::test]
+    async fn build_rows_fills_every_row() {
+        let known = "https://known.example.com/a.m3u8";
+        let unknown = "https://unknown.example.com/b.m3u8";
+        let mut map = HashMap::new();
+        map.insert(extract_manifest_host(known), true);
+        let cache: crate::CorsCache = std::sync::Arc::new(tokio::sync::RwLock::new(map));
+
+        let rows: Vec<AdminSourceRow> =
+            build_rows(vec![sample_source(known), sample_source(unknown)], &cache).await;
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].budget_badge_class, "budget-direct");
+        assert_eq!(rows[0].budget_badge_char, "⚡");
+        assert_eq!(rows[1].budget_badge_class, "budget-unknown");
+        assert_eq!(rows[1].budget_badge_char, "");
+    }
+
+    #[tokio::test]
+    async fn build_row_fills_single_row() {
+        let url = "https://cdn.example.com/live/stream.m3u8";
+        let mut map = HashMap::new();
+        map.insert(extract_manifest_host(url), false);
+        let cache: crate::CorsCache = std::sync::Arc::new(tokio::sync::RwLock::new(map));
+
+        let row: AdminSourceRow = build_row(sample_source(url), &cache).await;
+        assert_eq!(row.budget_badge_class, "budget-proxied");
+        assert_eq!(row.budget_badge_char, "☁");
+    }
 
     #[test]
     fn test_check_basic_auth_valid_credentials() {
