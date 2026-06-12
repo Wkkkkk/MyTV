@@ -489,8 +489,8 @@ async fn test_source_test_returns_row_partial_not_ok_badge() {
         "response should be the row partial"
     );
     assert!(
-        body.contains("\u{25CF}"),
-        "row should render a health dot (\u{25CF})"
+        body.contains("\u{2715}"),
+        "an errored source should render the Down status glyph (\u{2715}), got: {body}"
     );
     assert!(
         !body.contains(">OK<"),
@@ -1307,7 +1307,7 @@ async fn admin_live_status_non_youtube_is_neutral() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
-    assert!(body.contains("Live status unknown"));
+    assert!(body.contains("Not yet checked"));
     assert!(!body.contains("Currently live"));
 }
 
