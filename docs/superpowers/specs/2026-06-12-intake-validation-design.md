@@ -135,6 +135,12 @@ behavior, and such a test should be updated to assert the new (stricter) behavio
 2. **Empty playlist `title`** → now rejected with 422. Today the form silently creates an item
    with an empty title; the JSON API already rejects it.
 
+Additionally, a minor **ordering** shift falls out of the refactor: the channel `update`
+handlers (form + JSON) now look up the existing row (404) *before* validating the body, so an
+update to a missing channel with an invalid body returns 404 rather than 422. This is
+consistent across both transports and pinned by `channel_update_unknown_with_bad_body_is_404`
+in `tests/api.rs`.
+
 ## Testing
 
 - **New:** pure unit tests on each `validate_new` / `validate_update` — no router, no DB, no
