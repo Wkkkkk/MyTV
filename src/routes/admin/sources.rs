@@ -32,25 +32,18 @@ pub async fn source_create(
     Path(channel_id): Path<i64>,
     axum::extract::Form(form): axum::extract::Form<SourceForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let kind = form
-        .kind
-        .parse::<source::SourceKind>()
-        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-    if form.url.trim().is_empty() {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
     let priority: i64 = form.priority.trim().parse().unwrap_or(1);
-    source::create(
-        &state.pool,
-        source::NewSource {
-            channel_id,
-            kind,
-            url: form.url.trim().to_string(),
-            priority,
-        },
-    )
-    .await
-    .map_err(internal_error)?;
+    let new = source::SourceInput {
+        kind: Some(form.kind),
+        url: form.url,
+        priority,
+    }
+    .validate_new(channel_id)
+    .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
+
+    source::create(&state.pool, new)
+        .await
+        .map_err(internal_error)?;
     Ok(Redirect::to(&format!("/admin/channels/{channel_id}")))
 }
 
