@@ -390,7 +390,8 @@ async fn scenario_discovery(client: &ApiClient) -> Result<(), String> {
     use reqwest::Method;
     let mut problems: Vec<String> = Vec::new();
 
-    // Deterministic: YouTube search without an API key → 503.
+    // YouTube search: 503 when YOUTUBE_API_KEY is unset, 200 when configured
+    // (prod has the key set). Both are healthy outcomes.
     match client
         .send(
             Method::GET,
@@ -399,8 +400,8 @@ async fn scenario_discovery(client: &ApiClient) -> Result<(), String> {
         )
         .await
     {
-        Ok(r) if r.status().as_u16() == 503 => {}
-        Ok(r) => problems.push(format!("youtube: expected 503, got {}", r.status())),
+        Ok(r) if matches!(r.status().as_u16(), 200 | 503) => {}
+        Ok(r) => problems.push(format!("youtube: expected 200 or 503, got {}", r.status())),
         Err(e) => problems.push(format!("youtube: {e}")),
     }
 
