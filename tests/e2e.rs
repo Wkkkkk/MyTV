@@ -376,6 +376,102 @@ fn scenario_mytvctl(cfg: &Config, token: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Best-effort discovery checks. Advisory throughout — gone/changed streams or
+/// yt-dlp hiccups produce sub-warnings, never a hard failure. Accumulates all
+/// sub-failures into one Err string (logged as a single warning by the caller).
+async fn scenario_discovery(client: &ApiClient) -> Result<(), String> {
+    use reqwest::Method;
+    let mut problems: Vec<String> = Vec::new();
+
+    // Deterministic: YouTube search without an API key → 503.
+    match client
+        .send(
+            Method::GET,
+            "/api/admin/discover/youtube?keyword=test",
+            None,
+        )
+        .await
+    {
+        Ok(r) if r.status().as_u16() == 503 => {}
+        Ok(r) => problems.push(format!("youtube: expected 503, got {}", r.status())),
+        Err(e) => problems.push(format!("youtube: {e}")),
+    }
+
+    // Pure URL parse (no network/yt-dlp): a valid channel handle → 200.
+    match client
+        .send(
+            Method::POST,
+            "/api/admin/discover/channel",
+            Some(serde_json::json!({ "url": "https://www.youtube.com/@NASA" })),
+        )
+        .await
+    {
+        Ok(r) if r.status().is_success() => {}
+        Ok(r) => problems.push(format!("channel-parse: got {}", r.status())),
+        Err(e) => problems.push(format!("channel-parse: {e}")),
+    }
+
+    // m3u search against live iptv-org: shape only (200 + JSON array, may be empty).
+    match client
+        .send(
+            Method::GET,
+            "/api/admin/discover/m3u?country=se&group=News",
+            None,
+        )
+        .await
+    {
+        Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
+            Ok(v) if v.is_array() => {}
+            Ok(_) => problems.push("m3u: response not a JSON array".into()),
+            Err(e) => problems.push(format!("m3u decode: {e}")),
+        },
+        Ok(r) => problems.push(format!("m3u: got {}", r.status())),
+        Err(e) => problems.push(format!("m3u: {e}")),
+    }
+
+    // Resolve representative real URLs across protocols/types. Best-effort.
+    let resolve_urls = [
+        (
+            "dash-live",
+            "https://demo.unified-streaming.com/k8s/live/scte35.isml/.mpd",
+        ),
+        (
+            "dash-vod",
+            "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd",
+        ),
+        (
+            "hls-live",
+            "https://stream.mux.com/v69RSHhFelSm4701snP22dYz2jICy4E4FUyk02rW4gxRM.m3u8",
+        ),
+        (
+            "hls-vod",
+            "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+        ),
+        ("youtube", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+    ];
+    for (label, url) in resolve_urls {
+        match client
+            .send(
+                Method::POST,
+                "/api/admin/discover/resolve",
+                Some(serde_json::json!({ "url": url })),
+            )
+            .await
+        {
+            Ok(r) if r.status().is_success() => {}
+            Ok(r) => problems.push(format!("resolve {label}: got {}", r.status())),
+            Err(e) => problems.push(format!("resolve {label}: {e}")),
+        }
+    }
+
+    if problems.is_empty() {
+        println!("✓ scenario 4: discovery");
+        Ok(())
+    } else {
+        Err(problems.join("; "))
+    }
+}
+
 #[tokio::test]
 #[ignore = "e2e against prod — run manually"]
 async fn e2e_smoke() {
@@ -402,6 +498,9 @@ async fn e2e_smoke() {
     let mut warnings: Vec<String> = Vec::new();
     if let Err(e) = scenario_mytvctl(&cfg, &token) {
         warnings.push(format!("mytvctl: {e}"));
+    }
+    if let Err(e) = scenario_discovery(&client).await {
+        warnings.push(format!("discovery: {e}"));
     }
 
     let post = sweep(&client).await.unwrap_or(0);
