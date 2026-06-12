@@ -25,6 +25,7 @@ fn is_e2e_name_matches_only_prefixed() {
 
 struct Config {
     base_url: String,
+    password: String,
 }
 
 /// Returns the prod config, or `None` (after printing a skip line) when either
@@ -38,7 +39,72 @@ fn env_or_skip() -> Option<Config> {
     }
     Some(Config {
         base_url: base_url.trim_end_matches('/').to_string(),
+        password,
     })
+}
+
+/// Thin reqwest wrapper: prefixes the base URL and attaches HTTP Basic auth.
+/// The username half is ignored by the server (password-only auth).
+struct ApiClient {
+    http: reqwest::Client,
+    base_url: String,
+    password: String,
+}
+
+impl ApiClient {
+    fn new(cfg: &Config) -> Self {
+        ApiClient {
+            http: reqwest::Client::new(),
+            base_url: cfg.base_url.clone(),
+            password: cfg.password.clone(),
+        }
+    }
+
+    async fn send(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> reqwest::Result<reqwest::Response> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut req = self
+            .http
+            .request(method, url)
+            .basic_auth("e2e", Some(&self.password));
+        if let Some(b) = body {
+            req = req.json(&b);
+        }
+        req.send().await
+    }
+}
+
+/// Delete every channel whose name starts with `E2E_PREFIX`. Cleans up any
+/// prior crashed run at start, and our own entities at end. Best-effort per
+/// channel; returns how many it removed.
+async fn sweep(client: &ApiClient) -> Result<usize, String> {
+    let resp = client
+        .send(reqwest::Method::GET, "/api/admin/channels", None)
+        .await
+        .map_err(|e| format!("list channels: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("list channels: HTTP {}", resp.status()));
+    }
+    let channels: Vec<mytv::model::channel::Channel> = resp
+        .json()
+        .await
+        .map_err(|e| format!("decode channels: {e}"))?;
+    let mut removed = 0;
+    for ch in channels.iter().filter(|c| is_e2e_name(&c.name)) {
+        let _ = client
+            .send(
+                reqwest::Method::DELETE,
+                &format!("/api/admin/channels/{}", ch.id),
+                None,
+            )
+            .await;
+        removed += 1;
+    }
+    Ok(removed)
 }
 
 #[tokio::test]
@@ -48,4 +114,16 @@ async fn e2e_smoke() {
         return;
     };
     println!("== e2e smoke against {} ==", cfg.base_url);
+    let client = ApiClient::new(&cfg);
+
+    let pre = sweep(&client)
+        .await
+        .expect("start sweep failed — is prod reachable / creds valid?");
+    println!("start sweep removed {pre} stale __e2e__ channel(s)");
+
+    // (scenarios added in later tasks)
+
+    let post = sweep(&client).await.unwrap_or(0);
+    println!("== e2e summary ==");
+    println!("end sweep removed {post} leftover __e2e__ channel(s)");
 }
