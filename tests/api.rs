@@ -212,3 +212,124 @@ async fn channel_update_preserves_existing_loop_anchor() {
         "loop_anchor must be preserved when omitted on update"
     );
 }
+
+#[tokio::test]
+async fn source_crud_and_kind_autodetect() {
+    let app = app().await;
+
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels/1/sources",
+            serde_json::json!({"url": "https://www.youtube.com/watch?v=abc"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let created = body_json(r).await;
+    let id = created["id"].as_i64().unwrap();
+    assert_eq!(created["kind"], "youtube_live"); // SourceKind::detect → YoutubeLive
+    assert_eq!(created["channel_id"], 1);
+
+    let r = app
+        .clone()
+        .oneshot(authed_get("/api/admin/channels/1/sources"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(body_json(r)
+        .await
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["id"] == id));
+
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "PATCH",
+            &format!("/api/admin/sources/{id}"),
+            serde_json::json!({"url":"https://x.example.com/y.m3u8","priority":5}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let updated = body_json(r).await;
+    assert_eq!(updated["url"], "https://x.example.com/y.m3u8");
+    assert_eq!(updated["priority"], 5);
+
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            &format!("/api/admin/sources/{id}/toggle"),
+            serde_json::json!({"active": false}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(body_json(r).await["is_active"], false);
+
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/admin/sources/{id}"))
+                .header("Authorization", AUTH)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn source_create_empty_url_is_422() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels/1/sources",
+            serde_json::json!({"url": "   "}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn source_test_populates_last_checked() {
+    let r = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/sources/1/test")
+                .header("Authorization", AUTH)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let json = body_json(r).await;
+    assert_eq!(json["id"], 1);
+    assert!(!json["last_checked_at"].is_null());
+}
+
+#[tokio::test]
+async fn source_update_unknown_is_404() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "PATCH",
+            "/api/admin/sources/999999",
+            serde_json::json!({"url":"https://x","priority":1}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}

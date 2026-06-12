@@ -3,11 +3,12 @@
 //! requests use the DTOs defined per submodule.
 
 mod channels;
+mod sources;
 
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Json, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use serde::Serialize;
@@ -54,4 +55,16 @@ pub fn api_router() -> Router<AppState> {
                 .patch(channels::update)
                 .delete(channels::remove),
         )
+        .route(
+            "/channels/:id/sources",
+            get(sources::list_for_channel).post(sources::create),
+        )
+        .route(
+            "/sources/:id",
+            get(sources::get_one)
+                .patch(sources::update)
+                .delete(sources::remove),
+        )
+        .route("/sources/:id/toggle", post(sources::toggle))
+        .route("/sources/:id/test", post(sources::test))
 }
