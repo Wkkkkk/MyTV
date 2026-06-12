@@ -8,11 +8,7 @@ use serde::Deserialize;
 
 use crate::routes::admin::AdminPlaylistItemRow;
 use crate::routes::{internal_error, render};
-use crate::{
-    media,
-    model::{playlist_item, playlist_item::NewPlaylistItem},
-    AppState,
-};
+use crate::{media, model::playlist_item, AppState};
 
 #[derive(Template)]
 #[template(path = "admin/partials/playlist_item_row.html")]
@@ -62,19 +58,19 @@ pub async fn playlist_item_create(
         .map(|m| m + 1)
         .unwrap_or(0);
 
-    if playlist_item::create(
-        &state.pool,
-        NewPlaylistItem {
-            channel_id,
-            title: form.title.trim().to_string(),
-            url,
-            duration_secs,
-            sort_order,
-        },
-    )
-    .await
-    .is_err()
+    let new = match (playlist_item::PlaylistInput {
+        title: form.title,
+        url,
+        duration_secs,
+        sort_order,
+    })
+    .validate_new(channel_id)
     {
+        Ok(new) => new,
+        Err(_) => return StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    };
+
+    if playlist_item::create(&state.pool, new).await.is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     Redirect::to(&format!("/admin/channels/{channel_id}")).into_response()

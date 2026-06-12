@@ -2,6 +2,8 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
+use super::IntakeError;
+
 /// A playlist item row as stored in the database.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PlaylistItem {
@@ -164,6 +166,54 @@ pub async fn update_health(
         is_active,
     )
     .await
+}
+
+/// Raw, transport-decoded playlist-item fields awaiting validation.
+/// `duration_secs` and `sort_order` are already resolved by the adapter
+/// (the form auto-fetches duration and derives sort_order from the DB max).
+pub struct PlaylistInput {
+    pub title: String,
+    pub url: String,
+    pub duration_secs: i64,
+    pub sort_order: i64,
+}
+
+fn validate_title_url(title: String, url: String) -> Result<(String, String), IntakeError> {
+    let title = title.trim();
+    let url = url.trim();
+    if title.is_empty() || url.is_empty() {
+        return Err(IntakeError("title and url are required".into()));
+    }
+    Ok((title.to_string(), url.to_string()))
+}
+
+impl PlaylistInput {
+    pub fn validate_new(self, channel_id: i64) -> Result<NewPlaylistItem, IntakeError> {
+        let (title, url) = validate_title_url(self.title, self.url)?;
+        if self.duration_secs <= 0 {
+            return Err(IntakeError("duration_secs must be > 0".into()));
+        }
+        Ok(NewPlaylistItem {
+            channel_id,
+            title,
+            url,
+            duration_secs: self.duration_secs,
+            sort_order: self.sort_order,
+        })
+    }
+
+    pub fn validate_update(self) -> Result<UpdatePlaylistItem, IntakeError> {
+        let (title, url) = validate_title_url(self.title, self.url)?;
+        if self.duration_secs <= 0 {
+            return Err(IntakeError("duration_secs must be > 0".into()));
+        }
+        Ok(UpdatePlaylistItem {
+            title,
+            url,
+            duration_secs: self.duration_secs,
+            sort_order: self.sort_order,
+        })
+    }
 }
 
 /// Sum the duration of all items in the playlist.
@@ -537,5 +587,68 @@ mod tests {
         .await
         .unwrap();
         assert!(r.is_none());
+    }
+
+    #[test]
+    fn validate_new_trims_and_keeps_fields() {
+        let new = PlaylistInput {
+            title: "  Ep 1  ".into(),
+            url: "  https://x.example/e1.mp4  ".into(),
+            duration_secs: 1800,
+            sort_order: 4,
+        }
+        .validate_new(7)
+        .unwrap();
+        assert_eq!(new.channel_id, 7);
+        assert_eq!(new.title, "Ep 1");
+        assert_eq!(new.url, "https://x.example/e1.mp4");
+        assert_eq!(new.duration_secs, 1800);
+        assert_eq!(new.sort_order, 4);
+    }
+
+    #[test]
+    fn validate_new_rejects_empty_title_url_and_nonpositive_duration() {
+        assert!(PlaylistInput {
+            title: "   ".into(),
+            url: "https://x.example/e.mp4".into(),
+            duration_secs: 10,
+            sort_order: 0,
+        }
+        .validate_new(1)
+        .is_err());
+
+        assert!(PlaylistInput {
+            title: "Ep".into(),
+            url: "  ".into(),
+            duration_secs: 10,
+            sort_order: 0,
+        }
+        .validate_new(1)
+        .is_err());
+
+        assert!(PlaylistInput {
+            title: "Ep".into(),
+            url: "https://x.example/e.mp4".into(),
+            duration_secs: 0,
+            sort_order: 0,
+        }
+        .validate_new(1)
+        .is_err());
+    }
+
+    #[test]
+    fn validate_update_trims_and_keeps_fields() {
+        let upd = PlaylistInput {
+            title: " Ep 2 ".into(),
+            url: " https://x.example/e2.mp4 ".into(),
+            duration_secs: 600,
+            sort_order: 2,
+        }
+        .validate_update()
+        .unwrap();
+        assert_eq!(upd.title, "Ep 2");
+        assert_eq!(upd.url, "https://x.example/e2.mp4");
+        assert_eq!(upd.duration_secs, 600);
+        assert_eq!(upd.sort_order, 2);
     }
 }

@@ -169,6 +169,23 @@ async fn channel_get_unknown_is_404() {
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
 }
 
+// Updating a missing channel returns 404 even when the body is invalid: the
+// handler looks up the existing row before validating. Pins the intake-refactor
+// ordering so a future change can't silently flip it back to 422.
+#[tokio::test]
+async fn channel_update_unknown_with_bad_body_is_404() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "PATCH",
+            "/api/admin/channels/999999",
+            serde_json::json!({"name":"x","category":"y","type":"nonsense","sort_order":0}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn channel_create_empty_name_is_422() {
     let r = app()

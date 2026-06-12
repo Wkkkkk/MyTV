@@ -1,7 +1,9 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
+
+use super::IntakeError;
 
 /// A channel row as stored in the database.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -199,6 +201,94 @@ pub fn distinct_categories(channels: &[Channel]) -> Vec<String> {
     cats
 }
 
+/// Raw, transport-decoded channel fields awaiting validation.
+/// `sort_order` is already an `i64` (form adapter parses its string field first).
+pub struct ChannelInput {
+    pub name: String,
+    pub category: String,
+    pub channel_type: String,
+    pub sort_order: i64,
+    pub logo_url: Option<String>,
+    pub loop_anchor: Option<String>,
+}
+
+fn parse_loop_anchor(s: &str) -> Option<DateTime<Utc>> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M")
+        .ok()
+        .map(|dt| DateTime::from_naive_utc_and_offset(dt, Utc))
+}
+
+fn normalize_logo(logo: Option<String>) -> Option<String> {
+    logo.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+fn validate_names(name: String, category: String) -> Result<(String, String), IntakeError> {
+    let name = name.trim();
+    let category = category.trim();
+    if name.is_empty() || category.is_empty() {
+        return Err(IntakeError("name and category are required".into()));
+    }
+    Ok((name.to_string(), category.to_string()))
+}
+
+fn resolve_anchor(
+    channel_type: ChannelType,
+    raw: Option<&str>,
+    existing: Option<DateTime<Utc>>,
+) -> Option<DateTime<Utc>> {
+    if channel_type == ChannelType::VodLoop {
+        raw.and_then(parse_loop_anchor)
+            .or(existing)
+            .or_else(|| Some(Utc::now()))
+    } else {
+        None
+    }
+}
+
+impl ChannelInput {
+    pub fn validate_new(self) -> Result<NewChannel, IntakeError> {
+        let channel_type = self
+            .channel_type
+            .parse::<ChannelType>()
+            .map_err(|_| IntakeError(format!("invalid channel type: {}", self.channel_type)))?;
+        let (name, category) = validate_names(self.name, self.category)?;
+        let loop_anchor = resolve_anchor(channel_type, self.loop_anchor.as_deref(), None);
+        Ok(NewChannel {
+            name,
+            category,
+            logo_url: normalize_logo(self.logo_url),
+            channel_type,
+            sort_order: self.sort_order,
+            loop_anchor,
+        })
+    }
+
+    pub fn validate_update(
+        self,
+        existing_anchor: Option<DateTime<Utc>>,
+    ) -> Result<UpdateChannel, IntakeError> {
+        let channel_type = self
+            .channel_type
+            .parse::<ChannelType>()
+            .map_err(|_| IntakeError(format!("invalid channel type: {}", self.channel_type)))?;
+        let (name, category) = validate_names(self.name, self.category)?;
+        let loop_anchor =
+            resolve_anchor(channel_type, self.loop_anchor.as_deref(), existing_anchor);
+        Ok(UpdateChannel {
+            name,
+            category,
+            logo_url: normalize_logo(self.logo_url),
+            channel_type,
+            sort_order: self.sort_order,
+            loop_anchor,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,5 +472,103 @@ mod tests {
         assert!(!set_type_and_anchor_if_live(&pool, 9999, anchor)
             .await
             .unwrap());
+    }
+
+    #[test]
+    fn validate_new_live_trims_and_drops_anchor() {
+        let new = ChannelInput {
+            name: "  CNN  ".into(),
+            category: " news ".into(),
+            channel_type: "live".into(),
+            sort_order: 3,
+            logo_url: Some("  ".into()),
+            loop_anchor: Some("2021-01-01T00:00".into()),
+        }
+        .validate_new()
+        .unwrap();
+        assert_eq!(new.name, "CNN");
+        assert_eq!(new.category, "news");
+        assert_eq!(new.channel_type, ChannelType::Live);
+        assert_eq!(new.sort_order, 3);
+        assert_eq!(new.logo_url, None);
+        assert_eq!(new.loop_anchor, None);
+    }
+
+    #[test]
+    fn validate_new_rejects_empty_name_and_bad_type() {
+        let bad_name = ChannelInput {
+            name: "   ".into(),
+            category: "news".into(),
+            channel_type: "live".into(),
+            sort_order: 0,
+            logo_url: None,
+            loop_anchor: None,
+        }
+        .validate_new();
+        assert!(bad_name.is_err());
+
+        let bad_type = ChannelInput {
+            name: "CNN".into(),
+            category: "news".into(),
+            channel_type: "bogus".into(),
+            sort_order: 0,
+            logo_url: None,
+            loop_anchor: None,
+        }
+        .validate_new();
+        assert!(bad_type.is_err());
+    }
+
+    #[test]
+    fn validate_new_vod_parses_explicit_anchor() {
+        let new = ChannelInput {
+            name: "VOD".into(),
+            category: "movies".into(),
+            channel_type: "vod_loop".into(),
+            sort_order: 0,
+            logo_url: None,
+            loop_anchor: Some("2021-05-05T10:00".into()),
+        }
+        .validate_new()
+        .unwrap();
+        let anchor = new.loop_anchor.expect("vod_loop must have an anchor");
+        assert_eq!(
+            anchor.format("%Y-%m-%dT%H:%M").to_string(),
+            "2021-05-05T10:00"
+        );
+    }
+
+    #[test]
+    fn validate_new_vod_defaults_anchor_to_now_when_blank() {
+        let new = ChannelInput {
+            name: "VOD".into(),
+            category: "movies".into(),
+            channel_type: "vod_loop".into(),
+            sort_order: 0,
+            logo_url: None,
+            loop_anchor: Some("".into()),
+        }
+        .validate_new()
+        .unwrap();
+        assert!(new.loop_anchor.is_some());
+    }
+
+    #[test]
+    fn validate_update_prefers_existing_anchor_when_blank() {
+        let existing = DateTime::from_naive_utc_and_offset(
+            NaiveDateTime::parse_from_str("2020-02-02T08:00", "%Y-%m-%dT%H:%M").unwrap(),
+            Utc,
+        );
+        let upd = ChannelInput {
+            name: "VOD".into(),
+            category: "movies".into(),
+            channel_type: "vod_loop".into(),
+            sort_order: 0,
+            logo_url: None,
+            loop_anchor: None,
+        }
+        .validate_update(Some(existing))
+        .unwrap();
+        assert_eq!(upd.loop_anchor, Some(existing));
     }
 }

@@ -1,6 +1,9 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
+use std::str::FromStr;
+
+use super::IntakeError;
 
 /// Source media kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -226,6 +229,50 @@ pub async fn update_health(
         is_active,
     )
     .await
+}
+
+/// Raw, transport-decoded source fields awaiting validation.
+/// `kind` is `None`/blank when the caller wants it auto-detected from the URL.
+pub struct SourceInput {
+    pub kind: Option<String>,
+    pub url: String,
+    pub priority: i64,
+}
+
+impl SourceInput {
+    pub fn validate_new(self, channel_id: i64) -> Result<NewSource, IntakeError> {
+        let url = self.url.trim();
+        if url.is_empty() {
+            return Err(IntakeError("url is required".into()));
+        }
+        let url = url.to_string();
+        let kind = match self
+            .kind
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(k) => SourceKind::from_str(k).map_err(|e| IntakeError(e.to_string()))?,
+            None => SourceKind::detect(&url),
+        };
+        Ok(NewSource {
+            channel_id,
+            kind,
+            url,
+            priority: self.priority,
+        })
+    }
+
+    pub fn validate_update(self) -> Result<UpdateSource, IntakeError> {
+        let url = self.url.trim();
+        if url.is_empty() {
+            return Err(IntakeError("url is required".into()));
+        }
+        Ok(UpdateSource {
+            url: url.to_string(),
+            priority: self.priority,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -557,6 +604,74 @@ mod tests {
         assert_eq!(reenabled.consecutive_failures, 0);
         assert_eq!(reenabled.last_status.as_deref(), Some("ok"));
         assert!(reenabled.failure_reason.is_none());
+    }
+
+    #[test]
+    fn validate_new_parses_explicit_kind() {
+        let new = SourceInput {
+            kind: Some("dash".into()),
+            url: "  https://x.example/s.mpd  ".into(),
+            priority: 5,
+        }
+        .validate_new(7)
+        .unwrap();
+        assert_eq!(new.channel_id, 7);
+        assert_eq!(new.kind, SourceKind::Dash);
+        assert_eq!(new.url, "https://x.example/s.mpd");
+        assert_eq!(new.priority, 5);
+    }
+
+    #[test]
+    fn validate_new_detects_kind_when_absent_or_blank() {
+        let detected = SourceInput {
+            kind: None,
+            url: "https://x.example/s.m3u8".into(),
+            priority: 1,
+        }
+        .validate_new(1)
+        .unwrap();
+        assert_eq!(detected.kind, SourceKind::Hls);
+
+        let blank = SourceInput {
+            kind: Some("   ".into()),
+            url: "https://youtu.be/abc".into(),
+            priority: 1,
+        }
+        .validate_new(1)
+        .unwrap();
+        assert_eq!(blank.kind, SourceKind::YoutubeLive);
+    }
+
+    #[test]
+    fn validate_new_rejects_empty_url_and_bad_kind() {
+        assert!(SourceInput {
+            kind: Some("hls".into()),
+            url: "   ".into(),
+            priority: 1,
+        }
+        .validate_new(1)
+        .is_err());
+
+        assert!(SourceInput {
+            kind: Some("rtmp".into()),
+            url: "https://x.example/s".into(),
+            priority: 1,
+        }
+        .validate_new(1)
+        .is_err());
+    }
+
+    #[test]
+    fn validate_update_trims_url_ignores_kind() {
+        let upd = SourceInput {
+            kind: Some("rtmp".into()),
+            url: "  https://x.example/s.m3u8  ".into(),
+            priority: 9,
+        }
+        .validate_update()
+        .unwrap();
+        assert_eq!(upd.url, "https://x.example/s.m3u8");
+        assert_eq!(upd.priority, 9);
     }
 
     #[test]

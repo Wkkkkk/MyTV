@@ -4,7 +4,6 @@ use axum::{
     response::Json,
 };
 use serde::Deserialize;
-use std::str::FromStr;
 
 use super::{internal, ApiError, ToggleRequest};
 use crate::{model::source, AppState};
@@ -48,27 +47,13 @@ pub async fn create(
     Path(channel_id): Path<i64>,
     Json(req): Json<CreateSourceRequest>,
 ) -> Result<(StatusCode, Json<source::Source>), ApiError> {
-    let url = req.url.trim().to_string();
-    if url.is_empty() {
-        return Err(ApiError::Validation("url is required".into()));
+    let new = source::SourceInput {
+        kind: req.kind,
+        url: req.url,
+        priority: req.priority.unwrap_or(1),
     }
-    let kind = match req.kind {
-        Some(k) => {
-            source::SourceKind::from_str(&k).map_err(|e| ApiError::Validation(e.to_string()))?
-        }
-        None => source::SourceKind::detect(&url),
-    };
-    let src = source::create(
-        &state.pool,
-        source::NewSource {
-            channel_id,
-            kind,
-            url,
-            priority: req.priority.unwrap_or(1),
-        },
-    )
-    .await
-    .map_err(internal)?;
+    .validate_new(channel_id)?;
+    let src = source::create(&state.pool, new).await.map_err(internal)?;
     Ok((StatusCode::CREATED, Json(src)))
 }
 
@@ -77,21 +62,16 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(req): Json<UpdateSourceRequest>,
 ) -> Result<Json<source::Source>, ApiError> {
-    let url = req.url.trim().to_string();
-    if url.is_empty() {
-        return Err(ApiError::Validation("url is required".into()));
+    let upd = source::SourceInput {
+        kind: None,
+        url: req.url,
+        priority: req.priority,
     }
-    let src = source::update(
-        &state.pool,
-        id,
-        source::UpdateSource {
-            url,
-            priority: req.priority,
-        },
-    )
-    .await
-    .map_err(internal)?
-    .ok_or(ApiError::NotFound)?;
+    .validate_update()?;
+    let src = source::update(&state.pool, id, upd)
+        .await
+        .map_err(internal)?
+        .ok_or(ApiError::NotFound)?;
     Ok(Json(src))
 }
 

@@ -50,26 +50,16 @@ pub async fn create(
     Path(channel_id): Path<i64>,
     Json(req): Json<CreatePlaylistItemRequest>,
 ) -> Result<(StatusCode, Json<playlist_item::PlaylistItem>), ApiError> {
-    let title = req.title.trim().to_string();
-    let url = req.url.trim().to_string();
-    if title.is_empty() || url.is_empty() {
-        return Err(ApiError::Validation("title and url are required".into()));
+    let new = playlist_item::PlaylistInput {
+        title: req.title,
+        url: req.url,
+        duration_secs: req.duration_secs,
+        sort_order: req.sort_order.unwrap_or(0),
     }
-    if req.duration_secs <= 0 {
-        return Err(ApiError::Validation("duration_secs must be > 0".into()));
-    }
-    let item = playlist_item::create(
-        &state.pool,
-        playlist_item::NewPlaylistItem {
-            channel_id,
-            title,
-            url,
-            duration_secs: req.duration_secs,
-            sort_order: req.sort_order.unwrap_or(0),
-        },
-    )
-    .await
-    .map_err(internal)?;
+    .validate_new(channel_id)?;
+    let item = playlist_item::create(&state.pool, new)
+        .await
+        .map_err(internal)?;
     Ok((StatusCode::CREATED, Json(item)))
 }
 
@@ -78,27 +68,17 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(req): Json<UpdatePlaylistItemRequest>,
 ) -> Result<Json<playlist_item::PlaylistItem>, ApiError> {
-    let title = req.title.trim().to_string();
-    let url = req.url.trim().to_string();
-    if title.is_empty() || url.is_empty() {
-        return Err(ApiError::Validation("title and url are required".into()));
+    let upd = playlist_item::PlaylistInput {
+        title: req.title,
+        url: req.url,
+        duration_secs: req.duration_secs,
+        sort_order: req.sort_order,
     }
-    if req.duration_secs <= 0 {
-        return Err(ApiError::Validation("duration_secs must be > 0".into()));
-    }
-    let item = playlist_item::update(
-        &state.pool,
-        id,
-        playlist_item::UpdatePlaylistItem {
-            title,
-            url,
-            duration_secs: req.duration_secs,
-            sort_order: req.sort_order,
-        },
-    )
-    .await
-    .map_err(internal)?
-    .ok_or(ApiError::NotFound)?;
+    .validate_update()?;
+    let item = playlist_item::update(&state.pool, id, upd)
+        .await
+        .map_err(internal)?
+        .ok_or(ApiError::NotFound)?;
     Ok(Json(item))
 }
 

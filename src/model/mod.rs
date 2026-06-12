@@ -5,6 +5,17 @@ pub mod source;
 use anyhow::Result;
 use sqlx::SqlitePool;
 
+/// A validation failure produced by the `*Input::validate_*` intake validators.
+/// Carries a human-readable message; adapters decide the transport status code.
+#[derive(Debug)]
+pub struct IntakeError(pub String);
+
+impl std::fmt::Display for IntakeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Shared health-update SQL for `sources` and `playlist_items`.
 /// `table` must be a `'static` literal — "sources" or "playlist_items".
 pub(crate) async fn update_health_sql(
