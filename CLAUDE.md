@@ -46,6 +46,7 @@ src/
   budget.rs       # CORS budget badge computation (⚡/☁) for guide display
   ssrf.rs         # SSRF URL validation and 60 s hostname cache
   metrics.rs      # latency histograms, proxy counters, track_metrics middleware
+  proxy.rs        # stream-proxy deep module: fetch_rewritten (redirect-follow, SSRF, detect, HLS/DASH rewrite)
   model/          # Channel, Source, PlaylistItem structs + DB queries
   routes/
     player.rs     # /channel/:id/tune, /channel/:id/next, /stream-proxy

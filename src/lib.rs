@@ -7,6 +7,7 @@ pub mod health;
 pub mod media;
 pub mod metrics;
 pub mod model;
+pub mod proxy;
 mod routes;
 pub mod ssrf;
 pub mod status;
