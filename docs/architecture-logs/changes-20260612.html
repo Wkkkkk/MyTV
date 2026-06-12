@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — MyTV</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 5 4; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .hatch {
+        background-image: repeating-linear-gradient(45deg, #e2e8f0 0 6px, #f1f5f9 6px 12px);
+      }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-14">
+      <!-- ============ HEADER ============ -->
+      <header class="space-y-5">
+        <div class="flex items-baseline justify-between flex-wrap gap-2">
+          <h1 class="text-4xl font-serif tracking-tight">Architecture review — MyTV</h1>
+          <span class="text-sm text-slate-500">2026-06-12 · Rust / Axum IPTV</span>
+        </div>
+        <p class="text-slate-600 max-w-3xl">
+          Five deepening opportunities, ranked. Each turns a <strong>shallow</strong> module —
+          where the interface is nearly as complex as the implementation — into a
+          <strong>deep</strong> one: a lot of behaviour behind a small interface.
+        </p>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-600 border-t border-b border-slate-200 py-3">
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 border-2 border-slate-700 rounded-sm"></span> module</span>
+          <span class="flex items-center gap-2"><svg width="28" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="#64748b" stroke-width="2" class="seam"/></svg> seam</span>
+          <span class="flex items-center gap-2"><svg width="28" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="#dc2626" stroke-width="2"/></svg> leakage / duplication</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 deep rounded-sm"></span> deep module</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 hatch rounded-sm border border-slate-300"></span> faded = now internal</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-12">
+
+      <!-- ============ CANDIDATE 1 ============ -->
+      <article id="c1" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-6 space-y-5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">1 · Deepen channel/source/playlist intake</h2>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 uppercase tracking-wide">Strong</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">in-process · 2 adapters</span>
+          </div>
+
+          <div class="mono text-sm text-slate-500 space-y-0.5">
+            <div>src/routes/admin/channels.rs <span class="text-slate-400">(channel_create:108, channel_update:179 — inline validation)</span></div>
+            <div>src/routes/api/channels.rs <span class="text-slate-400">(parse_type / normalize_logo / resolve_anchor / validate_names:26–59)</span></div>
+            <div>src/routes/admin/sources.rs · api/sources.rs · admin/playlist.rs · api/playlist.rs <span class="text-slate-400">(same split)</span></div>
+          </div>
+
+          <!-- BEFORE / AFTER -->
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — validation duplicated in both adapters</div>
+              <div class="space-y-3 relative">
+                <div class="border-2 border-slate-700 rounded-md p-2">
+                  <div class="text-xs uppercase tracking-wider text-slate-500">form adapter</div>
+                  <div class="mt-1 space-y-1 text-[11px] mono text-rose-700">
+                    <div>parse_type · trim names</div>
+                    <div>normalize logo · sort_order</div>
+                    <div>resolve loop_anchor</div>
+                  </div>
+                </div>
+                <svg width="100%" height="22"><line x1="20%" y1="0" x2="20%" y2="22" stroke="#dc2626" stroke-width="2"/><line x1="80%" y1="0" x2="80%" y2="22" stroke="#dc2626" stroke-width="2"/><text x="50%" y="15" text-anchor="middle" fill="#dc2626" font-size="10">same logic, copied</text></svg>
+                <div class="border-2 border-slate-700 rounded-md p-2">
+                  <div class="text-xs uppercase tracking-wider text-slate-500">JSON adapter</div>
+                  <div class="mt-1 space-y-1 text-[11px] mono text-rose-700">
+                    <div>parse_type · trim names</div>
+                    <div>normalize logo · sort_order</div>
+                    <div>resolve loop_anchor</div>
+                  </div>
+                </div>
+                <div class="text-center text-slate-400 text-lg leading-none">↓ ↓</div>
+                <div class="border border-slate-300 rounded-md p-2 text-center text-xs mono text-slate-600">channel::create / update (model)</div>
+              </div>
+              <p class="text-xs text-slate-500 mt-3">Interface ≈ implementation: each handler is mostly parse/trim/normalize. JSON side <em>already</em> imports <span class="mono">parse_loop_anchor</span> from the form module — the seam exists but only half-built.</p>
+            </div>
+
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4">
+              <div class="text-xs uppercase tracking-wider text-emerald-600 mb-3">After — one deep intake module</div>
+              <div class="space-y-3">
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="border-2 border-slate-400 rounded-md p-2 text-center">
+                    <div class="text-xs uppercase tracking-wider text-slate-500">form adapter</div>
+                    <div class="text-[11px] mono text-slate-500 mt-1">→ ChannelInput</div>
+                  </div>
+                  <div class="border-2 border-slate-400 rounded-md p-2 text-center">
+                    <div class="text-xs uppercase tracking-wider text-slate-500">JSON adapter</div>
+                    <div class="text-[11px] mono text-slate-500 mt-1">→ ChannelInput</div>
+                  </div>
+                </div>
+                <svg width="100%" height="20"><line x1="25%" y1="0" x2="50%" y2="20" stroke="#64748b" stroke-width="1.5"/><line x1="75%" y1="0" x2="50%" y2="20" stroke="#64748b" stroke-width="1.5"/></svg>
+                <div class="deep text-white rounded-md p-3">
+                  <div class="text-xs uppercase tracking-wider text-slate-300">ChannelInput::validate()</div>
+                  <div class="text-[11px] mono text-slate-300 mt-1">parse · trim · normalize · anchor → Result&lt;NewChannel&gt;</div>
+                </div>
+                <div class="text-center text-slate-400 text-lg leading-none">↓</div>
+                <div class="border border-slate-300 rounded-md p-2 text-center text-xs mono text-slate-600">channel::create / update (model)</div>
+              </div>
+              <p class="text-xs text-emerald-700 mt-3">Small interface (<span class="mono">validate() -&gt; Result&lt;NewChannel, _&gt;</span>), all the rules behind it. Adapters shrink to "deserialize, map error, render".</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <div><span class="font-semibold text-slate-700">Problem</span> — the same parse/trim/normalize/anchor rules live in both the form handler and the JSON handler; they already drift (StatusCode vs ApiError, inline vs extracted).</div>
+            <div><span class="font-semibold text-slate-700">Solution</span> — one <span class="mono">ChannelInput</span> (and sibling <span class="mono">SourceInput</span>, <span class="mono">PlaylistInput</span>) deep module that turns raw string fields into a validated <span class="mono">NewChannel</span>/<span class="mono">UpdateChannel</span>.</div>
+          </div>
+          <ul class="grid sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm text-slate-700 list-disc list-inside">
+            <li>Locality: validation bugs concentrate in one module</li>
+            <li>Leverage: one interface, two adapters, N fields</li>
+            <li>Interface shrinks; handlers absorb nothing</li>
+            <li>Test the rules once, not through two transports</li>
+          </ul>
+          <p class="text-xs text-slate-500">Deletion test: remove the module → validation reappears, copied, in every form and JSON handler. It earns its keep.</p>
+        </div>
+      </article>
+
+      <!-- ============ CANDIDATE 2 ============ -->
+      <article id="c2" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-6 space-y-5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">2 · Narrow the health probe interface</h2>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 uppercase tracking-wide">Worth exploring</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+          </div>
+
+          <div class="mono text-sm text-slate-500 space-y-0.5">
+            <div>src/health.rs <span class="text-slate-400">(probe_source:123, probe_playlist_item:195, probe_and_cache_cors:230, probe_and_cache_resolved_cors:267, record_source_liveness:112)</span></div>
+            <div>callers: admin/sources.rs:96+110 · api/sources.rs:136 · admin/playlist.rs:128 · api/playlist.rs:145 · player.rs:409</div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <pre class="mermaid">
+flowchart LR
+  subgraph callers[caller must pick the path]
+    A[admin/sources Test]
+    P[player stream-proxy]
+  end
+  A -->|live source?| R[probe_and_cache_resolved_cors]
+  A -->|else| S[probe_source]
+  P --> C[probe_and_cache_cors]
+  S --> C
+  R --> H[hls::probe_source_cors]
+  C --> H
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class A,R,S leak
+            </pre>
+            <p class="text-xs text-slate-500 mt-2">The interface is <strong>wide</strong>: five public probe entry points, and <span class="mono">admin/sources.rs</span> branches on "is this a live source?" to choose between two of them before calling. The choice is the caller's burden — that's the leak.</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — wide interface</div>
+              <!-- mass diagram: interface nearly as tall as impl -->
+              <div class="flex items-end gap-6 h-44 justify-center">
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-16 bg-rose-300 rounded-t" style="height:120px"></div>
+                  <span class="text-[10px] uppercase tracking-wider text-slate-500">interface<br>(5 fns)</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-16 bg-slate-300 rounded-t" style="height:150px"></div>
+                  <span class="text-[10px] uppercase tracking-wider text-slate-500">impl</span>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4">
+              <div class="text-xs uppercase tracking-wider text-emerald-600 mb-3">After — one entry, dispatch inside</div>
+              <div class="flex items-end gap-6 h-44 justify-center">
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-16 bg-emerald-400 rounded-t" style="height:38px"></div>
+                  <span class="text-[10px] uppercase tracking-wider text-slate-500">interface<br>probe(target)</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-16 deep rounded-t" style="height:150px"></div>
+                  <span class="text-[10px] uppercase tracking-wider text-slate-500">impl<br>(dispatch live/http/dash)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <div><span class="font-semibold text-slate-700">Problem</span> — callers must know which of five probe functions applies, and replicate the "live source needs resolution first" branch.</div>
+            <div><span class="font-semibold text-slate-700">Solution</span> — a single <span class="mono">probe(target) -&gt; ProbeOutcome</span> that classifies the target (live/http/dash) and dispatches internally; keep <span class="mono">record_source_liveness</span> separate (different concern).</div>
+          </div>
+          <ul class="grid sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm text-slate-700 list-disc list-inside">
+            <li>Interface shrinks from 5 → ~2</li>
+            <li>Locality: dispatch logic moves out of callers</li>
+            <li>New probe kind = edit one module</li>
+            <li>Test one interface with a target enum</li>
+          </ul>
+          <p class="text-xs text-slate-500">Deletion test: the probe orchestration earns its keep — but its interface advertises its internals. Deepen by hiding the dispatch.</p>
+        </div>
+      </article>
+
+      <!-- ============ CANDIDATE 3 ============ -->
+      <article id="c3" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-6 space-y-5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">3 · Give the ended-live → VOD flow a testable seam</h2>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 uppercase tracking-wide">Worth exploring</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+          </div>
+
+          <div class="mono text-sm text-slate-500 space-y-0.5">
+            <div>src/routes/player.rs <span class="text-slate-400">(next_live, live_to_vod_conversion:279, convert_channel_to_vod_loop:233)</span></div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <pre class="mermaid">
+sequenceDiagram
+  participant H as tune handler
+  participant T as tokio::spawn (detached)
+  participant DB
+  H->>T: spawn live_to_vod_conversion
+  H-->>Client: 200 { ended:true } (returns now)
+  Note over T,DB: runs later, no await point
+  T->>DB: fetch_video_id / duration / append item
+  Note over T: failure just logs & drops — invisible to tests
+            </pre>
+            <p class="text-xs text-slate-500 mt-2">The conversion is fired as a detached task, so a test driving <span class="mono">/tune</span> can't observe whether the VOD was appended. Tests today reach <em>past</em> the handler and call <span class="mono">convert_channel_to_vod_loop</span> directly — the interface is not the test surface.</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — logic tangled in handler + spawn</div>
+              <pre class="mermaid">
+flowchart TD
+  N[next_live handler] --> CL[classify outcome]
+  CL --> SP[tokio::spawn]
+  SP --> FV[fetch_video_id]
+  SP --> FD[fetch_duration]
+  SP --> CV[convert_channel_to_vod_loop]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class N,SP leak
+              </pre>
+            </div>
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4">
+              <div class="text-xs uppercase tracking-wider text-emerald-600 mb-3">After — deep core, spawn is just an adapter</div>
+              <pre class="mermaid">
+flowchart TD
+  N[next_live handler] --> CORE[broadcast::convert_if_ended]
+  subgraph deepmod[deep, awaitable, testable]
+    CORE --- FV2[fetch id/duration]
+    CORE --- CV2[append + flip type]
+  end
+  N -. detached .-> SP2[spawn = thin adapter]
+  SP2 --> CORE
+              </pre>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <div><span class="font-semibold text-slate-700">Problem</span> — the conversion's correctness (idempotency, failure handling, anchor) is only reachable by bypassing the handler; the spawn hides it from the request path's tests.</div>
+            <div><span class="font-semibold text-slate-700">Solution</span> — extract a <span class="mono">broadcast::convert_if_ended(...)</span> deep module with a synchronous, awaitable core that returns an outcome; the <span class="mono">tokio::spawn</span> becomes a one-line adapter over it.</div>
+          </div>
+          <ul class="grid sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm text-slate-700 list-disc list-inside">
+            <li>The interface becomes the test surface</li>
+            <li>Locality: idempotency + failure modes in one place</li>
+            <li>Handler shrinks to "call, spawn, respond"</li>
+            <li>Tests stop reaching past the seam</li>
+          </ul>
+          <p class="text-xs text-slate-500">Deletion test: the conversion logic concentrates real complexity (atomic flip, idempotency) — it earns a module; today it just lacks a clean seam.</p>
+        </div>
+      </article>
+
+      <!-- ============ CANDIDATE 4 ============ -->
+      <article id="c4" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-6 space-y-5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">4 · Collapse the stream-proxy fetch loop into a deep module</h2>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 uppercase tracking-wide">Worth exploring</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+          </div>
+
+          <div class="mono text-sm text-slate-500">src/routes/player.rs <span class="text-slate-400">(stream_proxy:374–566 — ~193 lines)</span></div>
+
+          <!-- cross-section: many thin layers vs one thick band -->
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — one opaque 193-line handler</div>
+              <div class="space-y-1">
+                <div class="h-9 border-l-4 border-slate-400 bg-slate-50 flex items-center px-3 text-xs mono text-slate-600">scheme validation</div>
+                <div class="h-9 border-l-4 border-slate-400 bg-slate-50 flex items-center px-3 text-xs mono text-slate-600">SSRF check</div>
+                <div class="h-9 border-l-4 border-slate-400 bg-slate-50 flex items-center px-3 text-xs mono text-slate-600">5-attempt redirect loop</div>
+                <div class="h-9 border-l-4 border-slate-400 bg-slate-50 flex items-center px-3 text-xs mono text-slate-600">playlist detection</div>
+                <div class="h-9 border-l-4 border-slate-400 bg-slate-50 flex items-center px-3 text-xs mono text-slate-600">HLS vs DASH rewrite</div>
+                <div class="h-9 border-l-4 border-slate-400 bg-slate-50 flex items-center px-3 text-xs mono text-slate-600">segment streaming + metrics</div>
+              </div>
+              <p class="text-xs text-slate-500 mt-3">All six concerns inline in the HTTP handler. Add a manifest format → patch this function.</p>
+            </div>
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4">
+              <div class="text-xs uppercase tracking-wider text-emerald-600 mb-3">After — thin handler over a deep fetch module</div>
+              <div class="space-y-2">
+                <div class="h-9 border-l-4 border-emerald-500 bg-white flex items-center px-3 text-xs mono text-slate-700">handler: extract url, stream response</div>
+                <div class="deep rounded-md p-3 text-white">
+                  <div class="text-xs uppercase tracking-wider text-slate-300">proxy::fetch_rewritten(url)</div>
+                  <div class="mt-2 space-y-1 hatch rounded p-2">
+                    <div class="text-[10px] mono text-slate-500">ssrf · redirect-follow · detect · rewrite (now internal)</div>
+                  </div>
+                </div>
+              </div>
+              <p class="text-xs text-emerald-700 mt-3">Redirect-follow, SSRF, detection and rewrite become internal seams of one module. The handler only knows <span class="mono">fetch_rewritten(url) -&gt; Response</span>.</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <div><span class="font-semibold text-slate-700">Problem</span> — HTTP plumbing and proxy business logic are interleaved in one long handler; rewrite changes mean editing the request handler.</div>
+            <div><span class="font-semibold text-slate-700">Solution</span> — a <span class="mono">proxy</span> module exposing <span class="mono">fetch_rewritten(url) -&gt; Response</span>, with redirect/SSRF/detect/rewrite as internal seams (the latter two already partly in <span class="mono">media::hls/mpd</span>).</div>
+          </div>
+          <ul class="grid sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm text-slate-700 list-disc list-inside">
+            <li>Handler returns to HTTP-only concerns</li>
+            <li>Leverage: proxy logic testable without a router</li>
+            <li>New format = edit one internal seam</li>
+            <li>Locality: redirect/SSRF rules in one module</li>
+          </ul>
+        </div>
+      </article>
+
+      <!-- ============ CANDIDATE 5 ============ -->
+      <article id="c5" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-6 space-y-5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">5 · Fold the budget-badge dance behind the row build</h2>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700 uppercase tracking-wide">Speculative</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+          </div>
+
+          <div class="mono text-sm text-slate-500 space-y-0.5">
+            <div>src/routes/admin/channels.rs:292 · admin/sources.rs:123 · admin/playlist.rs:141</div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 p-4 grid md:grid-cols-2 gap-5">
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — repeated 3-line dance</div>
+              <pre class="text-[11px] mono bg-slate-50 rounded p-3 text-slate-700 leading-relaxed">let cors = state.cors_cache
+    .read().await.clone();
+let row: AdminRow = x.into();
+row.apply_budget(&cors);</pre>
+              <p class="text-xs text-slate-500 mt-2">Same incantation in every admin handler that renders a row. Pure pass-through — forget <span class="mono">apply_budget</span> and the badge silently goes blank.</p>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wider text-emerald-600 mb-2">After — one builder owns it</div>
+              <pre class="text-[11px] mono bg-emerald-50 rounded p-3 text-slate-700 leading-relaxed">let rows = AdminRow::build(
+    items, &state.cors_cache
+).await;</pre>
+              <p class="text-xs text-emerald-700 mt-2">The cache read + budget apply live inside the builder. Callers can't forget the step because they don't perform it.</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <div><span class="font-semibold text-slate-700">Problem</span> — the badge-fill step is a manual ritual repeated across handlers; easy to omit, never reused.</div>
+            <div><span class="font-semibold text-slate-700">Solution</span> — a row-builder that reads the cache and applies the budget internally, returning ready-to-render rows.</div>
+          </div>
+          <ul class="grid sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm text-slate-700 list-disc list-inside">
+            <li>Locality: badge logic in one builder</li>
+            <li>Removes a forgettable manual step</li>
+            <li>Smallest payoff of the five</li>
+          </ul>
+          <p class="text-xs text-slate-500">Speculative: low mass. Worth doing opportunistically when next touching these handlers, not as standalone work.</p>
+        </div>
+      </article>
+
+      </section>
+
+      <!-- ============ TOP RECOMMENDATION ============ -->
+      <section id="top-recommendation">
+        <div class="deep text-white rounded-xl p-8 shadow-md">
+          <div class="text-xs uppercase tracking-widest text-emerald-300 mb-2">Top recommendation</div>
+          <h2 class="text-2xl font-serif mb-3">Start with <a href="#c1" class="underline decoration-emerald-400 underline-offset-4">#1 — deepen channel/source/playlist intake</a>.</h2>
+          <p class="text-slate-300 max-w-3xl text-sm leading-relaxed">
+            It is the only <strong>Strong</strong> candidate, and the seam is already half-built: the JSON adapter
+            extracted <span class="mono">parse_type</span>/<span class="mono">normalize_logo</span>/<span class="mono">resolve_anchor</span> and
+            even reaches into the form module for <span class="mono">parse_loop_anchor</span>. Two real adapters (form + JSON) justify the
+            seam today; you are completing a deepening the code is already drifting toward, not inventing one. Highest
+            leverage, clearest locality win, and it shrinks six handlers at once.
+          </p>
+        </div>
+      </section>
+
+      <footer class="text-center text-xs text-slate-400 pt-4">
+        No <span class="mono">CONTEXT.md</span> or <span class="mono">docs/adr/</span> present — language drawn from docs/architecture/. No ADR conflicts found.
+      </footer>
+    </main>
+  </body>
+</html>
