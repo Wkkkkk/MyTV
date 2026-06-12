@@ -21,7 +21,7 @@ Live instance: https://kunstv.fly.dev/
 
 ```bash
 cargo build            # compile
-cargo test             # 382 tests: 279 unit + 103 integration (8 ignored — need yt-dlp/network)
+cargo test             # 399 tests: 294 unit + 105 integration (9 ignored — need yt-dlp/network)
 cargo fmt              # format (ALWAYS run before committing)
 cargo clippy           # lint (CI runs with -D warnings)
 cargo run              # start server on :3000
@@ -77,7 +77,7 @@ tests/
 
 **Player routes return JSON**: `/channel/:id/tune` and `/channel/:id/next` return `Json<TuneResponse>` with HTTP 200 on success or HTTP 503 on failure. They do not redirect. `TuneResponse` carries two booleans beyond the metadata: `skip_proxy` (player uses the unproxied resolved URL for `<video src>` — set for resolved YouTube VOD direct MP4s) and `ended` (the live broadcast finished; client auto-advances).
 
-**Ended live → VOD**: `next_live` calls `resolver::resolve_url_with_status` (one yt-dlp subprocess that prints `live_status` + URL). When the returned status is `WasLive` or `PostLive`, or the resolved URL contains `force_finished/1` (fallback for extractors that don't set `live_status`), the handler returns `{ ended: true, url: "" }` and fires a detached `tokio::spawn` (`convert_channel_to_vod_loop`) that appends the recording as a `playlist_item`, flips the channel to `vod_loop`, and deactivates the sources. Idempotent; no migration (recording URL lives on the playlist_item). See `docs/architecture/tune-flow.md`.
+**Ended live → VOD**: `next_live` calls `resolver::resolve_url_with_status` (one yt-dlp subprocess that prints `live_status` + URL). When the returned status is `WasLive` or `PostLive`, or the resolved URL contains `force_finished/1` (fallback for extractors that don't set `live_status`), the handler returns `{ ended: true, url: "" }` and fires a detached `tokio::spawn` (`broadcast::spawn_conversion`) that runs `broadcast::convert_if_ended`: the awaitable conversion core in `src/broadcast.rs` takes the watch-url/duration resolution as an injected closure (`resolve_recording` in production), then flips the channel to `vod_loop`, appends the recording as a `playlist_item`, and deactivates the sources. Resolve runs before the atomic flip, which is the idempotency gate. The injected-closure seam makes the whole conversion testable without yt-dlp. Idempotent; no migration (recording URL lives on the playlist_item). See `docs/architecture/tune-flow.md`.
 
 **VOD position**: `tune_vod_at` computes current playlist position using `Utc::now()` and the channel's `loop_anchor`. The returned URL depends on current time — tests assert `url.contains(...)` rather than exact equality.
 

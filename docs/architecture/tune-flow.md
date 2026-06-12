@@ -79,21 +79,21 @@ flowchart TD
 
 Resolution returns the URL plus yt-dlp's `live_status`; the handler treats the broadcast as ended when the status is `was_live` (recording processed) or `post_live` (just ended), or — as a fallback for extractors without `live_status` — when `resolver::is_finished_live` detects a `force_finished/1` manifest. In any of these cases, the handler does **not** return the dead manifest. Instead it:
 
-1. Fires a detached `tokio::spawn` task (`spawn_live_to_vod_conversion`) and returns `TuneResponse { ended: true, url: "" }` immediately.
+1. Fires a detached `tokio::spawn` task (`broadcast::spawn_conversion`) and returns `TuneResponse { ended: true, url: "" }` immediately.
 2. The frontend shows a brief "Stream ended — switching…" overlay and auto-advances to the next channel in the lineup (loop-guarded, cancelled on a manual tune).
 
-The background task (`live_to_vod_conversion` → `convert_channel_to_vod_loop`):
+The background task (`broadcast::spawn_conversion` → `broadcast::convert_if_ended`, with the watch-url/duration resolution injected as `broadcast::resolve_recording`):
 
 ```
 watch_url = live_url_to_watch_url(source_url)            # youtube.com/live/<id> → watch?v=<id>
           ?? "watch?v=" + fetch_video_id(source_url)     # fallback for handle/channel /live forms
-duration  = fetch_duration_secs(watch_url)
+duration  = fetch_duration_secs(watch_url)               # the injected resolve_recording step
+if !channel::set_type_and_anchor_if_live(VodLoop, anchor = now): return AlreadyConverted
 create playlist_item { url: watch_url, duration, sort_order: 0 }
-channel::set_type_and_anchor(VodLoop, anchor = now)
 source::deactivate_all_for_channel(...)
 ```
 
-The conversion is **idempotent** — a channel already in `vod_loop` is left untouched, so concurrent tunes that both observe the ended manifest don't create duplicate items. No schema migration was needed: the recording URL lives on the new `playlist_item`, not the source.
+Resolution runs **before** the claim, so a failed resolve leaves the channel live (an empty VOD would 503). The `set_type_and_anchor_if_live` flip is both the type change and the idempotency gate. The conversion is **idempotent** — a channel already in `vod_loop` loses the claim and is left untouched, so concurrent tunes that both observe the ended manifest don't create duplicate items. No schema migration was needed: the recording URL lives on the new `playlist_item`, not the source.
 
 ## Notes
 
