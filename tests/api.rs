@@ -432,3 +432,85 @@ async fn playlist_test_endpoint_returns_item() {
     assert_eq!(json["id"], 1);
     assert!(!json["last_checked_at"].is_null());
 }
+
+#[tokio::test]
+async fn discover_resolve_non_youtube_url_is_deterministic() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/resolve",
+            serde_json::json!({"url": "https://cdn.example.com/live.m3u8"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let j = body_json(r).await;
+    assert_eq!(j["url"], "https://cdn.example.com/live.m3u8");
+    assert_eq!(j["title"], "https://cdn.example.com/live.m3u8");
+    assert_eq!(j["duration_secs"], 0);
+    assert_eq!(j["is_live"], true);
+    assert_eq!(j["source_kind"], "hls");
+}
+
+#[tokio::test]
+async fn discover_resolve_bad_url_is_422() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/resolve",
+            serde_json::json!({"url": "ftp://nope"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn discover_channel_valid_youtube_handle() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/channel",
+            serde_json::json!({"url": "https://www.youtube.com/@NASA"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let j = body_json(r).await;
+    assert_eq!(j["source_kind"], "youtube_live");
+    assert_eq!(j["is_live"], true);
+}
+
+#[tokio::test]
+async fn discover_channel_non_youtube_is_422() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/channel",
+            serde_json::json!({"url": "https://example.com/notyt"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn discover_resolve_requires_auth() {
+    let r = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/discover/resolve")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"url":"https://x/y.m3u8"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+}

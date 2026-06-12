@@ -3,6 +3,7 @@
 //! requests use the DTOs defined per submodule.
 
 mod channels;
+mod discover;
 mod playlist;
 mod sources;
 
@@ -86,4 +87,6 @@ pub fn api_router() -> Router<AppState> {
         )
         .route("/playlist/:id/toggle", post(playlist::toggle))
         .route("/playlist/:id/test", post(playlist::test))
+        .route("/discover/resolve", post(discover::resolve))
+        .route("/discover/channel", post(discover::channel))
 }
