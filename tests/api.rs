@@ -636,3 +636,20 @@ async fn discover_add_unknown_existing_channel_is_404() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn discover_add_invalid_source_kind_is_422() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/add",
+            serde_json::json!({
+                "url": "https://cdn.example.com/x.m3u8", "title": "X", "source_kind": "bogus",
+                "channel": {"existing_id": 1}
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
