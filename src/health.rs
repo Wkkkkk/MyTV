@@ -224,6 +224,82 @@ pub async fn probe_playlist_item(
     }
 }
 
+/// A health-probe target: a live/VOD source row, or a playlist item. `probe`
+/// classifies the variant and runs the full pipeline (health update, CORS cache,
+/// and — for resolution-needed URLs — the resolved-CDN CORS probe / VOD host mark)
+/// internally, so callers never branch on the URL kind.
+pub enum ProbeTarget<'a> {
+    Source(&'a Source),
+    PlaylistItem(&'a crate::model::playlist_item::PlaylistItem),
+}
+
+/// Probes a target's health and warms the CORS cache, without touching `is_active`.
+/// Used by the admin + JSON-API Test buttons. Dispatches on the target kind:
+/// a `Source` consults the live-status cache and, when the URL needs resolution,
+/// resolves it to probe the real CDN's CORS; a `PlaylistItem` skips the live cache
+/// and, when its URL needs resolution, marks the host Direct (VOD items bypass the
+/// proxy entirely).
+pub async fn probe(
+    pool: &SqlitePool,
+    client: &reqwest::Client,
+    cors_cache: &CorsCache,
+    live_cache: &LiveStatusCache,
+    target: ProbeTarget<'_>,
+) {
+    match target {
+        ProbeTarget::Source(src) => {
+            let ok = run_check(
+                client,
+                &src.url,
+                &src.kind,
+                src.consecutive_failures,
+                Some(live_cache),
+                |status, reason, failures| async move {
+                    source::update_health(pool, src.id, status, reason.as_deref(), failures, None)
+                        .await
+                },
+            )
+            .await;
+            if ok {
+                probe_and_cache_cors(client, cors_cache, &src.url).await;
+            }
+            if crate::media::resolver::needs_resolution(&src.url) {
+                probe_and_cache_resolved_cors(client, cors_cache, &src.url).await;
+            }
+        }
+        ProbeTarget::PlaylistItem(item) => {
+            let kind = crate::model::source::SourceKind::detect(&item.url);
+            let ok = run_check(
+                client,
+                &item.url,
+                kind.as_str(),
+                item.consecutive_failures,
+                None,
+                |status, reason, failures| async move {
+                    crate::model::playlist_item::update_health(
+                        pool,
+                        item.id,
+                        status,
+                        reason.as_deref(),
+                        failures,
+                        None,
+                    )
+                    .await
+                },
+            )
+            .await;
+            if ok {
+                probe_and_cache_cors(client, cors_cache, &item.url).await;
+            }
+            if crate::media::resolver::needs_resolution(&item.url) {
+                // VOD items bypass the proxy entirely, so their host is Direct outright.
+                let host = crate::media::hls::extract_manifest_host(&item.url);
+                cors_cache.write().await.insert(host, true);
+            }
+        }
+    }
+}
+
 /// Probes CORS for one URL and caches the result keyed by host. Returns `None`
 /// (a no-op, leaving the cache unchanged) for non-HTTPS URLs or resolution-needed
 /// (youtube/twitch) URLs, which have no stable HLS manifest to probe.
@@ -702,6 +778,58 @@ mod tests {
         assert!(after.is_active);
         assert_eq!(after.consecutive_failures, 0);
         assert_eq!(after.last_status.as_deref(), Some("ok"));
+    }
+
+    #[tokio::test]
+    async fn probe_marks_needs_resolution_vod_item_host_direct() {
+        let pool = crate::db::connect("sqlite::memory:").await.unwrap();
+        let ch = crate::model::channel::create(
+            &pool,
+            crate::model::channel::NewChannel {
+                name: "vod".to_string(),
+                category: "test".to_string(),
+                logo_url: None,
+                channel_type: crate::model::channel::ChannelType::VodLoop,
+                sort_order: 0,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap();
+        let item = crate::model::playlist_item::create(
+            &pool,
+            crate::model::playlist_item::NewPlaylistItem {
+                channel_id: ch.id,
+                title: "rec".to_string(),
+                url: "https://www.youtube.com/watch?v=abc123".to_string(),
+                duration_secs: 3600,
+                sort_order: 0,
+            },
+        )
+        .await
+        .unwrap();
+
+        let client = reqwest::Client::new();
+        let cors_cache: crate::CorsCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let live_cache: LiveStatusCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+
+        probe(
+            &pool,
+            &client,
+            &cors_cache,
+            &live_cache,
+            ProbeTarget::PlaylistItem(&item),
+        )
+        .await;
+
+        let host = crate::media::hls::extract_manifest_host(&item.url);
+        assert_eq!(
+            cors_cache.read().await.get(&host).copied(),
+            Some(true),
+            "needs-resolution VOD item host must be marked Direct"
+        );
     }
 
     #[tokio::test]
