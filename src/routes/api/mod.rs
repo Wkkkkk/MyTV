@@ -44,6 +44,12 @@ impl IntoResponse for ApiError {
     }
 }
 
+impl From<crate::model::IntakeError> for ApiError {
+    fn from(e: crate::model::IntakeError) -> Self {
+        ApiError::Validation(e.0)
+    }
+}
+
 /// Map any model/db error to a logged 500.
 pub(crate) fn internal<E: std::fmt::Display>(e: E) -> ApiError {
     tracing::error!("api error: {e}");
