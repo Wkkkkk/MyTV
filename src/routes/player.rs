@@ -1,15 +1,12 @@
 use axum::{
-    body::Bytes,
     extract::{Path, Query, State},
-    http::{HeaderMap, HeaderValue, StatusCode},
-    response::{IntoResponse, Json, Response},
+    http::{HeaderMap, StatusCode},
+    response::{Json, Response},
 };
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::Ordering;
 
 use crate::{
-    media::{hls, mpd, resolver},
+    media::resolver,
     model::{
         channel::{self, ChannelType},
         playlist_item, source,
@@ -308,191 +305,12 @@ pub struct StreamProxyQuery {
     pub url: String,
 }
 
-fn resolve_location(location: &str, base_url: &str) -> Option<String> {
-    if location.starts_with("http://") || location.starts_with("https://") {
-        return Some(location.to_string());
-    }
-    reqwest::Url::parse(base_url)
-        .ok()?
-        .join(location)
-        .ok()
-        .map(|u| u.to_string())
-}
-
-fn detect_playlist(content_type: &str, url: &str) -> bool {
-    let lower = url.to_lowercase();
-    let path = &lower[..lower.find('?').unwrap_or(lower.len())];
-    let is_dash = content_type.contains("dash+xml") || path.ends_with(".mpd");
-    is_dash || content_type.contains("mpegurl") || path.ends_with(".m3u8") || path.ends_with(".m3u")
-}
-
-async fn resolve_direct_segments(state: &AppState, base_url: &str) -> bool {
-    let host_key = crate::media::hls::extract_manifest_host(base_url);
-    {
-        let cache = state.cors_cache.read().await;
-        if let Some(&cached) = cache.get(&host_key) {
-            return cached;
-        }
-    }
-    // Cache miss: delegate to health::probe_and_cache_cors.
-    // Re-fetches the manifest internally; cache misses are rare (once per host per session).
-    crate::health::probe_and_cache_cors(&state.http_client, &state.cors_cache, base_url)
-        .await
-        .unwrap_or(false)
-}
-
 pub async fn stream_proxy(
     State(state): State<AppState>,
     Query(q): Query<StreamProxyQuery>,
     request_headers: HeaderMap,
 ) -> Response {
-    if !q.url.starts_with("http://") && !q.url.starts_with("https://") {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-
-    let mut url = q.url;
-    let mut upstream = None;
-
-    for _ in 0..5 {
-        // DNS resolved at check time; a hostile server can rebind between check and connect (TOCTOU).
-        if let Err(e) = crate::ssrf::is_safe_url_cached(&url, &state.ssrf_cache).await {
-            tracing::warn!(url = %url, reason = %e, "stream proxy SSRF check failed");
-            return StatusCode::UNPROCESSABLE_ENTITY.into_response();
-        }
-        let mut req = state.proxy_client.get(&url);
-        if let Some(range) = request_headers.get(axum::http::header::RANGE) {
-            req = req.header(axum::http::header::RANGE, range);
-        }
-        let resp = match req.send().await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(url = %url, error = %e, "stream proxy fetch failed");
-                return StatusCode::BAD_GATEWAY.into_response();
-            }
-        };
-        if resp.status().is_redirection() {
-            let location = match resp
-                .headers()
-                .get(axum::http::header::LOCATION)
-                .and_then(|v| v.to_str().ok())
-            {
-                Some(loc) => loc.to_string(),
-                None => return StatusCode::BAD_GATEWAY.into_response(),
-            };
-            url = match resolve_location(&location, &url) {
-                Some(resolved) => resolved,
-                None => return StatusCode::BAD_GATEWAY.into_response(),
-            };
-            continue;
-        }
-        upstream = Some(resp);
-        break;
-    }
-
-    let mut upstream = match upstream {
-        Some(r) => r,
-        None => return StatusCode::BAD_GATEWAY.into_response(),
-    };
-
-    let status = upstream.status();
-
-    let ct = upstream
-        .headers()
-        .get(axum::http::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_owned();
-
-    let is_playlist = detect_playlist(&ct, &url);
-
-    // RFC 7230 §6.1: collect headers listed in Connection so we can strip them too.
-    let connection_options: Vec<String> = upstream
-        .headers()
-        .get(axum::http::header::CONNECTION)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').map(|t| t.trim().to_lowercase()).collect())
-        .unwrap_or_default();
-
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_static("*"),
-    );
-    for (key, val) in upstream.headers() {
-        // Never forward CORS header (we own it) or hop-by-hop headers (RFC 7230 §6.1).
-        if key == axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN
-            || key == axum::http::header::CONNECTION
-            || key == axum::http::header::TRANSFER_ENCODING
-            || key == axum::http::header::TE
-            || key == axum::http::header::TRAILER
-            || key == axum::http::header::UPGRADE
-            || connection_options.iter().any(|o| o == key.as_str())
-        {
-            continue;
-        }
-        headers.append(key.clone(), val.clone());
-    }
-
-    if is_playlist {
-        headers.remove(axum::http::header::CONTENT_LENGTH);
-        const MAX_BODY: usize = 20 * 1024 * 1024;
-        let mut collected: Vec<u8> = Vec::new();
-        loop {
-            match upstream.chunk().await {
-                Ok(Some(chunk)) => {
-                    if collected.len() + chunk.len() > MAX_BODY {
-                        tracing::warn!(url = %url, "stream proxy response exceeds 20 MB cap");
-                        return StatusCode::BAD_GATEWAY.into_response();
-                    }
-                    collected.extend_from_slice(&chunk);
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    tracing::warn!(url = %url, error = %e, "stream proxy read failed");
-                    return StatusCode::BAD_GATEWAY.into_response();
-                }
-            }
-        }
-        let body_bytes = Bytes::from(collected);
-        state
-            .metrics
-            .proxy_bytes
-            .fetch_add(body_bytes.len() as u64, Ordering::Relaxed);
-        let text = String::from_utf8_lossy(&body_bytes);
-        let direct = resolve_direct_segments(&state, &url).await;
-        let is_dash_playlist = ct.contains("dash+xml") || url.to_lowercase().ends_with(".mpd");
-        let (rewritten, content_type) = if is_dash_playlist {
-            (
-                mpd::rewrite_mpd_urls(&text, &url, direct),
-                "application/dash+xml",
-            )
-        } else {
-            (
-                hls::rewrite_hls_urls(&text, &url, direct),
-                "application/vnd.apple.mpegurl",
-            )
-        };
-        headers.insert(
-            axum::http::header::CONTENT_TYPE,
-            HeaderValue::from_static(content_type),
-        );
-        (status, headers, rewritten).into_response()
-    } else {
-        // Guard lives inside the closure, so active_streams decrements when the
-        // client drops the body stream, not when this handler returns.
-        let guard = crate::metrics::ActiveStreamGuard::new(state.metrics.clone());
-        let metrics = state.metrics.clone();
-        let counted = upstream.bytes_stream().inspect(move |chunk| {
-            // Referencing guard makes the move-closure capture it for the stream's lifetime.
-            let _hold = &guard;
-            if let Ok(c) = chunk {
-                metrics
-                    .proxy_bytes
-                    .fetch_add(c.len() as u64, Ordering::Relaxed);
-            }
-        });
-        (status, headers, axum::body::Body::from_stream(counted)).into_response()
-    }
+    crate::proxy::fetch_rewritten(&state, q.url, &request_headers).await
 }
 
 #[cfg(test)]
@@ -971,101 +789,6 @@ mod tests {
         assert!(is_ended_live(
             Unknown,
             "https://r5---sn.googlevideo.com/a/force_finished/1/b/index.m3u8"
-        ));
-    }
-
-    // ── resolve_location ─────────────────────────────────────────────────────
-
-    #[test]
-    fn resolve_location_absolute_passthrough() {
-        assert_eq!(
-            resolve_location(
-                "https://cdn.example.com/new.m3u8",
-                "https://origin.example.com/old.m3u8",
-            ),
-            Some("https://cdn.example.com/new.m3u8".to_string())
-        );
-    }
-
-    #[test]
-    fn resolve_location_root_relative() {
-        assert_eq!(
-            resolve_location("/live/index.m3u8", "https://cdn.example.com/old/path.m3u8"),
-            Some("https://cdn.example.com/live/index.m3u8".to_string())
-        );
-    }
-
-    #[test]
-    fn resolve_location_relative_path() {
-        assert_eq!(
-            resolve_location("index.m3u8", "https://cdn.example.com/live/master.m3u8"),
-            Some("https://cdn.example.com/live/index.m3u8".to_string())
-        );
-    }
-
-    #[test]
-    fn resolve_location_unparseable_base_returns_none() {
-        assert_eq!(resolve_location("/path", "not-a-url"), None);
-    }
-
-    #[test]
-    fn resolve_location_protocol_relative() {
-        assert_eq!(
-            resolve_location(
-                "//cdn.example.com/stream.m3u8",
-                "https://origin.example.com/master.m3u8",
-            ),
-            Some("https://cdn.example.com/stream.m3u8".to_string())
-        );
-    }
-
-    // ── detect_playlist ──────────────────────────────────────────────────────
-
-    #[test]
-    fn test_detect_playlist_hls_manifest_by_extension() {
-        assert!(detect_playlist(
-            "application/octet-stream",
-            "https://cdn.example.com/live/index.m3u8"
-        ));
-    }
-
-    #[test]
-    fn test_detect_playlist_hls_manifest_by_content_type() {
-        assert!(detect_playlist(
-            "application/vnd.apple.mpegurl",
-            "https://cdn.example.com/live/stream"
-        ));
-    }
-
-    #[test]
-    fn test_detect_playlist_dash_manifest() {
-        assert!(detect_playlist(
-            "application/dash+xml",
-            "https://cdn.example.com/stream.mpd"
-        ));
-    }
-
-    #[test]
-    fn test_detect_playlist_youtube_live_segment_not_playlist() {
-        // YouTube live segment URL has .m3u8 as an intermediate path component,
-        // not the final path element — must NOT be treated as a playlist.
-        let seg_url = "https://rr1---sn-cgxqc5oqufv-5gos.googlevideo.com/videoplayback/\
-            id/abc123/itag/300/source/yt_live_broadcast/\
-            playlist/index.m3u8/sq/174385/file/seg.ts";
-        assert!(!detect_playlist("application/octet-stream", seg_url));
-    }
-
-    #[test]
-    fn test_detect_playlist_youtube_live_segment_with_query_not_playlist() {
-        let seg_url = "https://cdn.example.com/playlist/index.m3u8/sq/123/file/seg.ts?expire=999";
-        assert!(!detect_playlist("application/octet-stream", seg_url));
-    }
-
-    #[test]
-    fn test_detect_playlist_plain_ts_segment_not_playlist() {
-        assert!(!detect_playlist(
-            "application/octet-stream",
-            "https://cdn.example.com/hls/seg1.ts"
         ));
     }
 }
