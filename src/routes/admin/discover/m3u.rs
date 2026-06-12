@@ -120,3 +120,55 @@ pub(super) fn country_to_code(input: &str) -> Option<String> {
         .find(|(name, _)| s.contains(name))
         .map(|(_, code)| code.to_string())
 }
+
+/// Fetch + parse + filter the iptv-org M3U, then keep only reachable entries
+/// (capped at `limit`). Shared by the HTML handler and the JSON API.
+pub(crate) async fn search(
+    client: &reqwest::Client,
+    country: &str,
+    group: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<M3uResultRow>> {
+    let country_code = if country.trim().is_empty() {
+        None
+    } else {
+        country_to_code(country)
+    };
+    let raw = fetch_m3u(client, country_code.as_deref()).await?;
+    let all = crate::media::m3u::parse_m3u(&raw);
+    let matches: Vec<_> = crate::media::m3u::filter_m3u(&all, "", group)
+        .into_iter()
+        .take(limit)
+        .collect();
+
+    let handles: Vec<_> = matches
+        .iter()
+        .map(|ch| {
+            let client = client.clone();
+            let url = ch.url.clone();
+            tokio::spawn(async move { url_is_reachable(&client, &url).await })
+        })
+        .collect();
+    let mut reachable = Vec::with_capacity(handles.len());
+    for h in handles {
+        reachable.push(h.await.unwrap_or(false));
+    }
+
+    let rows = matches
+        .iter()
+        .zip(reachable)
+        .filter(|(_, ok)| *ok)
+        .enumerate()
+        .map(|(i, (ch, _))| M3uResultRow {
+            name: ch.name.clone(),
+            group: ch.group.clone(),
+            country: ch.country.clone(),
+            url: ch.url.clone(),
+            source_kind: crate::model::source::SourceKind::detect(&ch.url)
+                .as_str()
+                .to_string(),
+            form_id: i,
+        })
+        .collect();
+    Ok(rows)
+}
