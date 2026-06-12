@@ -1401,3 +1401,53 @@ async fn admin_channel_detail_shows_live_badge_for_youtube_source() {
     assert!(body.contains("hx-get=\"/admin/live-status?url="));
     assert!(body.contains("youtube.com/%40NASA/live"));
 }
+
+#[tokio::test]
+async fn test_tune_live_includes_source_identity() {
+    let response = app().await.oneshot(req("/channel/1/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    // Channel 1's only active source is seed source id 1 / live.m3u8.
+    assert_eq!(json["source_id"].as_i64().unwrap(), 1);
+    assert_eq!(
+        json["source_url"].as_str().unwrap(),
+        "https://stream.example.com/live.m3u8"
+    );
+    // A live tune has no playlist item.
+    assert!(json["playlist_item_id"].is_null());
+}
+
+#[tokio::test]
+async fn test_tune_vod_includes_playlist_item_id() {
+    let response = app().await.oneshot(req("/channel/4/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    // VOD playback comes from a playlist item, not a source.
+    assert!(!json["playlist_item_id"].is_null());
+    assert!(json["source_id"].is_null());
+    assert!(json["source_url"].is_null());
+}
+
+#[tokio::test]
+async fn test_watch_known_channel_injects_auto_tune() {
+    let response = app().await.oneshot(req("/watch/1")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("window.__autoTuneChannelId = 1;"));
+}
+
+#[tokio::test]
+async fn test_watch_unknown_channel_falls_back_to_guide() {
+    let response = app().await.oneshot(req("/watch/999999")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(!body.contains("window.__autoTuneChannelId = "));
+}
+
+#[tokio::test]
+async fn test_guide_has_no_auto_tune() {
+    let response = app().await.oneshot(req("/guide")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(!body.contains("window.__autoTuneChannelId = "));
+}

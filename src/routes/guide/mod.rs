@@ -4,13 +4,13 @@ mod layout;
 
 use askama::Template;
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::Html,
 };
 use serde::Deserialize;
 
-use crate::AppState;
+use crate::{model::channel, AppState};
 
 use data::{build_guide_data, ChannelRow, GuideData};
 use layout::TimeLabel;
@@ -18,7 +18,7 @@ use layout::TimeLabel;
 // ── template structs ───────────────────────────────────────────────────────
 
 macro_rules! define_guide_template {
-    ($name:ident, $path:literal) => {
+    ($name:ident, $path:literal $(, $extra:ident : $ty:ty = $default:expr)*) => {
         #[derive(Template)]
         #[template(path = $path)]
         struct $name {
@@ -32,6 +32,7 @@ macro_rules! define_guide_template {
             now_pct: Option<f64>,
             rows: Vec<ChannelRow>,
             channels_json: String,
+            $($extra: $ty,)*
         }
 
         impl From<GuideData> for $name {
@@ -47,14 +48,15 @@ macro_rules! define_guide_template {
                     now_pct: d.now_pct,
                     rows: d.rows,
                     channels_json: d.channels_json,
+                    $($extra: $default,)*
                 }
             }
         }
     };
 }
 
-define_guide_template!(GuidePageTemplate, "guide.html");
 define_guide_template!(EpgContentTemplate, "partials/epg_content.html");
+define_guide_template!(GuidePageTemplate, "guide.html", auto_tune_channel_id: Option<i64> = None);
 
 // ── query params ───────────────────────────────────────────────────────────
 
@@ -110,6 +112,23 @@ pub async fn guide_page(
 ) -> Result<Html<String>, StatusCode> {
     let data = load_data(&state, params).await?;
     render_or_500(GuidePageTemplate::from(data))
+}
+
+pub async fn watch_page(
+    State(state): State<AppState>,
+    Path(channel_id): Path<i64>,
+    Query(params): Query<GuideQuery>,
+) -> Result<Html<String>, StatusCode> {
+    let exists = channel::get(&state.pool, channel_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .is_some();
+    let data = load_data(&state, params).await?;
+    let mut tpl = GuidePageTemplate::from(data);
+    if exists {
+        tpl.auto_tune_channel_id = Some(channel_id);
+    }
+    render_or_500(tpl)
 }
 
 pub async fn guide_partial(
