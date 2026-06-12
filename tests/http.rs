@@ -984,6 +984,22 @@ async fn channel_detail_renders_status_column() {
     assert!(!body.contains("<th>Live</th>"), "old Live header removed");
 }
 
+#[tokio::test]
+async fn channel_detail_vod_renders_playlist_status_column() {
+    let response = app()
+        .await
+        .oneshot(authed("/admin/channels/4"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("<th>Status</th>"));
+    assert!(
+        !body.contains("<th>Active</th>"),
+        "old Active header removed"
+    );
+}
+
 // Discover page
 
 #[tokio::test]

@@ -70,9 +70,10 @@ pub struct AdminPlaylistItemRow {
     pub budget_badge_class: &'static str,
     pub budget_badge_char: &'static str,
     pub is_active: bool,
-    pub last_status: Option<String>,
-    pub consecutive_failures: i64,
     pub failure_reason: Option<String>,
+    pub status_color: &'static str,
+    pub status_glyph: &'static str,
+    pub status_title: String,
 }
 
 impl AdminPlaylistItemRow {
@@ -143,6 +144,14 @@ impl From<playlist_item::PlaylistItem> for AdminPlaylistItemRow {
     fn from(i: playlist_item::PlaylistItem) -> Self {
         let (budget_badge_class, budget_badge_char) =
             crate::budget::budget_badge(crate::budget::BudgetStatus::Unknown);
+        let status = crate::status::compute(
+            i.is_active,
+            "hls", // playlist items use health only — never the youtube_live live branch
+            i.last_status.as_deref(),
+            i.failure_reason.as_deref(),
+            None,
+        );
+        let badge = crate::status::status_badge(&status);
         Self {
             id: i.id,
             title: i.title,
@@ -152,9 +161,10 @@ impl From<playlist_item::PlaylistItem> for AdminPlaylistItemRow {
             budget_badge_class,
             budget_badge_char,
             is_active: i.is_active,
-            last_status: i.last_status,
-            consecutive_failures: i.consecutive_failures,
             failure_reason: i.failure_reason,
+            status_color: badge.color,
+            status_glyph: badge.glyph,
+            status_title: badge.title,
         }
     }
 }

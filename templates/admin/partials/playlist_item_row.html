@@ -4,30 +4,13 @@
   <td style="word-break:break-all;max-width:360px;font-size:0.78rem">{{ item.url }}</td>
   <td style="white-space:nowrap">{{ item.duration_secs }}s</td>
   <td>
-    {% if item.is_active %}
-    <span class="badge badge-on">on</span>
-    {% else %}
-    <span class="badge badge-off">off</span>
-    {% endif %}
-  </td>
-  <td>
-    {% match item.last_status %}
-    {% when None %}
-    <span style="color:#888" title="Never checked">○</span>
-    {% when Some(status) %}
-    {% if status == "ok" %}
-    <span style="color:#4caf50" title="Healthy">●</span>
-    {% else %}
-    <span style="color:#e94560" title="Last check failed">●</span>
+    <span style="color:{{ item.status_color }}" title="{{ item.status_title }}">{{ item.status_glyph }}</span>
     {% match item.failure_reason %}
     {% when Some(reason) %}
+    {% if item.is_active %}
     <div style="font-size:0.7rem;color:#e94560;margin-top:2px">{{ reason }}</div>
+    {% endif %}
     {% when None %}
-    {% endmatch %}
-    {% if !item.is_active && item.consecutive_failures >= 3 %}
-    <div style="font-size:0.7rem;color:#888">[auto-disabled]</div>
-    {% endif %}
-    {% endif %}
     {% endmatch %}
   </td>
   <td>
