@@ -302,6 +302,9 @@ async fn source_create_empty_url_is_422() {
 
 #[tokio::test]
 async fn source_test_populates_last_checked() {
+    // Seed source 1 (https://stream.example.com, unreachable in tests) → probe
+    // fast-fails and still records last_checked_at. Mirrors the non-ignored
+    // test_source_test_returns_row_partial_not_ok_badge in http.rs.
     let r = app()
         .await
         .oneshot(

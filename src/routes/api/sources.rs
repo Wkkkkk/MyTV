@@ -6,7 +6,7 @@ use axum::{
 use serde::Deserialize;
 use std::str::FromStr;
 
-use super::{internal, ApiError};
+use super::{internal, ApiError, ToggleRequest};
 use crate::{model::source, AppState};
 
 #[derive(Deserialize)]
@@ -20,11 +20,6 @@ pub struct CreateSourceRequest {
 pub struct UpdateSourceRequest {
     pub url: String,
     pub priority: i64,
-}
-
-#[derive(Deserialize)]
-pub struct ToggleRequest {
-    pub active: bool,
 }
 
 pub async fn list_for_channel(
@@ -58,8 +53,9 @@ pub async fn create(
         return Err(ApiError::Validation("url is required".into()));
     }
     let kind = match req.kind {
-        Some(k) => source::SourceKind::from_str(&k)
-            .map_err(|_| ApiError::Validation(format!("invalid source kind: {k}")))?,
+        Some(k) => {
+            source::SourceKind::from_str(&k).map_err(|e| ApiError::Validation(e.to_string()))?
+        }
         None => source::SourceKind::detect(&url),
     };
     let src = source::create(

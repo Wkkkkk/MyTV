@@ -11,7 +11,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 
@@ -44,6 +44,12 @@ impl IntoResponse for ApiError {
 pub(crate) fn internal<E: std::fmt::Display>(e: E) -> ApiError {
     tracing::error!("api error: {e}");
     ApiError::Internal
+}
+
+/// Shared payload for the `/toggle` endpoints: set is_active on a source or item.
+#[derive(Deserialize)]
+pub struct ToggleRequest {
+    pub active: bool,
 }
 
 pub fn api_router() -> Router<AppState> {
