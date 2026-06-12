@@ -116,6 +116,10 @@ pub fn build_router(state: AppState) -> Router {
             routes::admin::basic_auth,
         ));
 
+    let api_router: Router<AppState> = routes::api::api_router().route_layer(
+        middleware::from_fn_with_state(state.clone(), routes::admin::basic_auth),
+    );
+
     Router::new()
         .route("/", get(|| async { Redirect::permanent("/guide") }))
         .route("/health", get(routes::health::health_check))
@@ -129,6 +133,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/manifest.json", get(routes::static_files::manifest_json))
         .route("/favicon.ico", get(routes::static_files::favicon_ico))
         .nest("/admin", admin_router)
+        .nest("/api/admin", api_router)
         // route_layer (not layer): MatchedPath is only available after routing.
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
