@@ -461,6 +461,12 @@
 
       window.tune = tune;
 
+      var autoCid = window['__auto' + 'TuneChannelId'];
+      if (autoCid) {
+        history.replaceState(null, '', '/watch/' + autoCid);
+        tune(autoCid);
+      }
+
       document.addEventListener('keydown', function(e) {
         var tag = (e.target.tagName || '').toLowerCase();
         if (tag === 'input' || tag === 'textarea' || tag === 'select') return;

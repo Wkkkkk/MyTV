@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
+{% match auto_tune_channel_id %}
+{% when Some with (cid) %}
+<script>window.__autoTuneChannelId = {{ cid }};</script>
+{% when None %}
+{% endmatch %}
 <div id="player-panel">
   <video id="video" controls></video>
   <div id="player-error">Channel unavailable</div>
