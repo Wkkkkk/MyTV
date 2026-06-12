@@ -118,32 +118,6 @@ pub async fn record_source_liveness(pool: &SqlitePool, src: &Source, ok: bool) {
     }
 }
 
-/// Probes a source's health and updates stats without touching `is_active`.
-/// Used by the admin Test button — respects the admin's manual enable/disable choice.
-pub async fn probe_source(
-    pool: &SqlitePool,
-    client: &reqwest::Client,
-    cors_cache: &CorsCache,
-    live_cache: &LiveStatusCache,
-    src: &Source,
-) {
-    let ok = run_check(
-        client,
-        &src.url,
-        &src.kind,
-        src.consecutive_failures,
-        Some(live_cache),
-        |status, reason, failures| async move {
-            source::update_health(pool, src.id, status, reason.as_deref(), failures, None).await
-        },
-    )
-    .await;
-
-    if ok {
-        probe_and_cache_cors(client, cors_cache, &src.url).await;
-    }
-}
-
 async fn check_source(
     pool: &SqlitePool,
     client: &reqwest::Client,
@@ -188,40 +162,6 @@ async fn check_playlist_item(
         },
     )
     .await
-}
-
-/// Probes a playlist item's health and updates stats without touching `is_active`.
-/// Used by the admin Test button — respects the admin's manual enable/disable choice.
-pub async fn probe_playlist_item(
-    pool: &SqlitePool,
-    client: &reqwest::Client,
-    cors_cache: &CorsCache,
-    item: &crate::model::playlist_item::PlaylistItem,
-) {
-    let kind = crate::model::source::SourceKind::detect(&item.url);
-    let ok = run_check(
-        client,
-        &item.url,
-        kind.as_str(),
-        item.consecutive_failures,
-        None,
-        |status, reason, failures| async move {
-            crate::model::playlist_item::update_health(
-                pool,
-                item.id,
-                status,
-                reason.as_deref(),
-                failures,
-                None,
-            )
-            .await
-        },
-    )
-    .await;
-
-    if ok {
-        probe_and_cache_cors(client, cors_cache, &item.url).await;
-    }
 }
 
 /// A health-probe target: a live/VOD source row, or a playlist item. `probe`
@@ -336,11 +276,9 @@ pub async fn probe_and_cache_cors(
 /// CDN host and the original source host. The original-host entry is what the
 /// guide and admin source-row budget lookups query with (they only know the DB
 /// source URL, never the resolved googlevideo URL). Returns `None` (cache
-/// unchanged) if resolution fails or the resolved URL is not a probeable HLS
-/// manifest, or for a URL that does not require resolution. Intended for the
-/// admin Test button only — the 15-min background sweep does not resolve live
-/// sources (too expensive).
-pub async fn probe_and_cache_resolved_cors(
+/// unchanged) if resolution fails, the resolved URL is not a probeable HLS
+/// manifest, or the URL does not require resolution.
+async fn probe_and_cache_resolved_cors(
     client: &reqwest::Client,
     cors_cache: &CorsCache,
     source_url: &str,
@@ -560,7 +498,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn probe_source_does_not_reenable_disabled_source() {
+    async fn probe_does_not_reenable_disabled_source() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         // A real server returning HTTP 200 — simulates a healthy but admin-disabled source.
@@ -620,8 +558,15 @@ mod tests {
         let live_cache: LiveStatusCache =
             std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
-        // probe_source is the manual Test-button path — must never change is_active.
-        probe_source(&pool, &client, &cors_cache, &live_cache, &src).await;
+        // probe() is the manual Test-button path — must never change is_active.
+        probe(
+            &pool,
+            &client,
+            &cors_cache,
+            &live_cache,
+            ProbeTarget::Source(&src),
+        )
+        .await;
 
         let updated = crate::model::source::get(&pool, src.id)
             .await
@@ -629,12 +574,12 @@ mod tests {
             .unwrap();
         assert!(
             !updated.is_active,
-            "probe_source must not re-enable a manually disabled source"
+            "probe() must not re-enable a manually disabled source"
         );
     }
 
     #[tokio::test]
-    async fn probe_playlist_item_does_not_reenable_disabled_item() {
+    async fn probe_does_not_reenable_disabled_playlist_item() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -691,8 +636,16 @@ mod tests {
             .unwrap();
         let cors_cache: crate::CorsCache =
             std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
-
-        probe_playlist_item(&pool, &client, &cors_cache, &it).await;
+        let live_cache: LiveStatusCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        probe(
+            &pool,
+            &client,
+            &cors_cache,
+            &live_cache,
+            ProbeTarget::PlaylistItem(&it),
+        )
+        .await;
 
         let updated = crate::model::playlist_item::get(&pool, it.id)
             .await
@@ -700,7 +653,7 @@ mod tests {
             .unwrap();
         assert!(
             !updated.is_active,
-            "probe_playlist_item must not re-enable a manually disabled item"
+            "probe() must not re-enable a manually disabled item"
         );
     }
 
