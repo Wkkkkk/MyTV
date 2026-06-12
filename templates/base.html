@@ -461,7 +461,7 @@
 
       window.tune = tune;
 
-      var autoCid = window['__auto' + 'TuneChannelId'];
+      var autoCid = window.__autoTuneChannelId;
       if (autoCid) {
         history.replaceState(null, '', '/watch/' + autoCid);
         tune(autoCid);

@@ -1441,7 +1441,7 @@ async fn test_watch_unknown_channel_falls_back_to_guide() {
     let response = app().await.oneshot(req("/watch/999999")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
-    assert!(!body.contains("__autoTuneChannelId"));
+    assert!(!body.contains("window.__autoTuneChannelId = "));
 }
 
 #[tokio::test]
@@ -1449,5 +1449,5 @@ async fn test_guide_has_no_auto_tune() {
     let response = app().await.oneshot(req("/guide")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
-    assert!(!body.contains("__autoTuneChannelId"));
+    assert!(!body.contains("window.__autoTuneChannelId = "));
 }
