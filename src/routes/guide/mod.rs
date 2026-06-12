@@ -73,12 +73,26 @@ fn parse_query(params: GuideQuery) -> (String, i64) {
 async fn load_data(state: &AppState, params: GuideQuery) -> Result<GuideData, StatusCode> {
     let (category, offset_hours) = parse_query(params);
     let cors_snapshot = state.cors_cache.read().await.clone();
-    build_guide_data(&state.pool, &cors_snapshot, &category, offset_hours)
-        .await
-        .map_err(|e| {
-            tracing::error!("guide data error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+    let live_snapshot: std::collections::HashMap<String, crate::media::resolver::LiveStatus> =
+        state
+            .live_cache
+            .read()
+            .await
+            .iter()
+            .map(|(url, (status, _))| (url.clone(), *status))
+            .collect();
+    build_guide_data(
+        &state.pool,
+        &cors_snapshot,
+        &live_snapshot,
+        &category,
+        offset_hours,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("guide data error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 fn render_or_500<T: Template>(t: T) -> Result<Html<String>, StatusCode> {
