@@ -313,7 +313,9 @@ fn scenario_mytvctl(cfg: &Config, token: &str) -> Result<(), String> {
     let bin = env!("CARGO_BIN_EXE_mytvctl");
 
     // `set_password = false` removes the env var to exercise the exit-2 path.
-    let run = |set_password: bool, args: &[&str]| -> std::process::Output {
+    // Returns Err (never panics) on spawn failure so the scenario stays fully
+    // non-panicking — a panic here would bypass the orchestrator's end-sweep.
+    let run = |set_password: bool, args: &[&str]| -> Result<std::process::Output, String> {
         let mut cmd = Command::new(bin);
         cmd.args(args).env("MYTV_BASE_URL", &cfg.base_url);
         if set_password {
@@ -321,7 +323,7 @@ fn scenario_mytvctl(cfg: &Config, token: &str) -> Result<(), String> {
         } else {
             cmd.env_remove("MYTV_ADMIN_PASSWORD");
         }
-        cmd.output().expect("failed to spawn mytvctl")
+        cmd.output().map_err(|e| format!("spawn mytvctl: {e}"))
     };
 
     let name = e2e_name("ctl", token);
@@ -339,7 +341,7 @@ fn scenario_mytvctl(cfg: &Config, token: &str) -> Result<(), String> {
             "--type",
             "live",
         ],
-    );
+    )?;
     if out.status.code() != Some(0) {
         return Err(format!("create exit {:?}, want 0", out.status.code()));
     }
@@ -349,25 +351,25 @@ fn scenario_mytvctl(cfg: &Config, token: &str) -> Result<(), String> {
 
     // exit 0: get
     let id_str = id.to_string();
-    let out = run(true, &["channel", "get", &id_str]);
+    let out = run(true, &["channel", "get", &id_str])?;
     if out.status.code() != Some(0) {
         return Err(format!("get exit {:?}, want 0", out.status.code()));
     }
 
     // exit 0: delete (also cleans up this scenario's channel)
-    let out = run(true, &["channel", "delete", &id_str]);
+    let out = run(true, &["channel", "delete", &id_str])?;
     if out.status.code() != Some(0) {
         return Err(format!("delete exit {:?}, want 0", out.status.code()));
     }
 
     // exit 1: GET a non-existent id → server 404 → exit 1
-    let out = run(true, &["channel", "get", "999999999"]);
+    let out = run(true, &["channel", "get", "999999999"])?;
     if out.status.code() != Some(1) {
         return Err(format!("missing-id exit {:?}, want 1", out.status.code()));
     }
 
     // exit 2: password env var unset
-    let out = run(false, &["channel", "list"]);
+    let out = run(false, &["channel", "list"])?;
     if out.status.code() != Some(2) {
         return Err(format!("no-password exit {:?}, want 2", out.status.code()));
     }
