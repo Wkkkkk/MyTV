@@ -98,6 +98,8 @@ pub struct ManualResolveForm {
     pub url: String,
 }
 
+/// Form body for the channel-resolve handler: a single YouTube channel URL or
+/// `@handle` to normalize into a live-source candidate.
 #[derive(Deserialize)]
 pub struct ChannelUrlForm {
     pub url: String,

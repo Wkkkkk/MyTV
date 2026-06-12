@@ -15,6 +15,7 @@ A personal web app that repackages live internet streams and VOD content into a 
 - **Budget badges** — the guide marks each channel ⚡ (loads direct from the CDN) or ☁ (routed through the proxy) based on probed CORS support, including resolved YouTube/Twitch live streams
 - **Admin UI** at `/admin` — manage channels, sources, and playlist items
 - **Discovery** at `/admin/discover` — find streams via the iptv-org M3U index, YouTube search, or manual URL entry
+- **JSON API & CLI** at `/api/admin` — every admin operation (channel/source/playlist CRUD, discovery, tune-testing) is scriptable as JSON, with a `mytvctl` command-line client in front of it
 
 ---
 
@@ -29,6 +30,16 @@ A personal web app that repackages live internet streams and VOD content into a 
 **yt-dlp resolution** — YouTube and Twitch URLs are not stored as stream URLs. At tune-in time the server calls yt-dlp to resolve the current direct URL — an HLS manifest for live, a single combined MP4 for VOD. This keeps streams working as platforms rotate their internal URLs.
 
 **Ended-live conversion** — yt-dlp marks a finished live broadcast with a `force_finished` manifest. The server detects this at tune time, returns an "ended" signal so the player can move on, and converts the channel into a VOD loop pointing at the recording (`watch?v=<id>`) — appending a playlist item, flipping the channel type, and deactivating the now-dead live sources. The conversion is idempotent and needs no schema change.
+
+**JSON API & CLI** — `/api/admin/**` mirrors the form admin as JSON CRUD for channels, sources, and playlist items (plus `toggle`/`test`) and exposes discovery (`/discover/m3u`, `/discover/youtube`, `/resolve`, `/channel`, `/add`). It sits behind the same basic-auth as the admin UI; errors funnel through a single `{"error": "..."}` shape (404/422/503/500). The `mytvctl` binary is a thin client over it, configured by `MYTV_BASE_URL` + `MYTV_ADMIN_PASSWORD` (password env-only):
+
+```bash
+export MYTV_BASE_URL=http://localhost:3000
+export MYTV_ADMIN_PASSWORD=admin
+mytvctl channel list
+mytvctl channel create --name "News" --category "Live" --type live
+mytvctl discover youtube --keyword "lofi" --type video
+```
 
 ---
 
