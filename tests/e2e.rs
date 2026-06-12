@@ -107,6 +107,102 @@ async fn sweep(client: &ApiClient) -> Result<usize, String> {
     Ok(removed)
 }
 
+fn make_token() -> String {
+    std::process::id().to_string()
+}
+
+fn e2e_name(scenario: &str, token: &str) -> String {
+    format!("{E2E_PREFIX}{token}__{scenario}")
+}
+
+/// Create → GET → PATCH → DELETE a channel via the JSON API, asserting the
+/// contract at each step. Deserializes into the lib's own `Channel` type so a
+/// shape change is a compile error. Hard-fail: returns Err on any mismatch.
+async fn scenario_crud(client: &ApiClient, token: &str) -> Result<(), String> {
+    use reqwest::Method;
+    let name = e2e_name("crud", token);
+
+    // CREATE → 201 + Channel echo
+    let resp = client
+        .send(
+            Method::POST,
+            "/api/admin/channels",
+            Some(serde_json::json!({
+                "name": name, "category": "__e2e__", "type": "live", "sort_order": 0
+            })),
+        )
+        .await
+        .map_err(|e| format!("create: {e}"))?;
+    if resp.status().as_u16() != 201 {
+        return Err(format!("create: expected 201, got {}", resp.status()));
+    }
+    let created: mytv::model::channel::Channel = resp
+        .json()
+        .await
+        .map_err(|e| format!("create decode: {e}"))?;
+    if created.name != name {
+        return Err(format!("create: name mismatch ({})", created.name));
+    }
+    let id = created.id;
+
+    // GET → 200 + same name
+    let resp = client
+        .send(Method::GET, &format!("/api/admin/channels/{id}"), None)
+        .await
+        .map_err(|e| format!("get: {e}"))?;
+    if resp.status().as_u16() != 200 {
+        return Err(format!("get: expected 200, got {}", resp.status()));
+    }
+    let got: mytv::model::channel::Channel =
+        resp.json().await.map_err(|e| format!("get decode: {e}"))?;
+    if got.id != id || got.name != name {
+        return Err("get: round-trip mismatch".into());
+    }
+
+    // PATCH (full-replace) → 200 + updated category
+    let resp = client
+        .send(
+            Method::PATCH,
+            &format!("/api/admin/channels/{id}"),
+            Some(serde_json::json!({
+                "name": name, "category": "__e2e__edited", "type": "live", "sort_order": 1
+            })),
+        )
+        .await
+        .map_err(|e| format!("patch: {e}"))?;
+    if resp.status().as_u16() != 200 {
+        return Err(format!("patch: expected 200, got {}", resp.status()));
+    }
+    let patched: mytv::model::channel::Channel = resp
+        .json()
+        .await
+        .map_err(|e| format!("patch decode: {e}"))?;
+    if patched.category != "__e2e__edited" || patched.sort_order != 1 {
+        return Err("patch: fields not updated".into());
+    }
+
+    // DELETE → 204, then GET → 404
+    let resp = client
+        .send(Method::DELETE, &format!("/api/admin/channels/{id}"), None)
+        .await
+        .map_err(|e| format!("delete: {e}"))?;
+    if resp.status().as_u16() != 204 {
+        return Err(format!("delete: expected 204, got {}", resp.status()));
+    }
+    let resp = client
+        .send(Method::GET, &format!("/api/admin/channels/{id}"), None)
+        .await
+        .map_err(|e| format!("get-after-delete: {e}"))?;
+    if resp.status().as_u16() != 404 {
+        return Err(format!(
+            "get-after-delete: expected 404, got {}",
+            resp.status()
+        ));
+    }
+    println!("✓ scenario 1: channel CRUD arc");
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "e2e against prod — run manually"]
 async fn e2e_smoke() {
@@ -121,9 +217,14 @@ async fn e2e_smoke() {
         .expect("start sweep failed — is prod reachable / creds valid?");
     println!("start sweep removed {pre} stale __e2e__ channel(s)");
 
-    // (scenarios added in later tasks)
+    let token = make_token();
+    let mut auth: Result<(), String> = Ok(());
+    if auth.is_ok() {
+        auth = scenario_crud(&client, &token).await;
+    }
 
     let post = sweep(&client).await.unwrap_or(0);
     println!("== e2e summary ==");
     println!("end sweep removed {post} leftover __e2e__ channel(s)");
+    auth.expect("authoritative e2e scenario failed");
 }
