@@ -78,16 +78,6 @@ pub struct AdminPlaylistItemRow {
     pub status_title: String,
 }
 
-#[allow(dead_code)]
-impl AdminPlaylistItemRow {
-    /// Fills the budget badge fields from a CORS-cache snapshot, keyed by this item's URL host.
-    pub fn apply_budget(&mut self, cors_cache: &std::collections::HashMap<String, bool>) {
-        let (class, glyph) = crate::budget::badge_for_url(&self.url, cors_cache);
-        self.budget_badge_class = class;
-        self.budget_badge_char = glyph;
-    }
-}
-
 /// Admin display rows that derive a network-budget badge from their URL.
 /// `from_model` is the *only* construction path, so a row can never exist
 /// without its badge filled — there is no half-built state to forget.
@@ -95,7 +85,7 @@ pub(crate) trait BudgetRow<T>: Sized {
     fn from_model(item: T, cors_cache: &HashMap<String, bool>) -> Self;
 }
 
-// ── From impls ─────────────────────────────────────────────────────────────
+// ── From impl ──────────────────────────────────────────────────────────────
 
 impl From<channel::Channel> for AdminChannelRow {
     fn from(ch: channel::Channel) -> Self {
@@ -105,77 +95,6 @@ impl From<channel::Channel> for AdminChannelRow {
             category: ch.category,
             type_str: ch.r#type,
             sort_order: ch.sort_order,
-        }
-    }
-}
-
-#[allow(dead_code)]
-impl AdminSourceRow {
-    /// Fills the budget badge fields from a CORS-cache snapshot, keyed by this source's URL host.
-    pub fn apply_budget(&mut self, cors_cache: &std::collections::HashMap<String, bool>) {
-        let (class, glyph) = crate::budget::badge_for_url(&self.url, cors_cache);
-        self.budget_badge_class = class;
-        self.budget_badge_char = glyph;
-    }
-}
-
-impl From<source::Source> for AdminSourceRow {
-    fn from(s: source::Source) -> Self {
-        let (budget_badge_class, budget_badge_char) =
-            crate::budget::budget_badge(crate::budget::BudgetStatus::Unknown);
-        let status_lazy = s.is_active && s.kind == "youtube_live";
-        // Inline status for non-lazy rows (disabled, or non-youtube). Lazy rows
-        // ignore these fields and fetch the badge via HTMX.
-        let status = crate::status::compute(
-            s.is_active,
-            &s.kind,
-            s.last_status.as_deref(),
-            s.failure_reason.as_deref(),
-            None,
-        );
-        let badge = crate::status::status_badge(&status);
-        Self {
-            id: s.id,
-            kind: s.kind,
-            url: s.url,
-            priority: s.priority,
-            is_active: s.is_active,
-            failure_reason: s.failure_reason,
-            budget_badge_class,
-            budget_badge_char,
-            status_color: badge.color,
-            status_glyph: badge.glyph,
-            status_title: badge.title,
-            status_lazy,
-        }
-    }
-}
-
-impl From<playlist_item::PlaylistItem> for AdminPlaylistItemRow {
-    fn from(i: playlist_item::PlaylistItem) -> Self {
-        let (budget_badge_class, budget_badge_char) =
-            crate::budget::budget_badge(crate::budget::BudgetStatus::Unknown);
-        let status = crate::status::compute(
-            i.is_active,
-            "hls", // playlist items use health only — never the youtube_live live branch
-            i.last_status.as_deref(),
-            i.failure_reason.as_deref(),
-            None,
-        );
-        let badge = crate::status::status_badge(&status);
-        Self {
-            id: i.id,
-            title: i.title,
-            url: i.url,
-            duration_secs: i.duration_secs,
-            sort_order: i.sort_order,
-            budget_badge_class,
-            budget_badge_char,
-            is_active: i.is_active,
-            failure_reason: i.failure_reason,
-            status_color: badge.color,
-            status_glyph: badge.glyph,
-            status_title: badge.title,
         }
     }
 }
