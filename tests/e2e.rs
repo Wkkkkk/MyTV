@@ -304,6 +304,78 @@ async fn scenario_tune(client: &ApiClient, token: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Drive the compiled `mytvctl` binary against prod and assert exit codes:
+/// 0 = success (create→get→delete), 1 = non-2xx (GET missing id → 404),
+/// 2 = MYTV_ADMIN_PASSWORD unset. Advisory: returns Err (→ warning) on any
+/// mismatch, never panics.
+fn scenario_mytvctl(cfg: &Config, token: &str) -> Result<(), String> {
+    use std::process::Command;
+    let bin = env!("CARGO_BIN_EXE_mytvctl");
+
+    // `set_password = false` removes the env var to exercise the exit-2 path.
+    let run = |set_password: bool, args: &[&str]| -> std::process::Output {
+        let mut cmd = Command::new(bin);
+        cmd.args(args).env("MYTV_BASE_URL", &cfg.base_url);
+        if set_password {
+            cmd.env("MYTV_ADMIN_PASSWORD", &cfg.password);
+        } else {
+            cmd.env_remove("MYTV_ADMIN_PASSWORD");
+        }
+        cmd.output().expect("failed to spawn mytvctl")
+    };
+
+    let name = e2e_name("ctl", token);
+
+    // exit 0: create → parse id from stdout JSON
+    let out = run(
+        true,
+        &[
+            "channel",
+            "create",
+            "--name",
+            &name,
+            "--category",
+            "__e2e__",
+            "--type",
+            "live",
+        ],
+    );
+    if out.status.code() != Some(0) {
+        return Err(format!("create exit {:?}, want 0", out.status.code()));
+    }
+    let created: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("create stdout not JSON: {e}"))?;
+    let id = created["id"].as_i64().ok_or("create stdout missing id")?;
+
+    // exit 0: get
+    let id_str = id.to_string();
+    let out = run(true, &["channel", "get", &id_str]);
+    if out.status.code() != Some(0) {
+        return Err(format!("get exit {:?}, want 0", out.status.code()));
+    }
+
+    // exit 0: delete (also cleans up this scenario's channel)
+    let out = run(true, &["channel", "delete", &id_str]);
+    if out.status.code() != Some(0) {
+        return Err(format!("delete exit {:?}, want 0", out.status.code()));
+    }
+
+    // exit 1: GET a non-existent id → server 404 → exit 1
+    let out = run(true, &["channel", "get", "999999999"]);
+    if out.status.code() != Some(1) {
+        return Err(format!("missing-id exit {:?}, want 1", out.status.code()));
+    }
+
+    // exit 2: password env var unset
+    let out = run(false, &["channel", "list"]);
+    if out.status.code() != Some(2) {
+        return Err(format!("no-password exit {:?}, want 2", out.status.code()));
+    }
+
+    println!("✓ scenario 3: mytvctl exit codes 0/1/2");
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "e2e against prod — run manually"]
 async fn e2e_smoke() {
@@ -327,8 +399,17 @@ async fn e2e_smoke() {
         auth = scenario_tune(&client, &token).await;
     }
 
+    let mut warnings: Vec<String> = Vec::new();
+    if let Err(e) = scenario_mytvctl(&cfg, &token) {
+        warnings.push(format!("mytvctl: {e}"));
+    }
+
     let post = sweep(&client).await.unwrap_or(0);
     println!("== e2e summary ==");
     println!("end sweep removed {post} leftover __e2e__ channel(s)");
+    for w in &warnings {
+        println!("⚠ WARN {w}");
+    }
+    println!("{} advisory warning(s)", warnings.len());
     auth.expect("authoritative e2e scenario failed");
 }
