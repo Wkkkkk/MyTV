@@ -519,3 +519,40 @@ async fn discover_resolve_requires_auth() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn discover_youtube_without_api_key_is_503() {
+    let r = app()
+        .await
+        .oneshot(authed_get("/api/admin/discover/youtube?keyword=news"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let j = body_json(r).await;
+    assert_eq!(j["error"], "YOUTUBE_API_KEY not configured");
+}
+
+#[tokio::test]
+async fn discover_youtube_requires_auth() {
+    let r = app()
+        .await
+        .oneshot(get("/api/admin/discover/youtube?keyword=news"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+#[ignore = "requires network access — run manually"]
+async fn discover_m3u_live_search() {
+    let r = app()
+        .await
+        .oneshot(authed_get(
+            "/api/admin/discover/m3u?country=us&group=&limit=5",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let j = body_json(r).await;
+    assert!(j.as_array().unwrap().len() <= 5);
+}

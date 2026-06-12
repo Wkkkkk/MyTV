@@ -3,8 +3,10 @@ mod m3u;
 mod youtube;
 
 pub use add::{do_discover_add, DiscoverAddParams};
+pub(crate) use m3u::search as m3u_search;
 pub(crate) use m3u::M3uResultRow;
 pub(crate) use youtube::YoutubeResultRow;
+pub(crate) use youtube::{fetch_youtube_channels, fetch_youtube_results};
 
 use askama::Template;
 use axum::{
