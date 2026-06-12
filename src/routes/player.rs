@@ -158,7 +158,7 @@ async fn next_live(
     ch: &channel::Channel,
     failed_url: Option<&str>,
 ) -> Result<Json<TuneResponse>, StatusCode> {
-    let sources = source::list_active_for_channel(&state.pool, ch.id)
+    let sources = source::list_tunable_for_channel(&state.pool, ch.id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
