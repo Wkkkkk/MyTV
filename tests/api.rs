@@ -92,3 +92,80 @@ async fn channels_list_returns_seeded_channels() {
     assert!(arr.len() >= 5);
     assert!(arr.iter().any(|c| c["name"] == "Live OK"));
 }
+
+#[tokio::test]
+async fn channel_crud_round_trip() {
+    let app = app().await;
+
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels",
+            serde_json::json!({"name":"API Made","category":"test","type":"live","sort_order":99}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let created = body_json(r).await;
+    let id = created["id"].as_i64().unwrap();
+    assert_eq!(created["name"], "API Made");
+    assert_eq!(created["type"], "live");
+
+    let r = app
+        .clone()
+        .oneshot(authed_get(&format!("/api/admin/channels/{id}")))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(body_json(r).await["name"], "API Made");
+
+    let r = app.clone().oneshot(authed_json("PATCH", &format!("/api/admin/channels/{id}"),
+        serde_json::json!({"name":"API Renamed","category":"test","type":"live","sort_order":1}))).await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(body_json(r).await["name"], "API Renamed");
+
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/admin/channels/{id}"))
+                .header("Authorization", AUTH)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+
+    let r = app
+        .oneshot(authed_get(&format!("/api/admin/channels/{id}")))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn channel_create_bad_type_is_422() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels",
+            serde_json::json!({"name":"x","category":"y","type":"nonsense","sort_order":0}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn channel_get_unknown_is_404() {
+    let r = app()
+        .await
+        .oneshot(authed_get("/api/admin/channels/999999"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}

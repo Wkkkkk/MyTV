@@ -19,7 +19,6 @@ use crate::AppState;
 /// `NotFound` and `Validation` are unused in the initial scaffold (only the
 /// channels-list endpoint exists) but are part of the API error contract that
 /// the channel/source/playlist write endpoints in later tasks return.
-#[allow(dead_code)]
 pub enum ApiError {
     NotFound,
     Validation(String),
@@ -51,5 +50,12 @@ pub(crate) fn internal<E: std::fmt::Display>(e: E) -> ApiError {
 }
 
 pub fn api_router() -> Router<AppState> {
-    Router::new().route("/channels", get(channels::list))
+    Router::new()
+        .route("/channels", get(channels::list).post(channels::create))
+        .route(
+            "/channels/:id",
+            get(channels::get_one)
+                .patch(channels::update)
+                .delete(channels::remove),
+        )
 }
