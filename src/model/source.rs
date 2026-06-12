@@ -129,6 +129,24 @@ pub async fn list_active_for_channel(pool: &SqlitePool, channel_id: i64) -> Resu
     .map_err(Into::into)
 }
 
+/// Sources the tune path may try, ordered by priority: active and not
+/// observed-Down. A regular source is Down once `last_status='error'` and
+/// `consecutive_failures >= 3`; `youtube_live` sources are exempt (kept in
+/// rotation so the resolve-time waiting/backoff for idea #38 can fire). `is_active`
+/// is the manual gate and is never mutated by health.
+pub async fn list_tunable_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<Source>> {
+    sqlx::query_as::<_, Source>(
+        "SELECT * FROM sources \
+         WHERE channel_id = ? AND is_active = 1 \
+           AND NOT (kind != 'youtube_live' AND last_status = 'error' AND consecutive_failures >= 3) \
+         ORDER BY priority ASC",
+    )
+    .bind(channel_id)
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
+}
+
 /// Delete a source by id; returns true if a row was removed.
 pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
     let rows = sqlx::query("DELETE FROM sources WHERE id = ?")
@@ -189,28 +207,6 @@ pub async fn update_health(
     .await
 }
 
-/// Returns the set of channel IDs that have at least one source (active or not).
-pub async fn channel_ids_with_any_sources(
-    pool: &SqlitePool,
-) -> Result<std::collections::HashSet<i64>> {
-    sqlx::query_scalar::<_, i64>("SELECT DISTINCT channel_id FROM sources")
-        .fetch_all(pool)
-        .await
-        .map(|v| v.into_iter().collect())
-        .map_err(Into::into)
-}
-
-/// Returns the set of channel IDs that have at least one active source.
-pub async fn channel_ids_with_active_sources(
-    pool: &SqlitePool,
-) -> Result<std::collections::HashSet<i64>> {
-    sqlx::query_scalar::<_, i64>("SELECT DISTINCT channel_id FROM sources WHERE is_active = 1")
-        .fetch_all(pool)
-        .await
-        .map(|v| v.into_iter().collect())
-        .map_err(Into::into)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,6 +239,80 @@ mod tests {
             url: url.to_string(),
             priority,
         }
+    }
+
+    const FAILURE_DOWN_THRESHOLD: i64 = 3;
+
+    #[tokio::test]
+    async fn test_list_tunable_skips_down_regular_keeps_youtube_and_disabled_excluded() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+
+        // 1: active, healthy HLS → tunable
+        let ok = create(&pool, hls(ch.id, "https://ok.example.com/s.m3u8", 1))
+            .await
+            .unwrap();
+        // 2: active HLS but Down past threshold → skipped
+        let down = create(&pool, hls(ch.id, "https://down.example.com/s.m3u8", 2))
+            .await
+            .unwrap();
+        update_health(
+            &pool,
+            down.id,
+            "error",
+            Some("dead"),
+            FAILURE_DOWN_THRESHOLD,
+            None,
+        )
+        .await
+        .unwrap();
+        // 3: active HLS errored but BELOW threshold → still tunable
+        let flaky = create(&pool, hls(ch.id, "https://flaky.example.com/s.m3u8", 3))
+            .await
+            .unwrap();
+        update_health(&pool, flaky.id, "error", Some("blip"), 1, None)
+            .await
+            .unwrap();
+        // 4: youtube_live recorded as error past threshold → KEPT (waiting/#38 lane)
+        let yt = create(
+            &pool,
+            NewSource {
+                channel_id: ch.id,
+                kind: SourceKind::YoutubeLive,
+                url: "https://youtube.com/watch?v=z".into(),
+                priority: 4,
+            },
+        )
+        .await
+        .unwrap();
+        update_health(
+            &pool,
+            yt.id,
+            "error",
+            Some("not currently live"),
+            FAILURE_DOWN_THRESHOLD,
+            None,
+        )
+        .await
+        .unwrap();
+        // 5: manually disabled → excluded
+        let off = create(&pool, hls(ch.id, "https://off.example.com/s.m3u8", 5))
+            .await
+            .unwrap();
+        set_active(&pool, off.id, false).await.unwrap();
+        let _ = ok; // ids referenced below by url
+
+        let tunable = list_tunable_for_channel(&pool, ch.id).await.unwrap();
+        let urls: Vec<&str> = tunable.iter().map(|s| s.url.as_str()).collect();
+        assert_eq!(
+            urls,
+            vec![
+                "https://ok.example.com/s.m3u8",
+                "https://flaky.example.com/s.m3u8",
+                "https://youtube.com/watch?v=z",
+            ],
+            "down regular skipped; below-threshold and youtube_live kept; disabled excluded"
+        );
     }
 
     #[tokio::test]

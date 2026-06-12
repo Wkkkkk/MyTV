@@ -1,16 +1,11 @@
 use chrono::{DateTime, Utc};
 
+use crate::media::resolver::LiveStatus;
+use crate::status::{self, SourceStatus};
 use crate::{
     budget::{status_for_url, BudgetStatus},
     model::{channel::ChannelType, playlist_item},
 };
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum HealthStatus {
-    Healthy,
-    Down,
-    Unknown,
-}
 
 pub(super) fn category_icon(category: &str) -> &'static str {
     let c = category.to_lowercase();
@@ -47,23 +42,44 @@ pub(super) fn category_icon(category: &str) -> &'static str {
     "📺"
 }
 
-pub(super) fn derive_health_status(
-    channel_id: i64,
+/// Minimal per-source facts the guide needs to compute a channel's status.
+pub(super) struct SourceFacts {
+    pub kind: String,
+    pub is_active: bool,
+    pub last_status: Option<String>,
+    pub failure_reason: Option<String>,
+}
+
+/// The channel's aggregated Status = the most-optimistic status across its
+/// sources. For `youtube_live` sources the live status comes from the warm cache
+/// snapshot (cold → Unchecked, never Down). VOD channels (no sources) are `Ok`
+/// (reachable) — matching the prior "VOD always healthy" behavior.
+pub(super) fn derive_channel_status(
     channel_type: &ChannelType,
-    all_source_ids: &std::collections::HashSet<i64>,
-    active_source_ids: &std::collections::HashSet<i64>,
-) -> HealthStatus {
+    sources: &[SourceFacts],
+    live_snapshot: &std::collections::HashMap<String, LiveStatus>,
+    source_urls: &[String],
+) -> SourceStatus {
     match channel_type {
-        ChannelType::VodLoop => HealthStatus::Healthy,
+        ChannelType::VodLoop => SourceStatus::Ok,
         ChannelType::Live => {
-            if !all_source_ids.contains(&channel_id) {
-                return HealthStatus::Unknown;
+            if sources.is_empty() {
+                return SourceStatus::Unchecked;
             }
-            if active_source_ids.contains(&channel_id) {
-                HealthStatus::Healthy
-            } else {
-                HealthStatus::Down
-            }
+            status::most_optimistic(sources.iter().zip(source_urls).map(|(f, url)| {
+                let live = if f.kind == "youtube_live" {
+                    live_snapshot.get(url).copied()
+                } else {
+                    None
+                };
+                status::compute(
+                    f.is_active,
+                    &f.kind,
+                    f.last_status.as_deref(),
+                    f.failure_reason.as_deref(),
+                    live,
+                )
+            }))
         }
     }
 }
@@ -96,14 +112,6 @@ pub(super) fn vod_budget_url(
         None => 0,
     };
     Some(items[idx].url.clone())
-}
-
-pub(super) fn health_badge(status: HealthStatus) -> (&'static str, &'static str) {
-    match status {
-        HealthStatus::Healthy => ("health-ok", "●"),
-        HealthStatus::Down => ("health-down", "●"),
-        HealthStatus::Unknown => ("health-unknown", "○"),
-    }
 }
 
 #[cfg(test)]
@@ -154,57 +162,41 @@ mod tests {
     }
 
     #[test]
-    fn test_derive_health_status_live_has_active_source() {
-        use std::collections::HashSet;
-        let all: HashSet<i64> = [1].into_iter().collect();
-        let active: HashSet<i64> = [1].into_iter().collect();
+    fn test_derive_channel_status_most_optimistic() {
+        use std::collections::HashMap;
+        let snapshot: HashMap<String, LiveStatus> = HashMap::new();
+        let sources = vec![
+            SourceFacts {
+                kind: "hls".into(),
+                is_active: true,
+                last_status: Some("error".into()),
+                failure_reason: Some("dead".into()),
+            },
+            SourceFacts {
+                kind: "hls".into(),
+                is_active: true,
+                last_status: Some("ok".into()),
+                failure_reason: None,
+            },
+        ];
+        let urls = vec![
+            "https://a/s.m3u8".to_string(),
+            "https://b/s.m3u8".to_string(),
+        ];
         assert_eq!(
-            derive_health_status(1, &ChannelType::Live, &all, &active),
-            HealthStatus::Healthy
+            derive_channel_status(&ChannelType::Live, &sources, &snapshot, &urls),
+            SourceStatus::Ok,
+            "one OK source beats a Down sibling"
         );
-    }
 
-    #[test]
-    fn test_derive_health_status_live_all_inactive() {
-        use std::collections::HashSet;
-        let all: HashSet<i64> = [1].into_iter().collect();
-        let active: HashSet<i64> = HashSet::new();
+        let no_sources: Vec<SourceFacts> = vec![];
         assert_eq!(
-            derive_health_status(1, &ChannelType::Live, &all, &active),
-            HealthStatus::Down
+            derive_channel_status(&ChannelType::Live, &no_sources, &snapshot, &[]),
+            SourceStatus::Unchecked
         );
-    }
-
-    #[test]
-    fn test_derive_health_status_no_sources_unknown() {
-        use std::collections::HashSet;
-        let all: HashSet<i64> = HashSet::new();
-        let active: HashSet<i64> = HashSet::new();
         assert_eq!(
-            derive_health_status(1, &ChannelType::Live, &all, &active),
-            HealthStatus::Unknown
-        );
-    }
-
-    #[test]
-    fn test_derive_health_status_vod_always_healthy() {
-        use std::collections::HashSet;
-        let all: HashSet<i64> = [1].into_iter().collect();
-        let active: HashSet<i64> = HashSet::new();
-        assert_eq!(
-            derive_health_status(1, &ChannelType::VodLoop, &all, &active),
-            HealthStatus::Healthy
-        );
-    }
-
-    #[test]
-    fn test_derive_health_status_vod_no_sources_still_healthy() {
-        use std::collections::HashSet;
-        let all: HashSet<i64> = HashSet::new();
-        let active: HashSet<i64> = HashSet::new();
-        assert_eq!(
-            derive_health_status(1, &ChannelType::VodLoop, &all, &active),
-            HealthStatus::Healthy
+            derive_channel_status(&ChannelType::VodLoop, &no_sources, &snapshot, &[]),
+            SourceStatus::Ok
         );
     }
 

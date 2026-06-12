@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::badges::{
-    budget_for_url, category_icon, derive_health_status, health_badge, vod_budget_url,
+    budget_for_url, category_icon, derive_channel_status, vod_budget_url, SourceFacts,
 };
 use super::layout::{
     compute_window, entry_to_slot, now_line_pct, time_labels, ProgramSlot, TimeLabel,
@@ -20,8 +20,9 @@ use super::layout::{
 pub(super) struct ChannelRow {
     pub name: String,
     pub category_icon: &'static str,
-    pub health_badge_class: &'static str,
-    pub health_badge_char: &'static str,
+    pub status_color: &'static str,
+    pub status_glyph: &'static str,
+    pub status_title: String,
     pub budget_badge_class: &'static str,
     pub budget_badge_char: &'static str,
     pub programs: Vec<ProgramSlot>,
@@ -43,6 +44,7 @@ pub(super) struct GuideData {
 pub(super) async fn build_guide_data(
     pool: &SqlitePool,
     cors_cache: &std::collections::HashMap<String, bool>,
+    live_snapshot: &std::collections::HashMap<String, crate::media::resolver::LiveStatus>,
     category: &str,
     offset_hours: i64,
 ) -> anyhow::Result<GuideData> {
@@ -70,27 +72,14 @@ pub(super) async fn build_guide_data(
             .collect()
     };
 
-    let all_source_ids = source::channel_ids_with_any_sources(pool).await?;
-    let active_source_ids = source::channel_ids_with_active_sources(pool).await?;
-
-    #[derive(sqlx::FromRow)]
-    struct SourceUrlRow {
-        channel_id: i64,
-        url: String,
-    }
-
-    let source_url_rows = sqlx::query_as::<_, SourceUrlRow>(
-        "SELECT channel_id, url FROM sources WHERE is_active = 1 ORDER BY channel_id, priority",
-    )
-    .fetch_all(pool)
-    .await?;
-
-    let first_active_urls: std::collections::HashMap<i64, String> = source_url_rows
-        .into_iter()
-        .fold(std::collections::HashMap::new(), |mut acc, row| {
-            acc.entry(row.channel_id).or_insert(row.url);
-            acc
-        });
+    let sources_by_channel: std::collections::HashMap<i64, Vec<source::Source>> =
+        source::list_all(pool).await?.into_iter().fold(
+            std::collections::HashMap::new(),
+            |mut acc, s| {
+                acc.entry(s.channel_id).or_default().push(s);
+                acc
+            },
+        );
 
     let all_playlist_items: std::collections::HashMap<i64, Vec<playlist_item::PlaylistItem>> =
         playlist_item::list_all(pool)
@@ -105,10 +94,15 @@ pub(super) async fn build_guide_data(
     let mut rows = Vec::new();
     for ch in &channels {
         let (entries, budget_url) = match ch.channel_type() {
-            ChannelType::Live => (
-                vec![epg::live_entry(ch.id, &ch.name, window_start, window_end)],
-                first_active_urls.get(&ch.id).cloned(),
-            ),
+            ChannelType::Live => {
+                let first_active_url = sources_by_channel
+                    .get(&ch.id)
+                    .and_then(|v| v.iter().find(|s| s.is_active).map(|s| s.url.clone()));
+                (
+                    vec![epg::live_entry(ch.id, &ch.name, window_start, window_end)],
+                    first_active_url,
+                )
+            }
             ChannelType::VodLoop => {
                 let items = all_playlist_items.get(&ch.id).cloned().unwrap_or_default();
                 let entries = match ch.loop_anchor {
@@ -129,20 +123,28 @@ pub(super) async fn build_guide_data(
             .iter()
             .filter_map(|e| entry_to_slot(e, window_start, window_end))
             .collect();
-        let health = derive_health_status(
-            ch.id,
-            &ch.channel_type(),
-            &all_source_ids,
-            &active_source_ids,
-        );
+        let empty: Vec<source::Source> = Vec::new();
+        let chan_sources = sources_by_channel.get(&ch.id).unwrap_or(&empty);
+        let facts: Vec<SourceFacts> = chan_sources
+            .iter()
+            .map(|s| SourceFacts {
+                kind: s.kind.clone(),
+                is_active: s.is_active,
+                last_status: s.last_status.clone(),
+                failure_reason: s.failure_reason.clone(),
+            })
+            .collect();
+        let source_urls: Vec<String> = chan_sources.iter().map(|s| s.url.clone()).collect();
+        let status = derive_channel_status(&ch.channel_type(), &facts, live_snapshot, &source_urls);
+        let status_badge = crate::status::status_badge(&status);
         let budget = budget_for_url(budget_url.as_deref(), cors_cache);
-        let (health_badge_class, health_badge_char) = health_badge(health);
         let (budget_badge_class, budget_badge_char) = budget_badge(budget);
         rows.push(ChannelRow {
             name: ch.name.clone(),
             category_icon: category_icon(&ch.category),
-            health_badge_class,
-            health_badge_char,
+            status_color: status_badge.color,
+            status_glyph: status_badge.glyph,
+            status_title: status_badge.title,
             budget_badge_class,
             budget_badge_char,
             programs,

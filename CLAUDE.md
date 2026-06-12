@@ -21,7 +21,7 @@ Live instance: https://kunstv.fly.dev/
 
 ```bash
 cargo build            # compile
-cargo test             # 336 tests: 266 unit + 70 integration (7 ignored — need yt-dlp/network)
+cargo test             # 342 tests: 269 unit + 73 integration (7 ignored — need yt-dlp/network)
 cargo fmt              # format (ALWAYS run before committing)
 cargo clippy           # lint (CI runs with -D warnings)
 cargo run              # start server on :3000
