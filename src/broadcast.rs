@@ -72,8 +72,8 @@ pub async fn resolve_recording(source_url: String) -> anyhow::Result<(String, i6
 }
 
 /// Thin adapter: fire the conversion as a detached task using the real yt-dlp
-/// resolver. Failures are logged and dropped — the broadcast simply stays live
-/// until the next tune retries.
+/// resolver. Failures are logged and dropped. Since resolve runs before the
+/// claim, a resolve failure leaves the channel live and the next tune retries.
 pub fn spawn_conversion(pool: SqlitePool, channel_id: i64, title: String, source_url: String) {
     tokio::spawn(async move {
         if let Err(e) = convert_if_ended(
