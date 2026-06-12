@@ -180,9 +180,9 @@ enum DiscoverCmd {
         source_kind: String,
         #[arg(long)]
         duration_secs: Option<i64>,
-        #[arg(long, conflicts_with_all = ["new_name", "new_category", "new_type"])]
+        #[arg(long, conflicts_with_all = ["new_name", "new_category", "new_type"], required_unless_present = "new_name")]
         channel: Option<i64>,
-        #[arg(long, requires_all = ["new_category", "new_type"])]
+        #[arg(long, requires_all = ["new_category", "new_type"], required_unless_present = "channel")]
         new_name: Option<String>,
         #[arg(long)]
         new_category: Option<String>,
@@ -356,6 +356,9 @@ fn request_for(cmd: &Command) -> ApiRequest {
             },
         },
         Command::Discover(c) => match c {
+            // Query values are interpolated raw: this is a single-user admin CLI and the
+            // common inputs (country codes, simple group/keyword) need no escaping. A value
+            // with spaces/&/# would need encoding — quote/encode it at the shell if so.
             DiscoverCmd::M3u {
                 country,
                 group,
@@ -588,5 +591,46 @@ mod tests {
         let body = req.body.unwrap();
         assert_eq!(body["channel"]["new"]["name"], "NC");
         assert_eq!(body["channel"]["new"]["type"], "live");
+    }
+
+    #[test]
+    fn request_for_discover_youtube_builds_get_query() {
+        let req = request_for(&Command::Discover(DiscoverCmd::Youtube {
+            keyword: "space".into(),
+            r#type: Some("channel".into()),
+        }));
+        assert_eq!(req.method, "GET");
+        assert_eq!(
+            req.path,
+            "/api/admin/discover/youtube?keyword=space&type=channel"
+        );
+        assert!(req.body.is_none());
+    }
+
+    #[test]
+    fn request_for_discover_youtube_omits_type_when_none() {
+        let req = request_for(&Command::Discover(DiscoverCmd::Youtube {
+            keyword: "news".into(),
+            r#type: None,
+        }));
+        assert_eq!(req.path, "/api/admin/discover/youtube?keyword=news");
+        assert!(req.body.is_none());
+    }
+
+    #[test]
+    fn request_for_discover_add_includes_duration_when_present() {
+        let req = request_for(&Command::Discover(DiscoverCmd::Add {
+            url: "https://x/y.mp4".into(),
+            title: "T".into(),
+            source_kind: "youtube_vod".into(),
+            duration_secs: Some(212),
+            channel: Some(4),
+            new_name: None,
+            new_category: None,
+            new_type: None,
+        }));
+        let body = req.body.unwrap();
+        assert_eq!(body["duration_secs"], 212);
+        assert_eq!(body["channel"]["existing_id"], 4);
     }
 }
