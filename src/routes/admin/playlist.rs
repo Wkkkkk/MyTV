@@ -121,13 +121,14 @@ pub async fn playlist_item_test(
         .map_err(internal_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    crate::health::probe_playlist_item(&state.pool, &state.http_client, &state.cors_cache, &item)
-        .await;
-
-    if media::resolver::needs_resolution(&item.url) {
-        let host = media::hls::extract_manifest_host(&item.url);
-        state.cors_cache.write().await.insert(host, true);
-    }
+    crate::health::probe(
+        &state.pool,
+        &state.http_client,
+        &state.cors_cache,
+        &state.live_cache,
+        crate::health::ProbeTarget::PlaylistItem(&item),
+    )
+    .await;
 
     let updated = playlist_item::get(&state.pool, item_id)
         .await

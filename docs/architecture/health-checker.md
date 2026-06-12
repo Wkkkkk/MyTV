@@ -50,7 +50,7 @@ stateDiagram-v2
 
 **CORS probing.** After a source HTTP check succeeds, `probe_and_cache_cors` sends a CORS preflight to the CDN and caches the result (keyed by host) in the shared `CorsCache`. After all sources are checked, `probe_all_playlist_cors` does the same for VOD playlist item URLs, deduping by CDN host so each CDN is probed at most once per cycle. Non-HTTPS and resolution-needed (YouTube/Twitch) URLs are skipped.
 
-**`probe_source` vs `check_source`.** The admin Test button calls `probe_source`, which runs the same HTTP check and updates `last_status`/`consecutive_failures` but passes `is_active = None` to `update_health` — it never changes whether a source is enabled. `check_source` (used by the background loop) is the only path that can auto-disable or auto-re-enable sources.
+**`probe` vs `check_source`.** The admin and JSON-API Test buttons call `probe(ProbeTarget::Source | PlaylistItem)`, which classifies the target and runs the same HTTP check, updates `last_status`/`consecutive_failures`, and warms the CORS cache (resolving live sources / marking VOD hosts internally) — but passes `is_active = None` to `update_health`, so it never changes whether a source is enabled. `check_source` (used by the background loop) is the only path that can auto-disable or auto-re-enable sources.
 
 **Why `MissedTickBehavior::Skip`?** If a full check round (many sources all timing out at 5s each) takes longer than 15 minutes, any missed ticks are dropped rather than queued. This prevents a backlog of back-to-back check rounds after a slow cycle.
 

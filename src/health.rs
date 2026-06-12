@@ -118,32 +118,6 @@ pub async fn record_source_liveness(pool: &SqlitePool, src: &Source, ok: bool) {
     }
 }
 
-/// Probes a source's health and updates stats without touching `is_active`.
-/// Used by the admin Test button — respects the admin's manual enable/disable choice.
-pub async fn probe_source(
-    pool: &SqlitePool,
-    client: &reqwest::Client,
-    cors_cache: &CorsCache,
-    live_cache: &LiveStatusCache,
-    src: &Source,
-) {
-    let ok = run_check(
-        client,
-        &src.url,
-        &src.kind,
-        src.consecutive_failures,
-        Some(live_cache),
-        |status, reason, failures| async move {
-            source::update_health(pool, src.id, status, reason.as_deref(), failures, None).await
-        },
-    )
-    .await;
-
-    if ok {
-        probe_and_cache_cors(client, cors_cache, &src.url).await;
-    }
-}
-
 async fn check_source(
     pool: &SqlitePool,
     client: &reqwest::Client,
@@ -190,37 +164,79 @@ async fn check_playlist_item(
     .await
 }
 
-/// Probes a playlist item's health and updates stats without touching `is_active`.
-/// Used by the admin Test button — respects the admin's manual enable/disable choice.
-pub async fn probe_playlist_item(
+/// A health-probe target: a live/VOD source row, or a playlist item. `probe`
+/// classifies the variant and runs the full pipeline (health update, CORS cache,
+/// and — for resolution-needed URLs — the resolved-CDN CORS probe / VOD host mark)
+/// internally, so callers never branch on the URL kind.
+pub enum ProbeTarget<'a> {
+    Source(&'a Source),
+    PlaylistItem(&'a crate::model::playlist_item::PlaylistItem),
+}
+
+/// Probes a target's health and warms the CORS cache, without touching `is_active`.
+/// Used by the admin + JSON-API Test buttons. Dispatches on the target kind:
+/// a `Source` consults the live-status cache and, when the URL needs resolution,
+/// resolves it to probe the real CDN's CORS; a `PlaylistItem` skips the live cache
+/// and, when its URL needs resolution, marks the host Direct (VOD items bypass the
+/// proxy entirely).
+pub async fn probe(
     pool: &SqlitePool,
     client: &reqwest::Client,
     cors_cache: &CorsCache,
-    item: &crate::model::playlist_item::PlaylistItem,
+    live_cache: &LiveStatusCache,
+    target: ProbeTarget<'_>,
 ) {
-    let kind = crate::model::source::SourceKind::detect(&item.url);
-    let ok = run_check(
-        client,
-        &item.url,
-        kind.as_str(),
-        item.consecutive_failures,
-        None,
-        |status, reason, failures| async move {
-            crate::model::playlist_item::update_health(
-                pool,
-                item.id,
-                status,
-                reason.as_deref(),
-                failures,
-                None,
+    match target {
+        ProbeTarget::Source(src) => {
+            let ok = run_check(
+                client,
+                &src.url,
+                &src.kind,
+                src.consecutive_failures,
+                Some(live_cache),
+                |status, reason, failures| async move {
+                    source::update_health(pool, src.id, status, reason.as_deref(), failures, None)
+                        .await
+                },
             )
-            .await
-        },
-    )
-    .await;
-
-    if ok {
-        probe_and_cache_cors(client, cors_cache, &item.url).await;
+            .await;
+            if ok {
+                probe_and_cache_cors(client, cors_cache, &src.url).await;
+            }
+            if crate::media::resolver::needs_resolution(&src.url) {
+                probe_and_cache_resolved_cors(client, cors_cache, &src.url).await;
+            }
+        }
+        ProbeTarget::PlaylistItem(item) => {
+            let kind = crate::model::source::SourceKind::detect(&item.url);
+            let ok = run_check(
+                client,
+                &item.url,
+                kind.as_str(),
+                item.consecutive_failures,
+                None,
+                |status, reason, failures| async move {
+                    crate::model::playlist_item::update_health(
+                        pool,
+                        item.id,
+                        status,
+                        reason.as_deref(),
+                        failures,
+                        None,
+                    )
+                    .await
+                },
+            )
+            .await;
+            if ok {
+                probe_and_cache_cors(client, cors_cache, &item.url).await;
+            }
+            if crate::media::resolver::needs_resolution(&item.url) {
+                // VOD items bypass the proxy entirely, so their host is Direct outright.
+                let host = crate::media::hls::extract_manifest_host(&item.url);
+                cors_cache.write().await.insert(host, true);
+            }
+        }
     }
 }
 
@@ -260,11 +276,9 @@ pub async fn probe_and_cache_cors(
 /// CDN host and the original source host. The original-host entry is what the
 /// guide and admin source-row budget lookups query with (they only know the DB
 /// source URL, never the resolved googlevideo URL). Returns `None` (cache
-/// unchanged) if resolution fails or the resolved URL is not a probeable HLS
-/// manifest, or for a URL that does not require resolution. Intended for the
-/// admin Test button only — the 15-min background sweep does not resolve live
-/// sources (too expensive).
-pub async fn probe_and_cache_resolved_cors(
+/// unchanged) if resolution fails, the resolved URL is not a probeable HLS
+/// manifest, or the URL does not require resolution.
+async fn probe_and_cache_resolved_cors(
     client: &reqwest::Client,
     cors_cache: &CorsCache,
     source_url: &str,
@@ -484,7 +498,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn probe_source_does_not_reenable_disabled_source() {
+    async fn probe_does_not_reenable_disabled_source() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         // A real server returning HTTP 200 — simulates a healthy but admin-disabled source.
@@ -544,8 +558,15 @@ mod tests {
         let live_cache: LiveStatusCache =
             std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
-        // probe_source is the manual Test-button path — must never change is_active.
-        probe_source(&pool, &client, &cors_cache, &live_cache, &src).await;
+        // probe() is the manual Test-button path — must never change is_active.
+        probe(
+            &pool,
+            &client,
+            &cors_cache,
+            &live_cache,
+            ProbeTarget::Source(&src),
+        )
+        .await;
 
         let updated = crate::model::source::get(&pool, src.id)
             .await
@@ -553,12 +574,12 @@ mod tests {
             .unwrap();
         assert!(
             !updated.is_active,
-            "probe_source must not re-enable a manually disabled source"
+            "probe() must not re-enable a manually disabled source"
         );
     }
 
     #[tokio::test]
-    async fn probe_playlist_item_does_not_reenable_disabled_item() {
+    async fn probe_does_not_reenable_disabled_playlist_item() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -615,8 +636,16 @@ mod tests {
             .unwrap();
         let cors_cache: crate::CorsCache =
             std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
-
-        probe_playlist_item(&pool, &client, &cors_cache, &it).await;
+        let live_cache: LiveStatusCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        probe(
+            &pool,
+            &client,
+            &cors_cache,
+            &live_cache,
+            ProbeTarget::PlaylistItem(&it),
+        )
+        .await;
 
         let updated = crate::model::playlist_item::get(&pool, it.id)
             .await
@@ -624,7 +653,7 @@ mod tests {
             .unwrap();
         assert!(
             !updated.is_active,
-            "probe_playlist_item must not re-enable a manually disabled item"
+            "probe() must not re-enable a manually disabled item"
         );
     }
 
@@ -702,6 +731,58 @@ mod tests {
         assert!(after.is_active);
         assert_eq!(after.consecutive_failures, 0);
         assert_eq!(after.last_status.as_deref(), Some("ok"));
+    }
+
+    #[tokio::test]
+    async fn probe_marks_needs_resolution_vod_item_host_direct() {
+        let pool = crate::db::connect("sqlite::memory:").await.unwrap();
+        let ch = crate::model::channel::create(
+            &pool,
+            crate::model::channel::NewChannel {
+                name: "vod".to_string(),
+                category: "test".to_string(),
+                logo_url: None,
+                channel_type: crate::model::channel::ChannelType::VodLoop,
+                sort_order: 0,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap();
+        let item = crate::model::playlist_item::create(
+            &pool,
+            crate::model::playlist_item::NewPlaylistItem {
+                channel_id: ch.id,
+                title: "rec".to_string(),
+                url: "https://www.youtube.com/watch?v=abc123".to_string(),
+                duration_secs: 3600,
+                sort_order: 0,
+            },
+        )
+        .await
+        .unwrap();
+
+        let client = reqwest::Client::new();
+        let cors_cache: crate::CorsCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let live_cache: LiveStatusCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+
+        probe(
+            &pool,
+            &client,
+            &cors_cache,
+            &live_cache,
+            ProbeTarget::PlaylistItem(&item),
+        )
+        .await;
+
+        let host = crate::media::hls::extract_manifest_host(&item.url);
+        assert_eq!(
+            cors_cache.read().await.get(&host).copied(),
+            Some(true),
+            "needs-resolution VOD item host must be marked Direct"
+        );
     }
 
     #[tokio::test]

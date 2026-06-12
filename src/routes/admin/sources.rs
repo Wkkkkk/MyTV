@@ -86,27 +86,14 @@ pub async fn source_test(
         .map_err(internal_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    crate::health::probe_source(
+    crate::health::probe(
         &state.pool,
         &state.http_client,
         &state.cors_cache,
         &state.live_cache,
-        &src,
+        crate::health::ProbeTarget::Source(&src),
     )
     .await;
-
-    // Unlike playlist_item_test (VOD items skip the proxy entirely, so their host is
-    // marked Direct outright), a live source still proxies its manifest and only loads
-    // segments direct when the resolved CDN sends CORS — so we must actually resolve
-    // and probe to learn the real budget badge.
-    if crate::media::resolver::needs_resolution(&src.url) {
-        crate::health::probe_and_cache_resolved_cors(
-            &state.http_client,
-            &state.cors_cache,
-            &src.url,
-        )
-        .await;
-    }
 
     let updated = source::get(&state.pool, source_id)
         .await

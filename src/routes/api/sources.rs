@@ -113,12 +113,12 @@ pub async fn test(
         .await
         .map_err(internal)?
         .ok_or(ApiError::NotFound)?;
-    crate::health::probe_source(
+    crate::health::probe(
         &state.pool,
         &state.http_client,
         &state.cors_cache,
         &state.live_cache,
-        &src,
+        crate::health::ProbeTarget::Source(&src),
     )
     .await;
     let updated = source::get(&state.pool, id)

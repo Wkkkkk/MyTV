@@ -122,8 +122,14 @@ pub async fn test(
         .await
         .map_err(internal)?
         .ok_or(ApiError::NotFound)?;
-    crate::health::probe_playlist_item(&state.pool, &state.http_client, &state.cors_cache, &item)
-        .await;
+    crate::health::probe(
+        &state.pool,
+        &state.http_client,
+        &state.cors_cache,
+        &state.live_cache,
+        crate::health::ProbeTarget::PlaylistItem(&item),
+    )
+    .await;
     let updated = playlist_item::get(&state.pool, id)
         .await
         .map_err(internal)?
