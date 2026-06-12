@@ -121,8 +121,10 @@ pub(super) fn country_to_code(input: &str) -> Option<String> {
         .map(|(_, code)| code.to_string())
 }
 
-/// Fetch + parse + filter the iptv-org M3U, then keep only reachable entries
-/// (capped at `limit`). Shared by the HTML handler and the JSON API.
+/// Fetch + parse + filter the iptv-org M3U, then keep only reachable entries.
+/// `limit` caps how many filtered candidates are *probed* for reachability
+/// (the cap is applied before the reachability checks), so the number of rows
+/// returned may be fewer than `limit`. Shared by the HTML handler and the JSON API.
 pub(crate) async fn search(
     client: &reqwest::Client,
     country: &str,
