@@ -21,7 +21,7 @@ Live instance: https://kunstv.fly.dev/
 
 ```bash
 cargo build            # compile
-cargo test             # 347 tests: 269 unit + 78 integration (7 ignored — need yt-dlp/network)
+cargo test             # 371 tests: 278 unit + 93 integration (7 ignored — need yt-dlp/network)
 cargo fmt              # format (ALWAYS run before committing)
 cargo clippy           # lint (CI runs with -D warnings)
 cargo run              # start server on :3000
@@ -36,6 +36,8 @@ fly deploy --app kunstv  # deploy to Fly.io
 src/
   lib.rs          # library root: exports AppState, build_router, public modules
   main.rs         # thin startup wrapper — only tokio::main, env setup, serve
+  bin/
+    mytvctl.rs    # CLI client for the JSON API (clap; MYTV_BASE_URL + MYTV_ADMIN_PASSWORD)
   config.rs       # Config struct, reads env vars
   db.rs           # db::connect(), runs migrations
   health.rs       # background health checker (spawned in main)
@@ -49,6 +51,7 @@ src/
     guide/        # /guide, /guide/partial — layout, badges, data aggregation
     health.rs     # /health
     admin/        # /admin/** — channel/source/playlist CRUD, discovery, live-status badge, /admin/metrics
+    api/          # /api/admin/** — JSON CRUD (channels/sources/playlist incl. edit + test), ApiError, mytvctl backend
   media/          # yt-dlp resolution + live-status probe (capped concurrency), HLS helpers, M3U parsing
 benches/
   hot_paths.rs    # criterion benches (epg, hls rewrite, m3u parse, budget)
@@ -58,6 +61,7 @@ templates/        # Askama .html files mirroring routes structure
 docs/performance/ # FRAMEWORK.md — perf mind map + baseline table
 tests/
   http.rs         # integration tests (tower::ServiceExt::oneshot)
+  api.rs          # /api/admin JSON API integration tests (oneshot)
   fixtures/
     seed.sql      # 5 test channels, 4 sources, 2 playlist items
 ```
@@ -77,6 +81,8 @@ tests/
 **VOD position**: `tune_vod_at` computes current playlist position using `Utc::now()` and the channel's `loop_anchor`. The returned URL depends on current time — tests assert `url.contains(...)` rather than exact equality.
 
 **Live-status badges**: `GET /admin/live-status?url=...` returns a small badge partial; source rows and discovery results lazy-load it via HTMX (`hx-trigger="load"`), so admin pages never block on yt-dlp. Results are cached in `AppState.live_cache` (60s TTL; 10s for Unknown). All yt-dlp subprocesses — probes and resolvers alike — go through `resolver::run_under_cap`, a global 2-permit semaphore with a bounded wait that load-sheds instead of queueing indefinitely (each yt-dlp process holds ~73 MB; the production VM has 256 MB — see `docs/bug-logs/2026-06-10-live-status-badge-ytdlp-oom.md`).
+
+**JSON admin API + CLI**: `src/routes/api/` serves `/api/admin/**` — JSON CRUD for channels, sources, and playlist items (list/get/create/`PATCH`/delete, plus `toggle` and `test` for sources & items). It is nested behind the *same* `basic_auth` route-layer as the form admin, reuses the `model::*` layer, and serializes the model structs directly (requests use string-friendly DTOs in each submodule; `ChannelRequest`/source/playlist `PATCH` is full-replace). Errors funnel through one `ApiError` enum → `{"error": "..."}` at 404/422/500 (`internal()` logs the real error, returns a generic 500 — no detail leaks). The `mytvctl` binary (`src/bin/mytvctl.rs`) is a standalone clap client: `mytvctl <channel|source|playlist> <verb> ...`, configured by `MYTV_BASE_URL` + `MYTV_ADMIN_PASSWORD` (password env-only), always prints the raw JSON response, exit codes 0/1/2. Its `request_for` (args→method/path/body) is a pure, unit-tested fn. See `docs/superpowers/specs/2026-06-12-admin-automation-design.md`.
 
 **Health checker**: `health::start(pool, client)` spawns a detached Tokio task. It uses `MissedTickBehavior::Skip` on a 15-minute interval. Sources are auto-disabled after consecutive failures and re-enabled after a cooldown.
 

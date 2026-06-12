@@ -70,7 +70,7 @@ pub struct ChannelForm {
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-fn parse_loop_anchor(s: &str) -> Option<DateTime<Utc>> {
+pub(crate) fn parse_loop_anchor(s: &str) -> Option<DateTime<Utc>> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
         return None;
