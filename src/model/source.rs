@@ -168,6 +168,27 @@ pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool
     Ok(rows > 0)
 }
 
+/// Input for updating an existing source (editable fields only).
+pub struct UpdateSource {
+    pub url: String,
+    pub priority: i64,
+}
+
+/// Update a source's url/priority by id; returns None if not found.
+pub async fn update(pool: &SqlitePool, id: i64, input: UpdateSource) -> Result<Option<Source>> {
+    let rows = sqlx::query("UPDATE sources SET url = ?, priority = ? WHERE id = ?")
+        .bind(&input.url)
+        .bind(input.priority)
+        .bind(id)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    if rows == 0 {
+        return Ok(None);
+    }
+    get(pool, id).await
+}
+
 /// Deactivate every source for a channel. Used when an ended YouTube live is
 /// converted to a VOD loop; rows are kept for reference, only is_active flips.
 pub async fn deactivate_all_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<()> {
@@ -545,5 +566,44 @@ mod tests {
             "youtube_vod".parse::<SourceKind>().unwrap(),
             SourceKind::YoutubeVod
         );
+    }
+
+    #[tokio::test]
+    async fn update_changes_url_and_priority() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let src = create(&pool, hls(ch.id, "https://old.example.com/x.m3u8", 1))
+            .await
+            .unwrap();
+
+        let updated = update(
+            &pool,
+            src.id,
+            UpdateSource {
+                url: "https://new.example.com/x.m3u8".into(),
+                priority: 9,
+            },
+        )
+        .await
+        .unwrap()
+        .expect("source exists");
+        assert_eq!(updated.url, "https://new.example.com/x.m3u8");
+        assert_eq!(updated.priority, 9);
+    }
+
+    #[tokio::test]
+    async fn update_unknown_id_returns_none() {
+        let pool = test_pool().await;
+        let r = update(
+            &pool,
+            999999,
+            UpdateSource {
+                url: "https://x".into(),
+                priority: 1,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(r.is_none());
     }
 }

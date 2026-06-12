@@ -114,6 +114,37 @@ pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool
     Ok(rows > 0)
 }
 
+/// Input for updating an existing playlist item.
+pub struct UpdatePlaylistItem {
+    pub title: String,
+    pub url: String,
+    pub duration_secs: i64,
+    pub sort_order: i64,
+}
+
+/// Update a playlist item by id; returns None if not found.
+pub async fn update(
+    pool: &SqlitePool,
+    id: i64,
+    input: UpdatePlaylistItem,
+) -> Result<Option<PlaylistItem>> {
+    let rows = sqlx::query(
+        "UPDATE playlist_items SET title = ?, url = ?, duration_secs = ?, sort_order = ? WHERE id = ?",
+    )
+    .bind(&input.title)
+    .bind(&input.url)
+    .bind(input.duration_secs)
+    .bind(input.sort_order)
+    .bind(id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    if rows == 0 {
+        return Ok(None);
+    }
+    get(pool, id).await
+}
+
 /// Update health check fields on a playlist item; optionally changes is_active.
 pub async fn update_health(
     pool: &SqlitePool,
@@ -463,5 +494,48 @@ mod tests {
         assert_eq!(reenabled.consecutive_failures, 0);
         assert_eq!(reenabled.last_status.as_deref(), Some("ok"));
         assert!(reenabled.failure_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn update_changes_fields() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let it = create(&pool, item(ch.id, "ep1", 1800, 0)).await.unwrap();
+
+        let updated = update(
+            &pool,
+            it.id,
+            UpdatePlaylistItem {
+                title: "Renamed".into(),
+                url: "https://vod.example.com/new.mp4".into(),
+                duration_secs: 123,
+                sort_order: 7,
+            },
+        )
+        .await
+        .unwrap()
+        .expect("item exists");
+        assert_eq!(updated.title, "Renamed");
+        assert_eq!(updated.url, "https://vod.example.com/new.mp4");
+        assert_eq!(updated.duration_secs, 123);
+        assert_eq!(updated.sort_order, 7);
+    }
+
+    #[tokio::test]
+    async fn update_unknown_id_returns_none() {
+        let pool = test_pool().await;
+        let r = update(
+            &pool,
+            999999,
+            UpdatePlaylistItem {
+                title: "x".into(),
+                url: "y".into(),
+                duration_secs: 1,
+                sort_order: 1,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(r.is_none());
     }
 }
