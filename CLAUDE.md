@@ -26,6 +26,7 @@ cargo fmt              # format (ALWAYS run before committing)
 cargo clippy           # lint (CI runs with -D warnings)
 cargo run              # start server on :3000
 fly deploy --app kunstv  # deploy to Fly.io
+./scripts/deploy.sh      # deploy to Fly.io, then run e2e smoke suite against prod
 ```
 
 ---
@@ -114,6 +115,8 @@ Runs on push/PR to `main`: `cargo fmt --check` → `cargo clippy -- -D warnings`
 ## Deployment
 
 Hosted on Fly.io. Config in `fly.toml`. Deploy with `fly deploy --app kunstv`. Health check at `/health`.
+
+**E2E smoke suite**: `tests/e2e.rs` drives the live prod instance with self-cleaning, `__e2e__`-prefixed CRUD. It is `#[ignore]`d and skips unless `MYTV_BASE_URL` + `MYTV_ADMIN_PASSWORD` are set, so CI and a plain `cargo test` never touch prod. Run manually with `cargo test --test e2e -- --ignored`, or automatically via `./scripts/deploy.sh`. Scenarios 1–2 (channel CRUD, tune `source_id`) hard-fail; scenarios 3–4 (`mytvctl` exit codes, discovery) warn-not-fail.
 
 ---
 
