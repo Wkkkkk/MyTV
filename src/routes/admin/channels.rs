@@ -239,24 +239,9 @@ pub async fn channel_detail(
         vec![]
     };
 
-    let cors = state.cors_cache.read().await.clone();
-    let sources: Vec<AdminSourceRow> = srcs
-        .into_iter()
-        .map(|s| {
-            let mut row: AdminSourceRow = s.into();
-            row.apply_budget(&cors);
-            row
-        })
-        .collect();
-
-    let playlist_items: Vec<AdminPlaylistItemRow> = items
-        .into_iter()
-        .map(|i| {
-            let mut row: AdminPlaylistItemRow = i.into();
-            row.apply_budget(&cors);
-            row
-        })
-        .collect();
+    let sources: Vec<AdminSourceRow> = super::build_rows(srcs, &state.cors_cache).await;
+    let playlist_items: Vec<AdminPlaylistItemRow> =
+        super::build_rows(items, &state.cors_cache).await;
 
     render(ChannelDetailTemplate {
         channel_id: ch.id,
