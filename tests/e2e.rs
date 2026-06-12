@@ -30,7 +30,12 @@ struct Config {
 
 /// Returns the prod config, or `None` (after printing a skip line) when either
 /// env var is absent — so the test passes as a no-op for contributors w/o creds.
+///
+/// Loads `.env` first (like the app's `main.rs`) so `MYTV_BASE_URL` /
+/// `MYTV_ADMIN_PASSWORD` can live there instead of being typed inline. Real
+/// environment variables already set take precedence (dotenvy does not override).
 fn env_or_skip() -> Option<Config> {
+    dotenvy::dotenv().ok();
     let base_url = std::env::var("MYTV_BASE_URL").unwrap_or_default();
     let password = std::env::var("MYTV_ADMIN_PASSWORD").unwrap_or_default();
     if base_url.is_empty() || password.is_empty() {
