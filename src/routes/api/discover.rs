@@ -1,11 +1,13 @@
 use axum::extract::{Query, State};
+use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
 
 use super::{internal, ApiError};
+use crate::model::channel;
 use crate::routes::admin::discover::{
-    fetch_youtube_channels, fetch_youtube_results, m3u_search, resolve_channel, resolve_manual,
-    M3uResultRow, ResolvedMeta, YoutubeResultRow,
+    do_discover_add, fetch_youtube_channels, fetch_youtube_results, m3u_search, resolve_channel,
+    resolve_manual, DiscoverAddParams, M3uResultRow, ResolvedMeta, YoutubeResultRow,
 };
 use crate::AppState;
 
@@ -148,4 +150,94 @@ pub async fn youtube(
     }
     .map_err(internal)?;
     Ok(Json(rows.into_iter().map(YoutubeCandidate::from).collect()))
+}
+
+#[derive(Deserialize)]
+pub struct NewChannelSpec {
+    pub name: String,
+    pub category: String,
+    #[serde(rename = "type")]
+    pub channel_type: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelTarget {
+    ExistingId(i64),
+    New(NewChannelSpec),
+}
+
+#[derive(Deserialize)]
+pub struct AddRequest {
+    pub url: String,
+    pub title: String,
+    pub source_kind: String,
+    #[serde(default)]
+    pub duration_secs: i64,
+    pub channel: ChannelTarget,
+}
+
+#[derive(Serialize)]
+pub struct AddResponse {
+    pub channel_id: i64,
+    pub channel: channel::Channel,
+}
+
+pub async fn add(
+    State(state): State<AppState>,
+    Json(req): Json<AddRequest>,
+) -> Result<(StatusCode, Json<AddResponse>), ApiError> {
+    let (channel_choice, new_name, new_category, new_channel_type) = match &req.channel {
+        ChannelTarget::ExistingId(id) => (
+            id.to_string(),
+            String::new(),
+            String::new(),
+            "live".to_string(),
+        ),
+        ChannelTarget::New(spec) => (
+            "new".to_string(),
+            spec.name.clone(),
+            spec.category.clone(),
+            spec.channel_type.clone(),
+        ),
+    };
+
+    let channel_id = do_discover_add(DiscoverAddParams {
+        pool: &state.pool,
+        client: &state.http_client,
+        url: &req.url,
+        title: &req.title,
+        source_kind: &req.source_kind,
+        duration_secs: req.duration_secs,
+        channel_choice: &channel_choice,
+        new_name: &new_name,
+        new_category: &new_category,
+        new_channel_type: &new_channel_type,
+    })
+    .await
+    .map_err(map_add_status)?;
+
+    let channel = channel::get(&state.pool, channel_id)
+        .await
+        .map_err(internal)?
+        .ok_or(ApiError::NotFound)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(AddResponse {
+            channel_id,
+            channel,
+        }),
+    ))
+}
+
+/// `do_discover_add` returns a bare StatusCode; map it to ApiError so the JSON
+/// error body stays consistent.
+fn map_add_status(status: StatusCode) -> ApiError {
+    match status {
+        StatusCode::NOT_FOUND => ApiError::NotFound,
+        StatusCode::UNPROCESSABLE_ENTITY => {
+            ApiError::Validation("invalid discover-add request".into())
+        }
+        _ => ApiError::Internal,
+    }
 }

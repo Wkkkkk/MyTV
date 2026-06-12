@@ -90,6 +90,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/playlist/:id/toggle", post(playlist::toggle))
         .route("/playlist/:id/test", post(playlist::test))
         .route("/discover/resolve", post(discover::resolve))
+        .route("/discover/add", post(discover::add))
         .route("/discover/channel", post(discover::channel))
         .route("/discover/m3u", get(discover::m3u))
         .route("/discover/youtube", get(discover::youtube))

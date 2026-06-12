@@ -561,3 +561,78 @@ async fn discover_m3u_live_search() {
     let j = body_json(r).await;
     assert!(j.as_array().unwrap().len() <= 5);
 }
+
+#[tokio::test]
+async fn discover_add_to_existing_channel() {
+    let app = app().await;
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/add",
+            serde_json::json!({
+                "url": "https://cdn.example.com/added.m3u8",
+                "title": "Added",
+                "source_kind": "hls",
+                "channel": {"existing_id": 1}
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let j = body_json(r).await;
+    assert_eq!(j["channel_id"], 1);
+    assert_eq!(j["channel"]["id"], 1);
+
+    let r = app
+        .oneshot(authed_get("/api/admin/channels/1/sources"))
+        .await
+        .unwrap();
+    let sources = body_json(r).await;
+    assert!(sources
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["url"] == "https://cdn.example.com/added.m3u8"));
+}
+
+#[tokio::test]
+async fn discover_add_creates_new_channel() {
+    let app = app().await;
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/add",
+            serde_json::json!({
+                "url": "https://cdn.example.com/newchan.m3u8",
+                "title": "NC",
+                "source_kind": "hls",
+                "channel": {"new": {"name": "New Discovered", "category": "test", "type": "live"}}
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let j = body_json(r).await;
+    assert_eq!(j["channel"]["name"], "New Discovered");
+    let new_id = j["channel_id"].as_i64().unwrap();
+    assert!(new_id > 5); // seed has channels 1-5
+}
+
+#[tokio::test]
+async fn discover_add_unknown_existing_channel_is_404() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/add",
+            serde_json::json!({
+                "url": "https://cdn.example.com/x.m3u8", "title": "X", "source_kind": "hls",
+                "channel": {"existing_id": 999999}
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}
