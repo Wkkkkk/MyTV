@@ -53,7 +53,6 @@ fn authed_get(uri: &str) -> Request<Body> {
         .unwrap()
 }
 
-#[allow(dead_code)]
 fn authed_json(method: &str, uri: &str, body: serde_json::Value) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -168,4 +167,48 @@ async fn channel_get_unknown_is_404() {
         .await
         .unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn channel_create_empty_name_is_422() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels",
+            serde_json::json!({"name":"   ","category":"y","type":"live","sort_order":0}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn channel_update_preserves_existing_loop_anchor() {
+    let app = app().await;
+    // create a vod_loop channel with an explicit anchor
+    let r = app.clone().oneshot(authed_json("POST", "/api/admin/channels",
+        serde_json::json!({"name":"VOD A","category":"test","type":"vod_loop","sort_order":0,"loop_anchor":"2021-05-05T10:00"}))).await.unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let created = body_json(r).await;
+    let id = created["id"].as_i64().unwrap();
+    let anchor = created["loop_anchor"].clone();
+    assert!(!anchor.is_null());
+
+    // PATCH changing only the name, omitting loop_anchor — anchor must be preserved
+    let r = app
+        .oneshot(authed_json(
+            "PATCH",
+            &format!("/api/admin/channels/{id}"),
+            serde_json::json!({"name":"VOD B","category":"test","type":"vod_loop","sort_order":0}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let updated = body_json(r).await;
+    assert_eq!(updated["name"], "VOD B");
+    assert_eq!(
+        updated["loop_anchor"], anchor,
+        "loop_anchor must be preserved when omitted on update"
+    );
 }

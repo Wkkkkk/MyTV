@@ -15,10 +15,6 @@ use serde::Serialize;
 use crate::AppState;
 
 /// Unified JSON error: renders `{ "error": "<msg>" }` with a status code.
-///
-/// `NotFound` and `Validation` are unused in the initial scaffold (only the
-/// channels-list endpoint exists) but are part of the API error contract that
-/// the channel/source/playlist write endpoints in later tasks return.
 pub enum ApiError {
     NotFound,
     Validation(String),
