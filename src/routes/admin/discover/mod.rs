@@ -3,6 +3,10 @@ mod m3u;
 mod youtube;
 
 pub use add::{do_discover_add, DiscoverAddParams};
+pub(crate) use m3u::search as m3u_search;
+pub(crate) use m3u::M3uResultRow;
+pub(crate) use youtube::YoutubeResultRow;
+pub(crate) use youtube::{fetch_youtube_channels, fetch_youtube_results};
 
 use askama::Template;
 use axum::{
@@ -14,14 +18,10 @@ use serde::Deserialize;
 
 use crate::routes::{internal_error, render};
 use crate::{
-    media::m3u as media_m3u,
     media::resolver,
     model::{channel, source},
     AppState,
 };
-
-use m3u::M3uResultRow;
-use youtube::YoutubeResultRow;
 
 // ── pure data types ────────────────────────────────────────────────────────
 
@@ -135,6 +135,65 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// Resolved metadata for a single URL — shared shape behind the manual/channel
+/// resolve HTML handlers and the JSON API.
+pub(crate) struct ResolvedMeta {
+    pub url: String,
+    pub title: String,
+    pub duration_secs: i64,
+    pub is_live: bool,
+    pub source_kind: String,
+}
+
+/// Resolve an arbitrary stream URL. For YouTube URLs, fetch duration+title via
+/// yt-dlp (5s timeouts); otherwise title=url, duration=0. `is_live` ≙ duration 0.
+pub(crate) async fn resolve_manual(url: &str) -> Result<ResolvedMeta, StatusCode> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    let (duration_secs, title) = if resolver::needs_resolution(url) {
+        let (dur_result, title_result) = tokio::join!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                resolver::fetch_duration_secs(url),
+            ),
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                resolver::fetch_title(url),
+            ),
+        );
+        let duration = dur_result.ok().and_then(|r| r.ok()).unwrap_or(0);
+        let title = title_result
+            .ok()
+            .and_then(|r| r.ok())
+            .unwrap_or_else(|| url.to_string());
+        (duration, title)
+    } else {
+        (0, url.to_string())
+    };
+    let is_live = duration_secs == 0;
+    Ok(ResolvedMeta {
+        url: url.to_string(),
+        title,
+        duration_secs,
+        is_live,
+        source_kind: source::SourceKind::detect(url).as_str().to_string(),
+    })
+}
+
+/// Resolve a YouTube channel URL to a normalized live-source candidate.
+pub(crate) fn resolve_channel(url: &str) -> Result<ResolvedMeta, StatusCode> {
+    let normalized = youtube::normalize_channel_url(url).ok_or(StatusCode::UNPROCESSABLE_ENTITY)?;
+    let title = youtube::channel_title_from_url(&normalized);
+    Ok(ResolvedMeta {
+        url: normalized,
+        title,
+        duration_secs: 0,
+        is_live: true,
+        source_kind: "youtube_live".to_string(),
+    })
+}
+
 // ── handlers ──────────────────────────────────────────────────────────────
 
 pub async fn discover_page(State(state): State<AppState>) -> Result<Html<String>, StatusCode> {
@@ -203,51 +262,13 @@ pub async fn discover_m3u_search(
     State(state): State<AppState>,
     Form(form): Form<M3uSearchForm>,
 ) -> Html<String> {
-    let country_code = if form.country.trim().is_empty() {
-        None
-    } else {
-        m3u::country_to_code(&form.country)
-    };
-    let raw = match m3u::fetch_m3u(&state.http_client, country_code.as_deref()).await {
+    let rows = match m3u::search(&state.http_client, &form.country, &form.group, usize::MAX).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("M3U fetch error: {e}");
             return Html("<p class=\"empty-state\" style=\"color:#f77\">Failed to fetch M3U list. Check server logs.</p>".to_string());
         }
     };
-    let all = media_m3u::parse_m3u(&raw);
-    let matches = media_m3u::filter_m3u(&all, "", &form.group);
-
-    let handles: Vec<_> = matches
-        .iter()
-        .map(|ch| {
-            let client = state.http_client.clone();
-            let url = ch.url.clone();
-            tokio::spawn(async move { m3u::url_is_reachable(&client, &url).await })
-        })
-        .collect();
-    let reachable: Vec<bool> = {
-        let mut r = Vec::with_capacity(handles.len());
-        for h in handles {
-            r.push(h.await.unwrap_or(false));
-        }
-        r
-    };
-
-    let rows: Vec<M3uResultRow> = matches
-        .iter()
-        .zip(reachable)
-        .filter(|(_, ok)| *ok)
-        .enumerate()
-        .map(|(i, (ch, _))| M3uResultRow {
-            name: ch.name.clone(),
-            group: ch.group.clone(),
-            country: ch.country.clone(),
-            url: ch.url.clone(),
-            source_kind: source::SourceKind::detect(&ch.url).as_str().to_string(),
-            form_id: i,
-        })
-        .collect();
     match (M3uResultsTemplate { rows }).render() {
         Ok(html) => Html(html),
         Err(e) => {
@@ -298,9 +319,7 @@ pub async fn discover_channel_resolve(
     State(state): State<AppState>,
     Form(form): Form<ChannelUrlForm>,
 ) -> Result<Html<String>, StatusCode> {
-    let normalized =
-        youtube::normalize_channel_url(&form.url).ok_or(StatusCode::UNPROCESSABLE_ENTITY)?;
-    let title = youtube::channel_title_from_url(&normalized);
+    let meta = resolve_channel(&form.url)?;
     let channels = channel::list(&state.pool)
         .await
         .map_err(internal_error)?
@@ -313,12 +332,12 @@ pub async fn discover_channel_resolve(
         .collect();
     render(ManualResultTemplate {
         form_id: "channel".to_string(),
-        url: normalized,
-        title,
+        url: meta.url,
+        title: meta.title,
         group: String::new(),
-        is_live: true,
-        duration_secs: 0,
-        source_kind: "youtube_live".to_string(),
+        is_live: meta.is_live,
+        duration_secs: meta.duration_secs,
+        source_kind: meta.source_kind,
         show_duration_input: false,
         channels,
     })
@@ -328,31 +347,7 @@ pub async fn discover_manual_resolve(
     State(state): State<AppState>,
     Form(form): Form<ManualResolveForm>,
 ) -> Result<Html<String>, StatusCode> {
-    if !form.url.starts_with("http://") && !form.url.starts_with("https://") {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
-    let is_youtube = resolver::needs_resolution(&form.url);
-    let (duration_secs, title) = if is_youtube {
-        let (dur_result, title_result) = tokio::join!(
-            tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                resolver::fetch_duration_secs(&form.url),
-            ),
-            tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                resolver::fetch_title(&form.url),
-            ),
-        );
-        let duration = dur_result.ok().and_then(|r| r.ok()).unwrap_or(0);
-        let title = title_result
-            .ok()
-            .and_then(|r| r.ok())
-            .unwrap_or_else(|| form.url.clone());
-        (duration, title)
-    } else {
-        (0, form.url.clone())
-    };
-    let is_live = duration_secs == 0;
+    let meta = resolve_manual(&form.url).await?;
     let channels = channel::list(&state.pool)
         .await
         .map_err(internal_error)?
@@ -365,13 +360,13 @@ pub async fn discover_manual_resolve(
         .collect();
     render(ManualResultTemplate {
         form_id: "manual".to_string(),
-        url: form.url.clone(),
-        title,
+        url: meta.url.clone(),
+        title: meta.title,
         group: String::new(),
-        is_live,
-        duration_secs,
-        source_kind: source::SourceKind::detect(&form.url).as_str().to_string(),
-        show_duration_input: !is_live && duration_secs == 0,
+        is_live: meta.is_live,
+        duration_secs: meta.duration_secs,
+        source_kind: meta.source_kind,
+        show_duration_input: !meta.is_live && meta.duration_secs == 0,
         channels,
     })
 }

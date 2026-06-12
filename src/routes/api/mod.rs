@@ -3,6 +3,7 @@
 //! requests use the DTOs defined per submodule.
 
 mod channels;
+mod discover;
 mod playlist;
 mod sources;
 
@@ -20,6 +21,7 @@ use crate::AppState;
 pub enum ApiError {
     NotFound,
     Validation(String),
+    Unavailable(String),
     Internal,
 }
 
@@ -28,6 +30,7 @@ impl IntoResponse for ApiError {
         let (status, msg) = match self {
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
             ApiError::Validation(m) => (StatusCode::UNPROCESSABLE_ENTITY, m),
+            ApiError::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
             ApiError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal error".to_string(),
@@ -86,4 +89,9 @@ pub fn api_router() -> Router<AppState> {
         )
         .route("/playlist/:id/toggle", post(playlist::toggle))
         .route("/playlist/:id/test", post(playlist::test))
+        .route("/discover/resolve", post(discover::resolve))
+        .route("/discover/add", post(discover::add))
+        .route("/discover/channel", post(discover::channel))
+        .route("/discover/m3u", get(discover::m3u))
+        .route("/discover/youtube", get(discover::youtube))
 }

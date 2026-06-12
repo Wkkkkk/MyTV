@@ -1,4 +1,4 @@
-pub(super) fn normalize_channel_url(input: &str) -> Option<String> {
+pub(crate) fn normalize_channel_url(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return None;
@@ -20,7 +20,7 @@ pub(super) fn normalize_channel_url(input: &str) -> Option<String> {
     Some(format!("{}/live", base))
 }
 
-pub(super) fn channel_title_from_url(url: &str) -> String {
+pub(crate) fn channel_title_from_url(url: &str) -> String {
     let trimmed = url.trim_end_matches("/live").trim_end_matches('/');
     trimmed
         .rsplit('/')
@@ -124,7 +124,7 @@ pub(super) fn build_channel_rows(items: &[serde_json::Value]) -> Vec<YoutubeResu
         .collect()
 }
 
-pub(super) async fn fetch_youtube_channels(
+pub(crate) async fn fetch_youtube_channels(
     keyword: &str,
     api_key: &str,
     client: &reqwest::Client,
@@ -190,7 +190,7 @@ pub fn parse_iso8601_duration(s: &str) -> i64 {
     total
 }
 
-pub(super) async fn fetch_youtube_results(
+pub(crate) async fn fetch_youtube_results(
     keyword: &str,
     api_key: &str,
     client: &reqwest::Client,

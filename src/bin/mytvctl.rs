@@ -19,6 +19,8 @@ enum Command {
     Source(SourceCmd),
     #[command(subcommand)]
     Playlist(PlaylistCmd),
+    #[command(subcommand)]
+    Discover(DiscoverCmd),
 }
 
 #[derive(Subcommand)]
@@ -142,6 +144,50 @@ enum PlaylistCmd {
     },
     Test {
         id: i64,
+    },
+}
+
+#[derive(Subcommand)]
+enum DiscoverCmd {
+    M3u {
+        #[arg(long, default_value = "")]
+        country: String,
+        #[arg(long, default_value = "")]
+        group: String,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    Youtube {
+        #[arg(long)]
+        keyword: String,
+        #[arg(long = "type")]
+        r#type: Option<String>,
+    },
+    Resolve {
+        #[arg(long)]
+        url: String,
+    },
+    Channel {
+        #[arg(long)]
+        url: String,
+    },
+    Add {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        source_kind: String,
+        #[arg(long)]
+        duration_secs: Option<i64>,
+        #[arg(long, conflicts_with_all = ["new_name", "new_category", "new_type"], required_unless_present = "new_name")]
+        channel: Option<i64>,
+        #[arg(long, requires_all = ["new_category", "new_type"], required_unless_present = "channel")]
+        new_name: Option<String>,
+        #[arg(long)]
+        new_category: Option<String>,
+        #[arg(long)]
+        new_type: Option<String>,
     },
 }
 
@@ -309,6 +355,76 @@ fn request_for(cmd: &Command) -> ApiRequest {
                 body: None,
             },
         },
+        Command::Discover(c) => match c {
+            // Query values are interpolated raw: this is a single-user admin CLI and the
+            // common inputs (country codes, simple group/keyword) need no escaping. A value
+            // with spaces/&/# would need encoding — quote/encode it at the shell if so.
+            DiscoverCmd::M3u {
+                country,
+                group,
+                limit,
+            } => {
+                let mut qs = format!("country={country}&group={group}");
+                if let Some(l) = limit {
+                    qs.push_str(&format!("&limit={l}"));
+                }
+                ApiRequest {
+                    method: "GET",
+                    path: format!("/api/admin/discover/m3u?{qs}"),
+                    body: None,
+                }
+            }
+            DiscoverCmd::Youtube { keyword, r#type } => {
+                let mut qs = format!("keyword={keyword}");
+                if let Some(t) = r#type {
+                    qs.push_str(&format!("&type={t}"));
+                }
+                ApiRequest {
+                    method: "GET",
+                    path: format!("/api/admin/discover/youtube?{qs}"),
+                    body: None,
+                }
+            }
+            DiscoverCmd::Resolve { url } => ApiRequest {
+                method: "POST",
+                path: "/api/admin/discover/resolve".into(),
+                body: Some(json!({ "url": url })),
+            },
+            DiscoverCmd::Channel { url } => ApiRequest {
+                method: "POST",
+                path: "/api/admin/discover/channel".into(),
+                body: Some(json!({ "url": url })),
+            },
+            DiscoverCmd::Add {
+                url,
+                title,
+                source_kind,
+                duration_secs,
+                channel,
+                new_name,
+                new_category,
+                new_type,
+            } => {
+                let channel_val = if let Some(id) = channel {
+                    json!({ "existing_id": id })
+                } else {
+                    json!({ "new": {
+                        "name": new_name, "category": new_category, "type": new_type
+                    }})
+                };
+                let mut body = json!({
+                    "url": url, "title": title, "source_kind": source_kind, "channel": channel_val
+                });
+                if let Some(d) = duration_secs {
+                    body["duration_secs"] = json!(d);
+                }
+                ApiRequest {
+                    method: "POST",
+                    path: "/api/admin/discover/add".into(),
+                    body: Some(body),
+                }
+            }
+        },
     }
 }
 
@@ -414,5 +530,107 @@ mod tests {
         assert_eq!(req.method, "POST");
         assert_eq!(req.path, "/api/admin/sources/4/toggle");
         assert_eq!(req.body.unwrap()["active"], false);
+    }
+
+    #[test]
+    fn request_for_discover_resolve_posts_url() {
+        let req = request_for(&Command::Discover(DiscoverCmd::Resolve {
+            url: "https://x/y.m3u8".into(),
+        }));
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.path, "/api/admin/discover/resolve");
+        assert_eq!(req.body.unwrap()["url"], "https://x/y.m3u8");
+    }
+
+    #[test]
+    fn request_for_discover_m3u_builds_get_query() {
+        let req = request_for(&Command::Discover(DiscoverCmd::M3u {
+            country: "us".into(),
+            group: "News".into(),
+            limit: Some(10),
+        }));
+        assert_eq!(req.method, "GET");
+        assert_eq!(
+            req.path,
+            "/api/admin/discover/m3u?country=us&group=News&limit=10"
+        );
+        assert!(req.body.is_none());
+    }
+
+    #[test]
+    fn request_for_discover_add_existing_channel() {
+        let req = request_for(&Command::Discover(DiscoverCmd::Add {
+            url: "https://x/y.m3u8".into(),
+            title: "T".into(),
+            source_kind: "hls".into(),
+            duration_secs: None,
+            channel: Some(1),
+            new_name: None,
+            new_category: None,
+            new_type: None,
+        }));
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.path, "/api/admin/discover/add");
+        let body = req.body.unwrap();
+        assert_eq!(body["channel"]["existing_id"], 1);
+        assert_eq!(body["source_kind"], "hls");
+    }
+
+    #[test]
+    fn request_for_discover_add_new_channel() {
+        let req = request_for(&Command::Discover(DiscoverCmd::Add {
+            url: "https://x/y.m3u8".into(),
+            title: "T".into(),
+            source_kind: "hls".into(),
+            duration_secs: None,
+            channel: None,
+            new_name: Some("NC".into()),
+            new_category: Some("test".into()),
+            new_type: Some("live".into()),
+        }));
+        let body = req.body.unwrap();
+        assert_eq!(body["channel"]["new"]["name"], "NC");
+        assert_eq!(body["channel"]["new"]["type"], "live");
+    }
+
+    #[test]
+    fn request_for_discover_youtube_builds_get_query() {
+        let req = request_for(&Command::Discover(DiscoverCmd::Youtube {
+            keyword: "space".into(),
+            r#type: Some("channel".into()),
+        }));
+        assert_eq!(req.method, "GET");
+        assert_eq!(
+            req.path,
+            "/api/admin/discover/youtube?keyword=space&type=channel"
+        );
+        assert!(req.body.is_none());
+    }
+
+    #[test]
+    fn request_for_discover_youtube_omits_type_when_none() {
+        let req = request_for(&Command::Discover(DiscoverCmd::Youtube {
+            keyword: "news".into(),
+            r#type: None,
+        }));
+        assert_eq!(req.path, "/api/admin/discover/youtube?keyword=news");
+        assert!(req.body.is_none());
+    }
+
+    #[test]
+    fn request_for_discover_add_includes_duration_when_present() {
+        let req = request_for(&Command::Discover(DiscoverCmd::Add {
+            url: "https://x/y.mp4".into(),
+            title: "T".into(),
+            source_kind: "youtube_vod".into(),
+            duration_secs: Some(212),
+            channel: Some(4),
+            new_name: None,
+            new_category: None,
+            new_type: None,
+        }));
+        let body = req.body.unwrap();
+        assert_eq!(body["duration_secs"], 212);
+        assert_eq!(body["channel"]["existing_id"], 4);
     }
 }

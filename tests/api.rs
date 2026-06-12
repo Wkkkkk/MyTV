@@ -432,3 +432,224 @@ async fn playlist_test_endpoint_returns_item() {
     assert_eq!(json["id"], 1);
     assert!(!json["last_checked_at"].is_null());
 }
+
+#[tokio::test]
+async fn discover_resolve_non_youtube_url_is_deterministic() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/resolve",
+            serde_json::json!({"url": "https://cdn.example.com/live.m3u8"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let j = body_json(r).await;
+    assert_eq!(j["url"], "https://cdn.example.com/live.m3u8");
+    assert_eq!(j["title"], "https://cdn.example.com/live.m3u8");
+    assert_eq!(j["duration_secs"], 0);
+    assert_eq!(j["is_live"], true);
+    assert_eq!(j["source_kind"], "hls");
+}
+
+#[tokio::test]
+async fn discover_resolve_bad_url_is_422() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/resolve",
+            serde_json::json!({"url": "ftp://nope"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body_json(r).await["error"], "invalid or unresolvable URL");
+}
+
+#[tokio::test]
+async fn discover_channel_valid_youtube_handle() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/channel",
+            serde_json::json!({"url": "https://www.youtube.com/@NASA"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let j = body_json(r).await;
+    assert_eq!(j["source_kind"], "youtube_live");
+    assert_eq!(j["is_live"], true);
+}
+
+#[tokio::test]
+async fn discover_channel_non_youtube_is_422() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/channel",
+            serde_json::json!({"url": "https://example.com/notyt"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body_json(r).await["error"],
+        "not a recognized YouTube channel URL"
+    );
+}
+
+#[tokio::test]
+async fn discover_resolve_requires_auth() {
+    let r = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/discover/resolve")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"url":"https://x/y.m3u8"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn discover_youtube_without_api_key_is_503() {
+    let r = app()
+        .await
+        .oneshot(authed_get("/api/admin/discover/youtube?keyword=news"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let j = body_json(r).await;
+    assert_eq!(j["error"], "YOUTUBE_API_KEY not configured");
+}
+
+#[tokio::test]
+async fn discover_youtube_requires_auth() {
+    let r = app()
+        .await
+        .oneshot(get("/api/admin/discover/youtube?keyword=news"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+}
+
+// No equivalent live test for `/discover/youtube`: unlike M3U search (network
+// only), YouTube search also requires a real YOUTUBE_API_KEY, which the test
+// harness intentionally leaves unset (the no-key → 503 path is covered by
+// `discover_youtube_without_api_key_is_503`). Exercise the live YouTube path
+// manually with a configured key.
+#[tokio::test]
+#[ignore = "requires network access — run manually"]
+async fn discover_m3u_live_search() {
+    let r = app()
+        .await
+        .oneshot(authed_get(
+            "/api/admin/discover/m3u?country=us&group=&limit=5",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let j = body_json(r).await;
+    assert!(j.as_array().unwrap().len() <= 5);
+}
+
+#[tokio::test]
+async fn discover_add_to_existing_channel() {
+    let app = app().await;
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/add",
+            serde_json::json!({
+                "url": "https://cdn.example.com/added.m3u8",
+                "title": "Added",
+                "source_kind": "hls",
+                "channel": {"existing_id": 1}
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let j = body_json(r).await;
+    assert_eq!(j["channel_id"], 1);
+    assert_eq!(j["channel"]["id"], 1);
+
+    let r = app
+        .oneshot(authed_get("/api/admin/channels/1/sources"))
+        .await
+        .unwrap();
+    let sources = body_json(r).await;
+    assert!(sources
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["url"] == "https://cdn.example.com/added.m3u8"));
+}
+
+#[tokio::test]
+async fn discover_add_creates_new_channel() {
+    let app = app().await;
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/add",
+            serde_json::json!({
+                "url": "https://cdn.example.com/newchan.m3u8",
+                "title": "NC",
+                "source_kind": "hls",
+                "channel": {"new": {"name": "New Discovered", "category": "test", "type": "live"}}
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let j = body_json(r).await;
+    assert_eq!(j["channel"]["name"], "New Discovered");
+    let new_id = j["channel_id"].as_i64().unwrap();
+    assert!(new_id > 5); // seed has channels 1-5
+}
+
+#[tokio::test]
+async fn discover_add_unknown_existing_channel_is_404() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/add",
+            serde_json::json!({
+                "url": "https://cdn.example.com/x.m3u8", "title": "X", "source_kind": "hls",
+                "channel": {"existing_id": 999999}
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn discover_add_invalid_source_kind_is_422() {
+    let r = app()
+        .await
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/discover/add",
+            serde_json::json!({
+                "url": "https://cdn.example.com/x.m3u8", "title": "X", "source_kind": "bogus",
+                "channel": {"existing_id": 1}
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
