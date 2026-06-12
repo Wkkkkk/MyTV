@@ -28,6 +28,9 @@ pub struct TuneResponse {
     pub skip_proxy: bool,
     pub ended: bool,
     pub waiting: bool,
+    pub source_id: Option<i64>,
+    pub source_url: Option<String>,
+    pub playlist_item_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +80,8 @@ fn tune_response(
     url: String,
     start_offset_secs: i64,
     skip_proxy: bool,
+    source: Option<&source::Source>,
+    playlist_item_id: Option<i64>,
 ) -> Json<TuneResponse> {
     Json(TuneResponse {
         url,
@@ -88,6 +93,9 @@ fn tune_response(
         skip_proxy,
         ended: false,
         waiting: false,
+        source_id: source.map(|s| s.id),
+        source_url: source.map(|s| s.url.clone()),
+        playlist_item_id,
     })
 }
 
@@ -102,6 +110,9 @@ fn tune_response_ended(ch: &channel::Channel) -> Json<TuneResponse> {
         skip_proxy: false,
         ended: true,
         waiting: false,
+        source_id: None,
+        source_url: None,
+        playlist_item_id: None,
     })
 }
 
@@ -116,6 +127,9 @@ fn tune_response_waiting(ch: &channel::Channel) -> Json<TuneResponse> {
         skip_proxy: false,
         ended: false,
         waiting: true,
+        source_id: None,
+        source_url: None,
+        playlist_item_id: None,
     })
 }
 
@@ -180,6 +194,8 @@ async fn next_live(
                         url,
                         0,
                         resolver::needs_resolution(&src.url),
+                        Some(src),
+                        None,
                     ));
                 }
                 Some(LiveOutcome::Waiting) => {
@@ -321,6 +337,8 @@ async fn tune_vod_at(
             url,
             offset,
             resolver::needs_resolution(&item.url),
+            None,
+            Some(item.id),
         )),
         Err(e) => {
             tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
@@ -343,6 +361,8 @@ async fn next_vod_at(
             url,
             0,
             resolver::needs_resolution(&item.url),
+            None,
+            Some(item.id),
         )),
         Err(e) => {
             tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
