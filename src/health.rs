@@ -10,13 +10,8 @@ use crate::LiveStatusCache;
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
-pub(crate) const FAILURE_THRESHOLD: i64 = 3;
-
-enum HealthAction {
-    Disable,
-    Reenable,
-    None,
-}
+#[cfg(test)]
+const FAILURE_THRESHOLD: i64 = 3;
 
 /// Dependencies for the background health checker.
 pub struct HealthClients {
@@ -87,81 +82,39 @@ async fn check_all(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn run_check<F, Fut>(
     client: &reqwest::Client,
     url: &str,
     kind: &str,
-    is_active: bool,
     consecutive_failures: i64,
-    manage_lifecycle: bool,
     live_cache: Option<&LiveStatusCache>,
     update: F,
 ) -> bool
 where
-    F: FnOnce(&'static str, Option<String>, i64, Option<bool>) -> Fut,
+    F: FnOnce(&'static str, Option<String>, i64) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<()>>,
 {
     let (ok, reason) = do_http_check(client, url, kind, live_cache).await;
-    let (new_failures, action) = process_result(is_active, consecutive_failures, ok);
-    let is_active_change = if manage_lifecycle {
-        match action {
-            HealthAction::Disable => Some(false),
-            HealthAction::Reenable => Some(true),
-            HealthAction::None => None,
-        }
-    } else {
-        None
-    };
-
+    let new_failures = process_failures(consecutive_failures, ok);
     let status: &'static str = if ok { "ok" } else { "error" };
-    if let Err(e) = update(status, reason, new_failures, is_active_change).await {
+    if let Err(e) = update(status, reason, new_failures).await {
         tracing::error!("health: failed to update {url}: {e}");
         return false;
     }
-
-    if manage_lifecycle {
-        match action {
-            HealthAction::Disable => tracing::warn!(
-                "health: {url} auto-disabled after {new_failures} consecutive failures"
-            ),
-            HealthAction::Reenable => {
-                tracing::info!("health: {url} auto-re-enabled after passing health check")
-            }
-            HealthAction::None => {}
-        }
-    }
-
     ok
 }
 
-/// Records a single liveness probe result against a source's health, reusing
-/// the same disable/re-enable lifecycle as the background checker. `ok = true`
-/// means the stream is playable (resets failures, re-enables); `ok = false`
-/// means offline/ended (counts toward the auto-disable threshold). Used by the
-/// interactive tune path so an active poll doubles as a liveness signal.
+/// Records a single liveness probe result against a source's health. `ok = true`
+/// resets failures (status "ok"); `ok = false` counts a failure (status "error",
+/// reason "not currently live"). Never changes `is_active` — manual intent is the
+/// admin's alone; the unified Status badge reflects liveness separately. Used by
+/// the interactive tune path so an active poll doubles as a liveness signal.
 pub async fn record_source_liveness(pool: &SqlitePool, src: &Source, ok: bool) {
-    let (new_failures, action) = process_result(src.is_active, src.consecutive_failures, ok);
-    let is_active_change = match action {
-        HealthAction::Disable => Some(false),
-        HealthAction::Reenable => Some(true),
-        HealthAction::None => None,
-    };
+    let new_failures = process_failures(src.consecutive_failures, ok);
     let status: &'static str = if ok { "ok" } else { "error" };
     let reason = if ok { None } else { Some("not currently live") };
-    let url = &src.url;
-    if let Err(e) =
-        source::update_health(pool, src.id, status, reason, new_failures, is_active_change).await
-    {
-        tracing::error!("health: failed to record liveness for {url}: {e}");
-        return;
-    }
-    match action {
-        HealthAction::Disable => {
-            tracing::warn!("health: {url} auto-disabled after {new_failures} offline probes")
-        }
-        HealthAction::Reenable => tracing::info!("health: {url} re-enabled (live again)"),
-        HealthAction::None => {}
+    if let Err(e) = source::update_health(pool, src.id, status, reason, new_failures, None).await {
+        tracing::error!("health: failed to record liveness for {}: {e}", src.url);
     }
 }
 
@@ -178,20 +131,10 @@ pub async fn probe_source(
         client,
         &src.url,
         &src.kind,
-        src.is_active,
         src.consecutive_failures,
-        false,
         Some(live_cache),
-        |status, reason, failures, is_active_change| async move {
-            source::update_health(
-                pool,
-                src.id,
-                status,
-                reason.as_deref(),
-                failures,
-                is_active_change,
-            )
-            .await
+        |status, reason, failures| async move {
+            source::update_health(pool, src.id, status, reason.as_deref(), failures, None).await
         },
     )
     .await;
@@ -211,20 +154,10 @@ async fn check_source(
         client,
         &src.url,
         &src.kind,
-        src.is_active,
         src.consecutive_failures,
-        true,
         Some(live_cache),
-        |status, reason, failures, is_active_change| async move {
-            source::update_health(
-                pool,
-                src.id,
-                status,
-                reason.as_deref(),
-                failures,
-                is_active_change,
-            )
-            .await
+        |status, reason, failures| async move {
+            source::update_health(pool, src.id, status, reason.as_deref(), failures, None).await
         },
     )
     .await
@@ -240,18 +173,16 @@ async fn check_playlist_item(
         client,
         &item.url,
         kind.as_str(),
-        item.is_active,
         item.consecutive_failures,
-        true,
         None,
-        |status, reason, failures, is_active_change| async move {
+        |status, reason, failures| async move {
             crate::model::playlist_item::update_health(
                 pool,
                 item.id,
                 status,
                 reason.as_deref(),
                 failures,
-                is_active_change,
+                None,
             )
             .await
         },
@@ -272,18 +203,16 @@ pub async fn probe_playlist_item(
         client,
         &item.url,
         kind.as_str(),
-        item.is_active,
         item.consecutive_failures,
-        false,
         None,
-        |status, reason, failures, is_active_change| async move {
+        |status, reason, failures| async move {
             crate::model::playlist_item::update_health(
                 pool,
                 item.id,
                 status,
                 reason.as_deref(),
                 failures,
-                is_active_change,
+                None,
             )
             .await
         },
@@ -410,16 +339,14 @@ fn live_status_health(status: LiveStatus) -> (bool, Option<&'static str>) {
     }
 }
 
-fn process_result(is_active: bool, consecutive_failures: i64, ok: bool) -> (i64, HealthAction) {
-    let new_failures = if ok { 0 } else { consecutive_failures + 1 };
-    let action = if ok && !is_active {
-        HealthAction::Reenable
-    } else if !ok && new_failures >= FAILURE_THRESHOLD && is_active {
-        HealthAction::Disable
+/// New consecutive-failure count after one check. `is_active` is no longer
+/// consulted here — the checker never changes `is_active` (manual intent only).
+fn process_failures(consecutive_failures: i64, ok: bool) -> i64 {
+    if ok {
+        0
     } else {
-        HealthAction::None
-    };
-    (new_failures, action)
+        consecutive_failures + 1
+    }
 }
 
 #[cfg(test)]
@@ -452,45 +379,13 @@ mod tests {
     }
 
     #[test]
-    fn test_process_result_ok_resets_failures() {
-        let (failures, action) = process_result(true, 2, true);
-        assert_eq!(failures, 0);
-        assert!(matches!(action, HealthAction::None));
+    fn test_process_failures_resets_on_ok() {
+        assert_eq!(process_failures(2, true), 0);
     }
 
     #[test]
-    fn test_process_result_error_increments_failures() {
-        let (failures, action) = process_result(true, 1, false);
-        assert_eq!(failures, 2);
-        assert!(matches!(action, HealthAction::None));
-    }
-
-    #[test]
-    fn test_process_result_triggers_disable_at_threshold() {
-        let (failures, action) = process_result(true, 2, false);
-        assert_eq!(failures, 3);
-        assert!(matches!(action, HealthAction::Disable));
-    }
-
-    #[test]
-    fn test_process_result_already_inactive_not_disabled_again() {
-        let (failures, action) = process_result(false, 2, false);
-        assert_eq!(failures, 3);
-        assert!(matches!(action, HealthAction::None));
-    }
-
-    #[test]
-    fn test_process_result_reenables_inactive_source_on_success() {
-        let (failures, action) = process_result(false, 3, true);
-        assert_eq!(failures, 0);
-        assert!(matches!(action, HealthAction::Reenable));
-    }
-
-    #[test]
-    fn test_process_result_active_source_ok_no_action() {
-        let (failures, action) = process_result(true, 0, true);
-        assert_eq!(failures, 0);
-        assert!(matches!(action, HealthAction::None));
+    fn test_process_failures_increments_on_error() {
+        assert_eq!(process_failures(1, false), 2);
     }
 
     #[test]
@@ -733,50 +628,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_run_check_probe_mode_never_changes_is_active() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        // Server returns 200 with body — simulates a healthy source
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
-            let (mut conn, _) = listener.accept().await.unwrap();
-            let mut buf = [0u8; 512];
-            let _ = conn.read(&mut buf).await;
-            conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
-                .await
-                .unwrap();
-        });
-
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-            .unwrap();
-
-        // Source is inactive with 3 failures — in manage_lifecycle=true mode this would Reenable.
-        // In probe mode (manage_lifecycle=false) it must never touch is_active.
-        let ok = run_check(
-            &client,
-            &format!("http://127.0.0.1:{}/stream.m3u8", port),
-            "hls",
-            false, // is_active: currently disabled
-            3,     // consecutive_failures
-            false, // manage_lifecycle: probe mode
-            None,  // live_cache: not needed for hls
-            |_status, _reason, _failures, is_active_change| async move {
-                assert!(
-                    is_active_change.is_none(),
-                    "probe mode must never pass is_active_change = Some(…)"
-                );
-                Ok::<(), anyhow::Error>(())
-            },
-        )
-        .await;
-
-        assert!(ok, "server returned 200 — run_check must return true");
-    }
-
     #[test]
     fn test_probed_hosts_dedup_same_cdn() {
         // Two episodes on the same CDN produce the same manifest host.
@@ -808,7 +659,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_record_source_liveness_disables_then_reenables() {
+    async fn test_record_source_liveness_never_changes_is_active() {
         use crate::model::{channel, source};
         let pool = crate::db::connect("sqlite::memory:").await.unwrap();
         let ch = channel::create(
@@ -836,17 +687,21 @@ mod tests {
         .await
         .unwrap();
 
-        for _ in 0..FAILURE_THRESHOLD {
+        // Many offline probes must NOT disable the source.
+        for _ in 0..(FAILURE_THRESHOLD + 2) {
             record_source_liveness(&pool, &src, false).await;
             src = source::get(&pool, src.id).await.unwrap().unwrap();
         }
-        assert!(!src.is_active, "disabled after threshold offline probes");
-        assert_eq!(src.consecutive_failures, FAILURE_THRESHOLD);
+        assert!(src.is_active, "liveness probes must never disable a source");
+        assert_eq!(src.consecutive_failures, FAILURE_THRESHOLD + 2);
+        assert_eq!(src.last_status.as_deref(), Some("error"));
 
+        // A success resets failures, still without touching is_active.
         record_source_liveness(&pool, &src, true).await;
         let after = source::get(&pool, src.id).await.unwrap().unwrap();
-        assert!(after.is_active, "re-enabled when live again");
+        assert!(after.is_active);
         assert_eq!(after.consecutive_failures, 0);
+        assert_eq!(after.last_status.as_deref(), Some("ok"));
     }
 
     #[tokio::test]
