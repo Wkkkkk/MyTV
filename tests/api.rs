@@ -336,3 +336,70 @@ async fn source_update_unknown_is_404() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn playlist_crud_round_trip() {
+    let app = app().await;
+
+    let r = app.clone().oneshot(authed_json("POST", "/api/admin/channels/4/playlist",
+        serde_json::json!({"title":"API Ep","url":"https://vod.example.com/api.mp4","duration_secs":600,"sort_order":10}))).await.unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let created = body_json(r).await;
+    let id = created["id"].as_i64().unwrap();
+    assert_eq!(created["title"], "API Ep");
+    assert_eq!(created["channel_id"], 4);
+
+    let r = app
+        .clone()
+        .oneshot(authed_get("/api/admin/channels/4/playlist"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(body_json(r)
+        .await
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["id"] == id));
+
+    let r = app.clone().oneshot(authed_json("PATCH", &format!("/api/admin/playlist/{id}"),
+        serde_json::json!({"title":"API Ep 2","url":"https://vod.example.com/api2.mp4","duration_secs":700,"sort_order":11}))).await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(body_json(r).await["title"], "API Ep 2");
+
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            &format!("/api/admin/playlist/{id}/toggle"),
+            serde_json::json!({"active": false}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(body_json(r).await["is_active"], false);
+
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/admin/playlist/{id}"))
+                .header("Authorization", AUTH)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn playlist_get_unknown_is_404() {
+    let r = app()
+        .await
+        .oneshot(authed_get("/api/admin/playlist/999999"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}

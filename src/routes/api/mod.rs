@@ -3,6 +3,7 @@
 //! requests use the DTOs defined per submodule.
 
 mod channels;
+mod playlist;
 mod sources;
 
 use axum::{
@@ -73,4 +74,16 @@ pub fn api_router() -> Router<AppState> {
         )
         .route("/sources/:id/toggle", post(sources::toggle))
         .route("/sources/:id/test", post(sources::test))
+        .route(
+            "/channels/:id/playlist",
+            get(playlist::list_for_channel).post(playlist::create),
+        )
+        .route(
+            "/playlist/:id",
+            get(playlist::get_one)
+                .patch(playlist::update)
+                .delete(playlist::remove),
+        )
+        .route("/playlist/:id/toggle", post(playlist::toggle))
+        .route("/playlist/:id/test", post(playlist::test))
 }
