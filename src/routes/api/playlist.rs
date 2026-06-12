@@ -83,6 +83,9 @@ pub async fn update(
     if title.is_empty() || url.is_empty() {
         return Err(ApiError::Validation("title and url are required".into()));
     }
+    if req.duration_secs <= 0 {
+        return Err(ApiError::Validation("duration_secs must be > 0".into()));
+    }
     let item = playlist_item::update(
         &state.pool,
         id,

@@ -403,3 +403,32 @@ async fn playlist_get_unknown_is_404() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn playlist_create_zero_duration_is_422() {
+    let r = app().await.oneshot(authed_json("POST", "/api/admin/channels/4/playlist",
+        serde_json::json!({"title":"X","url":"https://vod.example.com/x.mp4","duration_secs":0}))).await.unwrap();
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn playlist_test_endpoint_returns_item() {
+    // Seed channel 4 has playlist item id 1 ("Episode 1", https://vod.example.com/ep1.mp4,
+    // unreachable in tests) → probe fast-fails but the handler still returns the re-fetched item.
+    let r = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/playlist/1/test")
+                .header("Authorization", AUTH)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let json = body_json(r).await;
+    assert_eq!(json["id"], 1);
+    assert!(!json["last_checked_at"].is_null());
+}
