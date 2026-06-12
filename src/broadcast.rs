@@ -3,6 +3,7 @@ use std::future::Future;
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 
+use crate::media::resolver;
 use crate::model::{channel, playlist_item, source};
 
 /// Outcome of an ended-live → VOD conversion attempt.
@@ -54,6 +55,40 @@ where
     .await?;
     source::deactivate_all_for_channel(pool, channel_id).await?;
     Ok(ConversionOutcome::Converted)
+}
+
+/// Production resolver: derives the recording's canonical watch URL (from the
+/// embedded id, falling back to a yt-dlp id lookup) and its duration via yt-dlp.
+pub async fn resolve_recording(source_url: String) -> anyhow::Result<(String, i64)> {
+    let watch_url = match resolver::live_url_to_watch_url(&source_url) {
+        Some(u) => u,
+        None => {
+            let id = resolver::fetch_video_id(&source_url).await?;
+            format!("https://www.youtube.com/watch?v={id}")
+        }
+    };
+    let duration = resolver::fetch_duration_secs(&watch_url).await?;
+    Ok((watch_url, duration))
+}
+
+/// Thin adapter: fire the conversion as a detached task using the real yt-dlp
+/// resolver. Failures are logged and dropped — the broadcast simply stays live
+/// until the next tune retries.
+pub fn spawn_conversion(pool: SqlitePool, channel_id: i64, title: String, source_url: String) {
+    tokio::spawn(async move {
+        if let Err(e) = convert_if_ended(
+            &pool,
+            channel_id,
+            &title,
+            &source_url,
+            Utc::now(),
+            resolve_recording,
+        )
+        .await
+        {
+            tracing::warn!(channel_id, error = %e, "ended-live → VOD conversion failed");
+        }
+    });
 }
 
 #[cfg(test)]
