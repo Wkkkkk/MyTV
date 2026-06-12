@@ -18,7 +18,7 @@ use layout::TimeLabel;
 // ── template structs ───────────────────────────────────────────────────────
 
 macro_rules! define_guide_template {
-    ($name:ident, $path:literal) => {
+    ($name:ident, $path:literal $(, $extra:ident : $ty:ty = $default:expr)*) => {
         #[derive(Template)]
         #[template(path = $path)]
         struct $name {
@@ -32,6 +32,7 @@ macro_rules! define_guide_template {
             now_pct: Option<f64>,
             rows: Vec<ChannelRow>,
             channels_json: String,
+            $($extra: $ty,)*
         }
 
         impl From<GuideData> for $name {
@@ -47,6 +48,7 @@ macro_rules! define_guide_template {
                     now_pct: d.now_pct,
                     rows: d.rows,
                     channels_json: d.channels_json,
+                    $($extra: $default,)*
                 }
             }
         }
@@ -54,40 +56,7 @@ macro_rules! define_guide_template {
 }
 
 define_guide_template!(EpgContentTemplate, "partials/epg_content.html");
-
-#[derive(Template)]
-#[template(path = "guide.html")]
-struct GuidePageTemplate {
-    categories: Vec<String>,
-    active_category: String,
-    offset_hours: i64,
-    offset_prev: i64,
-    offset_next: i64,
-    window_label: String,
-    labels: Vec<TimeLabel>,
-    now_pct: Option<f64>,
-    rows: Vec<ChannelRow>,
-    channels_json: String,
-    auto_tune_channel_id: Option<i64>,
-}
-
-impl From<GuideData> for GuidePageTemplate {
-    fn from(d: GuideData) -> Self {
-        Self {
-            categories: d.categories,
-            active_category: d.active_category,
-            offset_hours: d.offset_hours,
-            offset_prev: d.offset_prev,
-            offset_next: d.offset_next,
-            window_label: d.window_label,
-            labels: d.labels,
-            now_pct: d.now_pct,
-            rows: d.rows,
-            channels_json: d.channels_json,
-            auto_tune_channel_id: None,
-        }
-    }
-}
+define_guide_template!(GuidePageTemplate, "guide.html", auto_tune_channel_id: Option<i64> = None);
 
 // ── query params ───────────────────────────────────────────────────────────
 

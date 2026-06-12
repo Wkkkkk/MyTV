@@ -462,7 +462,7 @@
       window.tune = tune;
 
       var autoCid = window.__autoTuneChannelId;
-      if (autoCid) {
+      if (autoCid != null) {
         history.replaceState(null, '', '/watch/' + autoCid);
         tune(autoCid);
       }
