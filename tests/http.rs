@@ -1477,3 +1477,13 @@ async fn test_guide_partial_tabs_are_buttons() {
         "EPG tabs must no longer be hrefless <a> elements"
     );
 }
+
+#[tokio::test]
+async fn test_guide_has_epg_skeleton() {
+    let response = app().await.oneshot(req("/guide")).await.unwrap();
+    let body = body_text(response).await;
+    assert!(
+        body.contains("id=\"epg-skeleton\""),
+        "guide must include the HTMX loading skeleton element"
+    );
+}

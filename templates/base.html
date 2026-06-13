@@ -108,6 +108,21 @@
     .budget-direct{background:#0d2a40;color:#64b5f6}
     .budget-proxied{background:#3a2800;color:#ffb74d}
     .budget-unknown{background:transparent}
+
+    /* ── loading skeleton (#33) ───────────────────────────────── */
+    #epg-skeleton{display:none}
+    #epg-skeleton.htmx-request,.htmx-request #epg-skeleton{display:block;
+      position:absolute;top:0;left:0;right:0;z-index:10;background:var(--bg)}
+    .skel-row{display:flex;min-height:44px;border-bottom:1px solid var(--border-subtle)}
+    .skel-chan{width:140px;flex-shrink:0;border-right:1px solid var(--border);
+      background:var(--surface-1);display:flex;align-items:center;padding:0 10px}
+    .skel-progs{flex:1;display:flex;gap:2px;padding:1px;align-items:center;height:44px}
+    .skel-progs .shim{height:42px}
+    .shim{background:var(--surface-2);border-radius:3px;
+      background-image:linear-gradient(90deg,var(--surface-2) 0,#262626 150px,var(--surface-2) 300px);
+      background-size:600px 100%;animation:shimmer 1.2s infinite linear}
+    @keyframes shimmer{0%{background-position:-300px 0}100%{background-position:300px 0}}
+    @media(max-width:600px){.skel-chan{width:80px}}
   </style>
 </head>
 <body>

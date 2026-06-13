@@ -22,8 +22,18 @@
   <span class="pi-pos"></span>
 </div>
 
-<div id="epg-content">
-  {% include "partials/epg_content.html" %}
+<div id="epg-area" style="position:relative">
+  <div id="epg-skeleton" class="htmx-indicator" aria-hidden="true">
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:60px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:2"></span><span class="shim" style="flex:1"></span><span class="shim" style="flex:3"></span></div></div>
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:50px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:1"></span><span class="shim" style="flex:2"></span></div></div>
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:70px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:3"></span><span class="shim" style="flex:1"></span><span class="shim" style="flex:1"></span></div></div>
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:55px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:2"></span><span class="shim" style="flex:2"></span></div></div>
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:65px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:1"></span><span class="shim" style="flex:3"></span><span class="shim" style="flex:1"></span></div></div>
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:50px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:3"></span><span class="shim" style="flex:2"></span></div></div>
+  </div>
+  <div id="epg-content">
+    {% include "partials/epg_content.html" %}
+  </div>
 </div>
 
 <div id="debug-panel">
