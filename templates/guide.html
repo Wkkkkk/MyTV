@@ -6,6 +6,21 @@
 {% when None %}
 {% endmatch %}
 <div id="player-panel">
+  <div id="player-toolbar">
+    <button type="button" class="ov-btn" id="ov-close" title="Close" aria-label="Close player">✕</button>
+    <button type="button" class="ov-btn" id="ov-prev" title="Previous channel" aria-label="Previous channel">↑</button>
+    <button type="button" class="ov-btn" id="ov-next" title="Next channel" aria-label="Next channel">↓</button>
+    <span class="ov-spacer"></span>
+    <button type="button" class="ov-btn" id="ov-help" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+  </div>
+  <div id="player-help" hidden>
+    <strong>Keyboard shortcuts</strong>
+    <div>↑ / ↓ — change channel</div>
+    <div>Space — play / pause</div>
+    <div>← / → — seek 10s (VOD)</div>
+    <div>F — fullscreen</div>
+  </div>
+  <div id="player-buffering"><span class="spinner-lg"></span> Loading…</div>
   <video id="video" controls></video>
   <div id="player-error">Channel unavailable</div>
   <div id="player-ended">Stream ended — switching to next channel…</div>

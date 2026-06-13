@@ -28,6 +28,30 @@
     #player-error{display:none;padding:32px;text-align:center;color:var(--accent);background:#000;font-size:1rem}
     #player-ended{display:none;padding:32px;text-align:center;color:#fff;background:#000;font-size:1rem}
     #player-waiting{display:none;padding:32px;text-align:center;color:#fff;background:#000;font-size:1rem}
+    #player-panel{position:relative}
+    #player-toolbar{position:absolute;top:0;left:0;right:0;z-index:6;
+      display:flex;align-items:center;gap:8px;padding:10px 12px;
+      background:linear-gradient(#000,transparent);
+      opacity:0;transition:opacity 0.2s;pointer-events:none}
+    #player-panel.show-controls #player-toolbar{opacity:1;pointer-events:auto}
+    .ov-btn{width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+      background:rgba(20,20,20,0.7);color:#eee;border:1px solid var(--border-strong);
+      border-radius:4px;cursor:pointer;font-size:1rem;font-family:inherit}
+    .ov-btn:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+    .ov-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+    .ov-spacer{flex:1}
+    #player-help{position:absolute;top:52px;right:12px;z-index:7;
+      background:rgba(10,10,10,0.92);border:1px solid var(--border-strong);
+      border-radius:5px;padding:10px 14px;font-size:0.8rem;color:var(--text);line-height:1.7}
+    #player-help strong{display:block;margin-bottom:4px;color:var(--accent)}
+    #player-buffering{display:none;position:absolute;top:0;left:0;right:0;bottom:0;z-index:5;
+      align-items:center;justify-content:center;gap:10px;
+      background:#000;color:#fff;font-size:0.95rem}
+    #player-buffering.show{display:flex}
+    .spinner-lg{width:22px;height:22px;border-radius:50%;
+      border:3px solid #444;border-top-color:var(--accent);
+      animation:spin 0.7s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
 
     /* ── player info bar ──────────────────────────────────────────── */
     #player-info{display:none;align-items:center;gap:10px;padding:8px 12px;
@@ -248,6 +272,7 @@
       }
 
       function _loadSource(url, offset, skipProxy) {
+        if (window.__showBuffering) window.__showBuffering();
         currentUrl = url;
         dashErrorFired = false;
         var isDash = url.indexOf('.mpd') >= 0;
@@ -353,6 +378,7 @@
       }
 
       function showPlayerError() {
+        if (window.__hideBuffering) window.__hideBuffering();
         stopPlayback();
         if (video) video.style.display = 'none';
         var el = document.getElementById('player-error');
@@ -381,6 +407,7 @@
       }
 
       function advanceEndedChannel() {
+        if (window.__hideBuffering) window.__hideBuffering();
         var channels = window.epgChannels || [];
         endedHops++;
         if (!channels.length || endedHops > channels.length) {
@@ -401,6 +428,7 @@
       }
 
       function enterWaitingState() {
+        if (window.__hideBuffering) window.__hideBuffering();
         stopPlayback();
         if (video) video.style.display = 'none';
         currentUrl = null; // avoid stale ?failed_url= if a late onerror fires while waiting
@@ -477,6 +505,59 @@
       }
 
       window.tune = tune;
+
+      // ── player overlay toolbar (#32) ──────────────────────────
+      var panel = document.getElementById('player-panel');
+      var helpBox = document.getElementById('player-help');
+      var hideControlsTimer = null;
+      function showControls() {
+        if (!panel) return;
+        panel.classList.add('show-controls');
+        if (hideControlsTimer) clearTimeout(hideControlsTimer);
+        hideControlsTimer = setTimeout(function() {
+          panel.classList.remove('show-controls');
+          if (helpBox) helpBox.hidden = true;
+        }, 3000);
+      }
+      if (panel) {
+        panel.addEventListener('mousemove', showControls);
+        panel.addEventListener('touchstart', showControls, {passive: true});
+        panel.addEventListener('focusin', showControls);
+      }
+      var ovPrev = document.getElementById('ov-prev');
+      var ovNext = document.getElementById('ov-next');
+      var ovClose = document.getElementById('ov-close');
+      var ovHelp = document.getElementById('ov-help');
+      if (ovPrev) ovPrev.addEventListener('click', function() {
+        var id = nextChannelId('up'); if (id) tune(id);
+      });
+      if (ovNext) ovNext.addEventListener('click', function() {
+        var id = nextChannelId('down'); if (id) tune(id);
+      });
+      if (ovClose) ovClose.addEventListener('click', function() {
+        stopPlayback();
+        if (panel) panel.style.display = 'none';
+        currentChannelId = null;
+      });
+      if (ovHelp) ovHelp.addEventListener('click', function() {
+        if (helpBox) helpBox.hidden = !helpBox.hidden;
+      });
+
+      // ── buffering overlay (#33) ───────────────────────────────
+      function showBuffering() {
+        var el = document.getElementById('player-buffering');
+        if (el) el.classList.add('show');
+      }
+      function hideBuffering() {
+        var el = document.getElementById('player-buffering');
+        if (el) el.classList.remove('show');
+      }
+      window.__showBuffering = showBuffering;
+      window.__hideBuffering = hideBuffering;
+      if (video) {
+        video.addEventListener('playing', hideBuffering);
+        video.addEventListener('error', hideBuffering);
+      }
 
       var autoCid = window.__autoTuneChannelId;
       if (autoCid != null) {

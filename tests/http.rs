@@ -1501,3 +1501,17 @@ async fn test_discover_page_has_search_spinner() {
         "discovery search forms must show an inline spinner during fetch"
     );
 }
+
+#[tokio::test]
+async fn test_guide_has_player_overlay_toolbar() {
+    let response = app().await.oneshot(req("/guide")).await.unwrap();
+    let body = body_text(response).await;
+    assert!(
+        body.contains("id=\"player-toolbar\""),
+        "player must include the overlay toolbar"
+    );
+    assert!(
+        body.contains("id=\"player-buffering\""),
+        "player must include the buffering overlay"
+    );
+}
