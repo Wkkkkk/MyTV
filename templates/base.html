@@ -556,6 +556,8 @@
       window.__hideBuffering = hideBuffering;
       if (video) {
         video.addEventListener('playing', hideBuffering);
+        video.addEventListener('canplay', hideBuffering);
+        video.addEventListener('pause', hideBuffering);
         video.addEventListener('error', hideBuffering);
       }
 
