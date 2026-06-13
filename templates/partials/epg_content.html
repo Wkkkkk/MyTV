@@ -1,27 +1,29 @@
 <script>window.epgChannels={{ channels_json|safe }};</script>
 <div class="epg-nav">
-  <div class="tabs">
-    <a class="tab{% if active_category.as_str() == "all" %} active{% endif %}"
+  <div class="tabs" role="tablist">
+    <button class="tab{% if active_category.as_str() == "all" %} active{% endif %}" type="button"
+       role="tab" aria-selected="{% if active_category.as_str() == "all" %}true{% else %}false{% endif %}"
        hx-get="/guide/partial?category=all&amp;offset={{ offset_hours }}"
-       hx-target="#epg-content"
-       hx-swap="innerHTML">All</a>
+       hx-target="#epg-content" hx-indicator="#epg-skeleton"
+       hx-swap="innerHTML">All</button>
     {% for cat in categories %}
-    <a class="tab{% if active_category.as_str() == cat.as_str() %} active{% endif %}"
+    <button class="tab{% if active_category.as_str() == cat.as_str() %} active{% endif %}" type="button"
+       role="tab" aria-selected="{% if active_category.as_str() == cat.as_str() %}true{% else %}false{% endif %}"
        hx-get="/guide/partial?category={{ cat }}&amp;offset={{ offset_hours }}"
-       hx-target="#epg-content"
-       hx-swap="innerHTML">{{ cat }}</a>
+       hx-target="#epg-content" hx-indicator="#epg-skeleton"
+       hx-swap="innerHTML">{{ cat }}</button>
     {% endfor %}
   </div>
   <div class="time-nav">
-    <a class="nav-btn"
+    <button type="button" class="nav-btn"
        hx-get="/guide/partial?category={{ active_category }}&amp;offset={{ offset_prev }}"
-       hx-target="#epg-content"
-       hx-swap="innerHTML">&#8592; Earlier</a>
+       hx-target="#epg-content" hx-indicator="#epg-skeleton"
+       hx-swap="innerHTML">&#8592; Earlier</button>
     <span class="time-range">{{ window_label }}</span>
-    <a class="nav-btn"
+    <button type="button" class="nav-btn"
        hx-get="/guide/partial?category={{ active_category }}&amp;offset={{ offset_next }}"
-       hx-target="#epg-content"
-       hx-swap="innerHTML">Later &#8594;</a>
+       hx-target="#epg-content" hx-indicator="#epg-skeleton"
+       hx-swap="innerHTML">Later &#8594;</button>
   </div>
 </div>
 
@@ -49,7 +51,8 @@
         <div class="program{% if prog.is_live %} live{% endif %}"
              style="left: {{ prog.left_pct }}%; width: {{ prog.width_pct }}%"
              role="button" tabindex="0"
-             onclick="tune({{ prog.channel_id }})">
+             onclick="tune({{ prog.channel_id }})"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();tune({{ prog.channel_id }})}">
           {% if prog.is_live %}<span class="live-badge">LIVE</span>{% endif %}
           <span class="program-title">{{ prog.title }}</span>
         </div>

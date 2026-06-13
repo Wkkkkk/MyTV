@@ -1463,3 +1463,17 @@ async fn test_guide_has_no_auto_tune() {
     let body = body_text(response).await;
     assert!(!body.contains("window.__autoTuneChannelId = "));
 }
+
+#[tokio::test]
+async fn test_guide_partial_tabs_are_buttons() {
+    let response = app().await.oneshot(req("/guide/partial")).await.unwrap();
+    let body = body_text(response).await;
+    assert!(
+        body.contains("<button class=\"tab"),
+        "EPG category tabs must be <button> elements for accessibility"
+    );
+    assert!(
+        !body.contains("<a class=\"tab"),
+        "EPG tabs must no longer be hrefless <a> elements"
+    );
+}
