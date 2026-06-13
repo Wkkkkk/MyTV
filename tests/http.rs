@@ -1487,3 +1487,17 @@ async fn test_guide_has_epg_skeleton() {
         "guide must include the HTMX loading skeleton element"
     );
 }
+
+#[tokio::test]
+async fn test_discover_page_has_search_spinner() {
+    let response = app()
+        .await
+        .oneshot(authed("/admin/discover"))
+        .await
+        .unwrap();
+    let body = body_text(response).await;
+    assert!(
+        body.contains("class=\"htmx-indicator spinner\""),
+        "discovery search forms must show an inline spinner during fetch"
+    );
+}

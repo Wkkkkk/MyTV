@@ -59,6 +59,12 @@
     .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
     .empty-state{color:#555;font-size:0.85rem;padding:12px 0}
     .tabs{margin-bottom:16px}
+    .spinner{display:none;width:14px;height:14px;border-radius:50%;
+      border:2px solid var(--border-strong);border-top-color:var(--accent);
+      vertical-align:middle;margin-left:6px}
+    .htmx-request .spinner,.spinner.htmx-request{display:inline-block;
+      animation:spin 0.7s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
