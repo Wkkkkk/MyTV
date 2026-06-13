@@ -1,0 +1,44 @@
+:root {
+  /* surfaces */
+  --bg: #0f0f0f;
+  --surface-1: #111;
+  --surface-2: #1a1a1a;
+  --surface-nav: #141414;
+  /* borders */
+  --border: #222;
+  --border-strong: #333;
+  --border-subtle: #1c1c1c;
+  /* text */
+  --text: #e0e0e0;
+  --text-muted: #999;
+  --text-dim: #666;
+  /* accent + semantic */
+  --accent: #e94560;
+  --accent-dark: #c73050;
+  --live: #c0001a;
+  --live-tint: #1a2a1a;
+  --ok: #4caf50;
+}
+
+/* shared tab strip (guide EPG nav + admin sub-nav) */
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tab {
+  padding: 4px 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-family: inherit;
+  line-height: 1.5;
+}
+.tab.active, .tab:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

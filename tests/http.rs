@@ -283,6 +283,18 @@ async fn test_guide_partial_returns_200() {
 }
 
 #[tokio::test]
+async fn test_app_css_returns_200_text_css() {
+    let response = app().await.oneshot(req("/app.css")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("content-type").unwrap(), "text/css");
+    let body = body_text(response).await;
+    assert!(
+        body.contains("--accent"),
+        "app.css must define design tokens"
+    );
+}
+
+#[tokio::test]
 async fn test_admin_channels_authed_returns_200() {
     let response = app()
         .await
