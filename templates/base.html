@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/app.css">
   <meta name="theme-color" content="#e94560">
   <title>MyTV</title>
   <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
@@ -12,23 +13,25 @@
   <script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,sans-serif;min-height:100vh}
+    body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;min-height:100vh}
     a{color:inherit;text-decoration:none}
 
     /* ── header ───────────────────────────────────────────────── */
-    .site-header{background:#111;padding:10px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #222}
-    .site-header h1{font-size:1.1rem;color:#e94560;letter-spacing:1px}
+    .site-header{background:var(--surface-1);padding:10px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)}
+    .site-header h1{font-size:1.1rem;color:var(--accent);letter-spacing:1px}
+    .site-nav{display:flex;gap:12px;font-size:0.85rem}
+    .site-nav a{color:var(--text-muted)}
 
     /* ── player panel ─────────────────────────────────────────── */
-    #player-panel{display:none;background:#000;border-bottom:2px solid #e94560}
+    #player-panel{display:none;background:#000;border-bottom:2px solid var(--accent)}
     #player-panel video{width:100%;max-height:50vh;display:block}
-    #player-error{display:none;padding:32px;text-align:center;color:#e94560;background:#000;font-size:1rem}
+    #player-error{display:none;padding:32px;text-align:center;color:var(--accent);background:#000;font-size:1rem}
     #player-ended{display:none;padding:32px;text-align:center;color:#fff;background:#000;font-size:1rem}
     #player-waiting{display:none;padding:32px;text-align:center;color:#fff;background:#000;font-size:1rem}
 
     /* ── player info bar ──────────────────────────────────────────── */
     #player-info{display:none;align-items:center;gap:10px;padding:8px 12px;
-                 background:#111;border-bottom:1px solid #1c1c1c}
+                 background:var(--surface-1);border-bottom:1px solid var(--border-subtle)}
     .pi-logo{width:28px;height:28px;border-radius:3px;flex-shrink:0;
              display:flex;align-items:center;justify-content:center;
              overflow:hidden;background:#222}
@@ -37,51 +40,50 @@
     .pi-meta{flex:1;min-width:0}
     .pi-name{display:block;color:#fff;font-size:0.85rem;font-weight:600;
              white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .pi-cat{display:block;color:#666;font-size:0.75rem}
-    .pi-live{background:#c0001a;color:#fff;font-size:0.6rem;font-weight:700;
+    .pi-cat{display:block;color:var(--text-dim);font-size:0.75rem}
+    .pi-live{background:var(--live);color:#fff;font-size:0.6rem;font-weight:700;
              padding:1px 5px;border-radius:2px;letter-spacing:0.5px;flex-shrink:0}
-    .pi-pos{font-size:0.75rem;color:#555;flex-shrink:0}
+    .pi-pos{font-size:0.75rem;color:var(--text-dim);flex-shrink:0}
 
     /* ── epg nav (tabs + time nav) ────────────────────────────── */
     .epg-nav{display:flex;align-items:center;justify-content:space-between;
-             flex-wrap:wrap;gap:8px;padding:8px 12px;background:#141420;border-bottom:1px solid #222}
-    .tabs{display:flex;gap:6px;flex-wrap:wrap}
-    .tab{padding:3px 12px;border-radius:3px;cursor:pointer;border:1px solid #333;
-         background:#1a1a1a;color:#999;font-size:0.82rem}
-    .tab.active,.tab:hover{background:#e94560;color:#fff;border-color:#e94560}
+             flex-wrap:wrap;gap:8px;padding:8px 12px;background:var(--surface-nav);border-bottom:1px solid var(--border)}
     .time-nav{display:flex;align-items:center;gap:10px}
-    .nav-btn{padding:3px 12px;background:#222;color:#bbb;border:1px solid #333;
-             border-radius:3px;cursor:pointer;font-size:0.82rem}
-    .nav-btn:hover{background:#333}
-    .time-range{font-size:0.8rem;color:#777;min-width:120px;text-align:center}
+    .nav-btn{padding:3px 12px;background:var(--border);color:var(--text-muted);border:1px solid var(--border-strong);
+             border-radius:3px;cursor:pointer;font-size:0.82rem;font-family:inherit;}
+    .nav-btn:hover{background:var(--border-strong)}
+    .time-range{font-size:0.8rem;color:var(--text-muted);min-width:120px;text-align:center}
 
     /* ── epg grid ─────────────────────────────────────────────── */
     .epg-wrapper{overflow-x:auto}
     .epg-grid{min-width:700px}
-    .epg-row{display:flex;border-bottom:1px solid #1c1c1c;min-height:44px}
+    .epg-row{display:flex;border-bottom:1px solid var(--border-subtle);min-height:44px}
     .channel-col{width:140px;flex-shrink:0;padding:0 10px;display:flex;align-items:center;
-                 font-size:0.8rem;border-right:1px solid #222;background:#111;overflow:hidden}
+                 font-size:0.8rem;border-right:1px solid var(--border);background:var(--surface-1);overflow:hidden}
     .programs-col{flex:1;position:relative;height:44px;overflow:hidden}
 
     /* time header row */
     .time-header .programs-col{height:26px;background:#0d0d1a;border-bottom:1px solid #1e2030}
-    .time-label{position:absolute;transform:translateX(-50%);font-size:0.7rem;color:#555;top:5px;white-space:nowrap}
+    .time-label{position:absolute;transform:translateX(-50%);font-size:0.75rem;color:var(--text-dim);top:5px;white-space:nowrap}
 
     /* program blocks */
     .program{position:absolute;top:1px;height:42px;overflow:hidden;cursor:pointer;
-             display:flex;align-items:center;padding:0 7px;font-size:0.78rem;
-             background:#1a2235;border-right:1px solid #0f0f0f;
+             display:flex;align-items:center;padding:0 7px;font-size:0.82rem;
+             background:var(--surface-2);border-right:1px solid #0f0f0f;
              transition:background 0.1s}
-    .program:hover{background:#22304a;z-index:2}
-    .program.live{background:#1a2a1a}
-    .program.live:hover{background:#203220}
-    .live-badge{background:#c0001a;color:#fff;font-size:0.6rem;font-weight:700;
+    .program:hover{background:#222;z-index:2}
+    .program.live{background:var(--live-tint)}
+    .program.live:hover{background:#203a20}
+    .live-badge{background:var(--live);color:#fff;font-size:0.6rem;font-weight:700;
                 padding:1px 4px;border-radius:2px;margin-right:5px;flex-shrink:0;letter-spacing:0.5px}
     .program-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
     /* "now" line */
-    .now-line{position:absolute;top:0;bottom:0;width:2px;background:#e94560;
+    .now-line{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);
               z-index:5;pointer-events:none}
+
+    /* keyboard focus rings (#31) */
+    .program:focus-visible,.nav-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
     /* ── mobile ───────────────────────────────────────────────── */
     @media(max-width:600px){
@@ -100,9 +102,9 @@
     /* ── status badges (health + budget) ─────────────────────── */
     .status-badge{display:inline-block;width:1.4em;text-align:center;font-size:0.72rem;
                   border-radius:3px;padding:1px 2px;vertical-align:middle;line-height:1}
-    .health-ok{color:#4caf50}
-    .health-down{color:#e94560}
-    .health-unknown{color:#666}
+    .health-ok{color:var(--ok)}
+    .health-down{color:var(--accent)}
+    .health-unknown{color:var(--text-dim)}
     .budget-direct{background:#0d2a40;color:#64b5f6}
     .budget-proxied{background:#3a2800;color:#ffb74d}
     .budget-unknown{background:transparent}
@@ -111,7 +113,7 @@
 <body>
   <header class="site-header">
     <h1>MyTV</h1>
-    <nav style="display:flex;gap:12px;font-size:0.85rem"><a href="/admin" style="color:#999;text-decoration:none">Admin</a></nav>
+    <nav class="site-nav"><a href="/admin">Admin</a></nav>
   </header>
 
   {% block content %}{% endblock %}
