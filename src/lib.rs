@@ -134,6 +134,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/favicon.svg", get(routes::static_files::favicon_svg))
         .route("/manifest.json", get(routes::static_files::manifest_json))
         .route("/favicon.ico", get(routes::static_files::favicon_ico))
+        .route("/app.css", get(routes::static_files::app_css))
         .nest("/admin", admin_router)
         .nest("/api/admin", api_router)
         // route_layer (not layer): MatchedPath is only available after routing.

@@ -5,20 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/app.css">
   <meta name="theme-color" content="#e94560">
   <title>MyTV Admin</title>
   <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,sans-serif;min-height:100vh}
-    a{color:#e94560;text-decoration:none}
+    body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;min-height:100vh}
+    a{color:var(--accent);text-decoration:none}
     a:hover{text-decoration:underline}
 
-    .site-header{background:#111;padding:10px 16px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #222}
-    .site-header h1{font-size:1.1rem;color:#e94560;letter-spacing:1px}
+    .site-header{background:var(--surface-1);padding:10px 16px;display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--border)}
+    .site-header h1{font-size:1.1rem;color:var(--accent);letter-spacing:1px}
     .site-header nav{display:flex;gap:12px;font-size:0.85rem}
-    .site-header nav a{color:#999}
-    .site-header nav a:hover{color:#e94560}
+    .site-header nav a{color:var(--text-muted)}
+    .site-header nav a:hover{color:var(--accent)}
 
     main{max-width:960px;margin:0 auto;padding:24px 16px}
     h2{font-size:1.1rem;margin-bottom:16px;color:#ddd}
@@ -26,15 +27,15 @@
 
     table{width:100%;border-collapse:collapse;font-size:0.85rem}
     th{text-align:left;padding:6px 10px;border-bottom:2px solid #222;color:#777;font-weight:600;white-space:nowrap}
-    td{padding:6px 10px;border-bottom:1px solid #1a1a1a;vertical-align:middle}
-    tr:hover td{background:#111}
+    td{padding:6px 10px;border-bottom:1px solid var(--border-subtle);vertical-align:middle}
+    tr:hover td{background:var(--surface-1)}
 
-    .btn{display:inline-block;padding:4px 12px;border-radius:3px;border:1px solid #333;
-         background:#1a1a1a;color:#ccc;cursor:pointer;font-size:0.82rem;text-decoration:none;
+    .btn{display:inline-block;padding:4px 12px;border-radius:3px;border:1px solid var(--border-strong);
+         background:var(--surface-2);color:#ccc;cursor:pointer;font-size:0.82rem;text-decoration:none;
          line-height:1.5;vertical-align:middle}
     .btn:hover{background:#222;text-decoration:none;color:#fff}
-    .btn-primary{background:#e94560;color:#fff;border-color:#e94560}
-    .btn-primary:hover{background:#c73050;color:#fff}
+    .btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .btn-primary:hover{background:var(--accent-dark);color:#fff}
     .btn-danger{background:#3a1015;color:#f77;border-color:#5a2025}
     .btn-danger:hover{background:#5a1020;color:#f99}
     .btn-sm{padding:2px 8px;font-size:0.78rem}
@@ -44,7 +45,7 @@
     input[type=text],input[type=number],input[type=datetime-local],select{
       width:100%;padding:7px 10px;background:#111;border:1px solid #2a2a2a;
       color:#e0e0e0;border-radius:3px;font-size:0.85rem}
-    input:focus,select:focus{outline:none;border-color:#e94560}
+    input:focus,select:focus{outline:none;border-color:var(--accent)}
     .form-actions{margin-top:20px;display:flex;gap:10px;align-items:center}
 
     .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:0.72rem;font-weight:700;letter-spacing:0.3px}
@@ -54,13 +55,16 @@
     .badge-on{background:#0a2a0a;color:#6d6}
     .badge-off{background:#2a0a0a;color:#f77}
 
-    .section{margin-top:32px;padding-top:24px;border-top:1px solid #1c1c1c}
+    .section{margin-top:32px;padding-top:24px;border-top:1px solid var(--border-subtle)}
     .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
     .empty-state{color:#555;font-size:0.85rem;padding:12px 0}
-    .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
-    .tab{padding:4px 14px;border-radius:3px;cursor:pointer;border:1px solid #333;
-         background:#1a1a1a;color:#999;font-size:0.82rem}
-    .tab.active,.tab:hover{background:#e94560;color:#fff;border-color:#e94560}
+    .tabs{margin-bottom:16px}
+    .spinner{display:none;width:14px;height:14px;border-radius:50%;
+      border:2px solid var(--border-strong);border-top-color:var(--accent);
+      vertical-align:middle;margin-left:6px}
+    .htmx-request .spinner,.spinner.htmx-request{display:inline-block;
+      animation:spin 0.7s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>

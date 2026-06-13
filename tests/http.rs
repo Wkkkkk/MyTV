@@ -283,6 +283,18 @@ async fn test_guide_partial_returns_200() {
 }
 
 #[tokio::test]
+async fn test_app_css_returns_200_text_css() {
+    let response = app().await.oneshot(req("/app.css")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("content-type").unwrap(), "text/css");
+    let body = body_text(response).await;
+    assert!(
+        body.contains("--accent"),
+        "app.css must define design tokens"
+    );
+}
+
+#[tokio::test]
 async fn test_admin_channels_authed_returns_200() {
     let response = app()
         .await
@@ -1450,4 +1462,56 @@ async fn test_guide_has_no_auto_tune() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
     assert!(!body.contains("window.__autoTuneChannelId = "));
+}
+
+#[tokio::test]
+async fn test_guide_partial_tabs_are_buttons() {
+    let response = app().await.oneshot(req("/guide/partial")).await.unwrap();
+    let body = body_text(response).await;
+    assert!(
+        body.contains("<button class=\"tab"),
+        "EPG category tabs must be <button> elements for accessibility"
+    );
+    assert!(
+        !body.contains("<a class=\"tab"),
+        "EPG tabs must no longer be hrefless <a> elements"
+    );
+}
+
+#[tokio::test]
+async fn test_guide_has_epg_skeleton() {
+    let response = app().await.oneshot(req("/guide")).await.unwrap();
+    let body = body_text(response).await;
+    assert!(
+        body.contains("id=\"epg-skeleton\""),
+        "guide must include the HTMX loading skeleton element"
+    );
+}
+
+#[tokio::test]
+async fn test_discover_page_has_search_spinner() {
+    let response = app()
+        .await
+        .oneshot(authed("/admin/discover"))
+        .await
+        .unwrap();
+    let body = body_text(response).await;
+    assert!(
+        body.contains("class=\"htmx-indicator spinner\""),
+        "discovery search forms must show an inline spinner during fetch"
+    );
+}
+
+#[tokio::test]
+async fn test_guide_has_player_overlay_toolbar() {
+    let response = app().await.oneshot(req("/guide")).await.unwrap();
+    let body = body_text(response).await;
+    assert!(
+        body.contains("id=\"player-toolbar\""),
+        "player must include the overlay toolbar"
+    );
+    assert!(
+        body.contains("id=\"player-buffering\""),
+        "player must include the buffering overlay"
+    );
 }

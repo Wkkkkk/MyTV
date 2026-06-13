@@ -6,6 +6,21 @@
 {% when None %}
 {% endmatch %}
 <div id="player-panel">
+  <div id="player-toolbar">
+    <button type="button" class="ov-btn" id="ov-close" title="Close" aria-label="Close player">✕</button>
+    <button type="button" class="ov-btn" id="ov-prev" title="Previous channel" aria-label="Previous channel">↑</button>
+    <button type="button" class="ov-btn" id="ov-next" title="Next channel" aria-label="Next channel">↓</button>
+    <span class="ov-spacer"></span>
+    <button type="button" class="ov-btn" id="ov-help" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+  </div>
+  <div id="player-help" hidden>
+    <strong>Keyboard shortcuts</strong>
+    <div>↑ / ↓ — change channel</div>
+    <div>Space — play / pause</div>
+    <div>← / → — seek 10s (VOD)</div>
+    <div>F — fullscreen</div>
+  </div>
+  <div id="player-buffering"><span class="spinner-lg"></span> Loading…</div>
   <video id="video" controls></video>
   <div id="player-error">Channel unavailable</div>
   <div id="player-ended">Stream ended — switching to next channel…</div>
@@ -22,16 +37,26 @@
   <span class="pi-pos"></span>
 </div>
 
-<div id="epg-content">
-  {% include "partials/epg_content.html" %}
+<div id="epg-area" style="position:relative">
+  <div id="epg-skeleton" class="htmx-indicator" aria-hidden="true">
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:60px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:2"></span><span class="shim" style="flex:1"></span><span class="shim" style="flex:3"></span></div></div>
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:50px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:1"></span><span class="shim" style="flex:2"></span></div></div>
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:70px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:3"></span><span class="shim" style="flex:1"></span><span class="shim" style="flex:1"></span></div></div>
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:55px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:2"></span><span class="shim" style="flex:2"></span></div></div>
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:65px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:1"></span><span class="shim" style="flex:3"></span><span class="shim" style="flex:1"></span></div></div>
+    <div class="skel-row"><div class="skel-chan"><span class="shim" style="width:50px;height:12px"></span></div><div class="skel-progs"><span class="shim" style="flex:3"></span><span class="shim" style="flex:2"></span></div></div>
+  </div>
+  <div id="epg-content">
+    {% include "partials/epg_content.html" %}
+  </div>
 </div>
 
 <div id="debug-panel">
   <div id="debug-header">
     <span style="font-weight:600;letter-spacing:0.5px">Debug</span>
     <span id="debug-count" style="color:#555;font-size:0.75rem;margin-left:6px">no messages</span>
-    <button id="debug-clear" onclick="debugClear()" style="margin-left:auto;background:none;border:none;color:#555;cursor:pointer;font-size:0.75rem;padding:0">Clear</button>
-    <button id="debug-toggle" onclick="debugToggle()" style="margin-left:10px;background:none;border:none;color:#555;cursor:pointer;font-size:0.75rem;padding:0">Hide</button>
+    <button id="debug-clear" onclick="debugClear()" aria-label="Clear debug log" style="margin-left:auto;background:none;border:none;color:#555;cursor:pointer;font-size:0.75rem;padding:0">Clear</button>
+    <button id="debug-toggle" onclick="debugToggle()" aria-label="Toggle debug log visibility" style="margin-left:10px;background:none;border:none;color:#555;cursor:pointer;font-size:0.75rem;padding:0">Hide</button>
   </div>
   <div id="debug-log"></div>
 </div>

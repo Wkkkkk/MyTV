@@ -25,6 +25,7 @@
       <input id="disc-group" type="text" name="group" placeholder="e.g. News">
     </div>
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Search</button>
+    <span class="htmx-indicator spinner" aria-hidden="true"></span>
   </form>
   <p class="empty-state" style="font-size:0.8rem">Enter a country or category filter, then click Search. Returns up to 50 channels from the iptv-org public index.</p>
   <div id="m3u-results"></div>
@@ -49,6 +50,7 @@
       </select>
     </div>
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Search</button>
+    <span class="htmx-indicator spinner" aria-hidden="true"></span>
   </form>
   <div id="yt-results"></div>
   {% else %}
@@ -68,6 +70,7 @@
              placeholder="https://youtube.com/@NASA or @NASA" required>
     </div>
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Resolve</button>
+    <span class="htmx-indicator spinner" aria-hidden="true"></span>
   </form>
   <div id="yt-channel-result"></div>
 </div>
@@ -83,6 +86,7 @@
       <input id="disc-url" type="text" name="url" placeholder="https://…" required>
     </div>
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Resolve</button>
+    <span class="htmx-indicator spinner" aria-hidden="true"></span>
   </form>
   <div id="manual-result"></div>
 </div>
