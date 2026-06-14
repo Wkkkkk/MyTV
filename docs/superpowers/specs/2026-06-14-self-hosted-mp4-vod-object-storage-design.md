@@ -157,6 +157,32 @@ yt-dlp's stderr), `ffprobe` failure, upload failure, or API non-2xx → clear
 stderr message + nonzero exit. Each run uses a unique key (no dedupe); re-running
 creates a new item — acceptable for a personal tool.
 
+## Retention (rolling window) — added 2026-06-14
+
+The intended library is **ephemeral**: videos under ~30 min, up to ~10/day, kept
+for at most a week (~300 MB/video → ~20 GB steady state). Retention is handled in
+two halves:
+
+- **Storage side — provider lifecycle rule.** A one-time R2 **object lifecycle
+  rule** ("delete objects older than 7 days") expires files automatically, with
+  no cron or script. This is the entire retention mechanism on the storage side
+  and is set up manually alongside the bucket (consistent with the manual
+  public-access setup already noted as out of scope to automate).
+- **MyTV side — tolerate 404s (no code).** A `playlist_item` row outlives its
+  deleted file and ends up pointing at a dead URL. The player already handles
+  this: the direct-`<video src>` branch in `templates/base.html` wires
+  `video.onerror` → `GET /channel/:id/next`, and `next_vod_at`
+  (`src/routes/player.rs`) returns the next item by playlist position. So a dead
+  item **auto-advances** instead of freezing the channel. Worst case, if several
+  consecutive items expired together, the player chains `onerror → /next` until
+  it lands on a live one — acceptable for a personal rolling library. Stale rows
+  accumulate in the guide and are pruned by hand occasionally (e.g.
+  `mytvctl playlist delete`) if they become noticeable. No retention sweeper, no
+  `created_at` migration, no new server code.
+
+This keeps the rolling window fully automatic on the storage side and free on
+the MyTV side, at the cost of transient stale guide entries.
+
 ## Data flow at play time
 
 ```
@@ -187,6 +213,34 @@ tune → item.url = https://<bucket>/<key>.mp4
 - **Quality default** is best avc1 (Bilibili offers avc1 up to 1080p); H.264 is
   larger than the AV1/HEVC variants at equal resolution — an accepted trade for
   compatibility.
+
+## Considered and rejected alternatives
+
+- **catbox.moe / Litterbox (2026-06-14).** A free, donation-funded file host.
+  *Catbox* (permanent, ~200 MB/file) and *Litterbox* (temporary, up to 1 GB,
+  expiry options 1h/12h/1day/**3 days max**). Attractive for zero-setup uploads
+  (a single multipart POST, no credentials or bucket). **Rejected as the backing
+  store** for three reasons:
+  1. **Retention mismatch** — Catbox is permanent (defeats the rolling window);
+     Litterbox caps at **3 days**, so it cannot honor the ~7-day window at all.
+  2. **Wrong tool for streaming** — a `vod_loop` re-fetches the file on every
+     loop, which is exactly the "use as a CDN / hotlinking" pattern Catbox's FAQ
+     prohibits; Litterbox is built for one-off shares, not repeated playback off
+     a free single-operator service with no SLA.
+  3. **No S3 API** — would need a separate uploader path in `vod_upload.py`,
+     diverging from the boto3 flow.
+  Its one legitimate use is a **zero-setup escape hatch**: Litterbox (3-day
+  window, accepting the streaming caveat) can prove the end-to-end pipeline
+  before an R2 bucket exists. Not the design's storage layer.
+- **Backblaze B2 + Cloudflare CDN** — supports lifecycle rules, but free egress
+  requires fronting it with Cloudflare, i.e. two services to wire for no
+  advantage over R2.
+- **Bunny.net Storage + CDN** — cheapest dedicated video delivery, but **no
+  native object-TTL**, so weekly deletion would become a maintained cron/script
+  — against the zero-maintenance priority.
+- **Fly volume (self-hosted serving)** — adds Fly egress, makes the 256 MB VM
+  serve ~300 MB files, and needs manual volume sizing. Rejected against the
+  zero-maintenance priority.
 
 ## Rollout
 
