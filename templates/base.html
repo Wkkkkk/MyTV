@@ -361,6 +361,9 @@
           if (hls) { hls.stopLoad(); hls.detachMedia(); }
           if (dash) { dash.reset(); dash = null; }
           video.onerror = function() {
+            // On-demand: a failed item must not fall back to /next (which would
+            // jump to item 1). Show the error and leave the playlist for the viewer.
+            if (odChannelId === currentChannelId) { showPlayerError(); return; }
             var nextUrl = '/channel/' + currentChannelId + '/next';
             if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
             fetch(nextUrl)
@@ -532,6 +535,9 @@
           dur.textContent = odFmtDur(it.duration_secs);
           row.appendChild(mark); row.appendChild(title); row.appendChild(dur);
           row.addEventListener('click', function() { odPlayIndex(i, 0); });
+          row.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); odPlayIndex(i, 0); }
+          });
           box.appendChild(row);
         });
       }
@@ -676,6 +682,7 @@
         stopPlayback();
         if (panel) panel.style.display = 'none';
         currentChannelId = null;
+        odChannelId = null; odItems = []; odIndex = -1;
       });
       if (ovHelp) ovHelp.addEventListener('click', function() {
         if (helpBox) helpBox.hidden = !helpBox.hidden;
