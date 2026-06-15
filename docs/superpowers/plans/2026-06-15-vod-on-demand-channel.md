@@ -24,7 +24,7 @@
 - `templates/base.html` — playlist CSS + the on-demand client logic.
 - `tests/http.rs` — integration tests for the endpoints, `channels_json`, and the admin option.
 
-No new files; no migration (the `channels.type` column is free-form text and `loop_anchor` stays NULL for on-demand).
+Migration `007_channel_vod_on_demand.sql` extends the `channels.type` CHECK constraint (added during Task 1 — the `001` constraint rejects unknown type strings); `loop_anchor` stays NULL for on-demand.
 
 ---
 
