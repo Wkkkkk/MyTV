@@ -1632,3 +1632,15 @@ async fn test_guide_partial_channels_json_includes_type() {
         "channels_json must carry channel type so the client can branch"
     );
 }
+
+#[tokio::test]
+async fn test_channel_new_form_has_on_demand_option() {
+    let response = app()
+        .await
+        .oneshot(authed("/admin/channels/new"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("value=\"vod_on_demand\""));
+}
