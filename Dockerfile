@@ -33,7 +33,7 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates python3-pip \
     && update-ca-certificates \
-    && pip3 install --break-system-packages yt-dlp==2026.3.17 \
+    && pip3 install --break-system-packages yt-dlp==2026.6.9 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/mytv ./mytv
