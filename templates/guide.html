@@ -11,6 +11,7 @@
     <button type="button" class="ov-btn" id="ov-prev" title="Previous channel" aria-label="Previous channel">↑</button>
     <button type="button" class="ov-btn" id="ov-next" title="Next channel" aria-label="Next channel">↓</button>
     <span class="ov-spacer"></span>
+    <button type="button" class="ov-btn" id="ov-playlist" title="Playlist" aria-label="Playlist" hidden>☰</button>
     <button type="button" class="ov-btn" id="ov-help" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
   </div>
   <div id="player-help" hidden>
@@ -20,6 +21,7 @@
     <div>← / → — seek 10s (VOD)</div>
     <div>F — fullscreen</div>
   </div>
+  <div id="player-playlist" hidden></div>
   <div id="player-buffering"><span class="spinner-lg"></span> Loading…</div>
   <video id="video" controls></video>
   <div id="player-error">Channel unavailable</div>

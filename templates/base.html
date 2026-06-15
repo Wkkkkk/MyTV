@@ -45,6 +45,19 @@
       background:rgba(10,10,10,0.92);border:1px solid var(--border-strong);
       border-radius:5px;padding:10px 14px;font-size:0.8rem;color:var(--text);line-height:1.7}
     #player-help strong{display:block;margin-bottom:4px;color:var(--accent)}
+    #player-playlist{position:absolute;bottom:100px;right:12px;z-index:7;
+      max-height:50vh;width:min(360px,80vw);overflow-y:auto;
+      background:rgba(0,0,0,0.92);border:1px solid var(--border);border-radius:6px;
+      opacity:0;pointer-events:none;transition:opacity .15s}
+    #player-panel.show-controls #player-playlist:not([hidden]){opacity:1;pointer-events:auto}
+    .pl-row{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;
+      line-height:1.4;border-bottom:1px solid var(--border-subtle)}
+    .pl-row:hover{background:rgba(255,255,255,0.08)}
+    .pl-row.current{background:var(--accent);color:#fff}
+    .pl-mark{flex:0 0 14px;text-align:center}
+    .pl-title{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .pl-dur{flex:0 0 auto;font-variant-numeric:tabular-nums;color:var(--text-muted)}
+    .pl-row.current .pl-dur{color:#fff}
     #player-buffering{display:none;position:absolute;top:0;left:0;right:0;bottom:0;z-index:5;
       align-items:center;justify-content:center;gap:10px;
       background:#000;color:#fff;font-size:0.95rem}

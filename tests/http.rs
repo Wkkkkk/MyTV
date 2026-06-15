@@ -1644,3 +1644,18 @@ async fn test_channel_new_form_has_on_demand_option() {
     let body = body_text(response).await;
     assert!(body.contains("value=\"vod_on_demand\""));
 }
+
+#[tokio::test]
+async fn test_guide_has_playlist_toolbar_markup() {
+    let response = app().await.oneshot(req("/guide")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("id=\"ov-playlist\""),
+        "playlist toggle button"
+    );
+    assert!(
+        body.contains("id=\"player-playlist\""),
+        "playlist list container"
+    );
+}
