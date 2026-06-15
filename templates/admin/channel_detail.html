@@ -6,6 +6,8 @@
     <span style="font-size:0.8rem;color:#666">
       {% if channel_type.as_str() == "live" %}
       <span class="badge badge-live">live</span>
+      {% else if channel_type.as_str() == "vod_on_demand" %}
+      <span class="badge badge-vod">on demand</span>
       {% else %}
       <span class="badge badge-vod">vod loop</span>
       {% endif %}
@@ -89,8 +91,8 @@
 </div>
 {% endif %}
 
-<!-- Playlist items (vod_loop only) -->
-{% if channel_type.as_str() == "vod_loop" %}
+<!-- Playlist items (vod_loop + vod_on_demand) -->
+{% if channel_type.as_str() == "vod_loop" || channel_type.as_str() == "vod_on_demand" %}
 <div class="section">
   <h3>Playlist</h3>
   {% if playlist_items.is_empty() %}

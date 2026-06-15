@@ -1646,6 +1646,28 @@ async fn test_channel_new_form_has_on_demand_option() {
 }
 
 #[tokio::test]
+async fn test_on_demand_channel_detail_shows_playlist_form() {
+    // Channel 6 is vod_on_demand with two seeded items. The admin detail page
+    // must expose the playlist management section (add-item form + item list)
+    // for on-demand channels, not just vod_loop.
+    let response = app()
+        .await
+        .oneshot(authed("/admin/channels/6"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("id=\"pl-url\""),
+        "on-demand detail must show the add-item form"
+    );
+    assert!(
+        body.contains("On-Demand 2"),
+        "on-demand detail must list existing playlist items"
+    );
+}
+
+#[tokio::test]
 async fn test_guide_has_playlist_toolbar_markup() {
     let response = app().await.oneshot(req("/guide")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
