@@ -370,6 +370,16 @@ async fn test_tune_vod_with_playlist_returns_stream_url() {
 }
 
 #[tokio::test]
+async fn test_tune_vod_mp4_item_skips_proxy() {
+    // Channel 4's seeded items are .mp4 (vod.example.com/epN.mp4): direct media
+    // files should now play without the stream proxy.
+    let response = app().await.oneshot(req("/channel/4/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert!(json["skip_proxy"].as_bool().unwrap());
+}
+
+#[tokio::test]
 async fn test_tune_vod_empty_playlist_returns_503() {
     let response = app().await.oneshot(req("/channel/5/tune")).await.unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
