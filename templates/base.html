@@ -483,8 +483,9 @@
 
       // ── on-demand VOD (#45) ───────────────────────────────────
       var odItems = [];          // [{id, title, duration_secs}]
-      var odIndex = -1;          // index into odItems of the current item
+      var odIndex = -1;          // index into odItems of the item actually loaded
       var odChannelId = null;    // channel id the playlist belongs to
+      var odPlayGen = 0;         // bumps per selection; guards out-of-order resolves
 
       function odKey(id) { return 'mytv:ondemand:' + id; }
 
@@ -544,11 +545,18 @@
 
       function odPlayIndex(i, offset) {
         if (i < 0 || i >= odItems.length) return;
-        odIndex = i;
-        odRenderList();
+        // Token this selection. odIndex / the ▶ highlight only move once THIS
+        // item actually loads, and a stale resolve (slower than a newer click
+        // or auto-advance) is dropped — so the highlight always matches the
+        // item in the <video>, never a request still in flight.
+        var gen = ++odPlayGen;
+        var chanAtRequest = odChannelId;
         fetch('/channel/' + odChannelId + '/item/' + odItems[i].id)
           .then(function(r) { if (!r.ok) throw new Error('item ' + r.status); return r.json(); })
           .then(function(d) {
+            if (gen !== odPlayGen || chanAtRequest !== odChannelId) return; // superseded
+            odIndex = i;
+            odRenderList();
             currentChannel = Object.assign({ channel_id: odChannelId }, d);
             renderInfoBar(currentChannel);
             if (video) video.style.display = '';
@@ -557,6 +565,7 @@
             odSaveCursor();
           })
           .catch(function(err) {
+            if (gen !== odPlayGen || chanAtRequest !== odChannelId) return;
             if (typeof debugLog === 'function') debugLog('error', 'on-demand item: ' + err);
             showPlayerError();
           });
