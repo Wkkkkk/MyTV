@@ -478,9 +478,131 @@
         if (d.url) _loadSource(d.url, d.start_offset_secs, d.skip_proxy);
       }
 
+      // ── on-demand VOD (#45) ───────────────────────────────────
+      var odItems = [];          // [{id, title, duration_secs}]
+      var odIndex = -1;          // index into odItems of the current item
+      var odChannelId = null;    // channel id the playlist belongs to
+
+      function odKey(id) { return 'mytv:ondemand:' + id; }
+
+      function odLoadCursor(id) {
+        try {
+          var raw = localStorage.getItem(odKey(id));
+          if (!raw) return null;
+          var c = JSON.parse(raw);
+          if (c && typeof c.itemId === 'number') return c;
+        } catch (e) {}
+        return null;
+      }
+
+      function odSaveCursor() {
+        if (odChannelId == null || odIndex < 0 || !odItems[odIndex]) return;
+        try {
+          localStorage.setItem(odKey(odChannelId), JSON.stringify({
+            itemId: odItems[odIndex].id,
+            offset: video ? video.currentTime || 0 : 0
+          }));
+        } catch (e) {}
+      }
+
+      function odFmtDur(secs) {
+        secs = Math.max(0, Math.floor(secs || 0));
+        var m = Math.floor(secs / 60), s = secs % 60;
+        return m + ':' + (s < 10 ? '0' : '') + s;
+      }
+
+      function odRenderList() {
+        var box = document.getElementById('player-playlist');
+        if (!box) return;
+        box.innerHTML = '';
+        odItems.forEach(function(it, i) {
+          var row = document.createElement('div');
+          row.className = 'pl-row' + (i === odIndex ? ' current' : '');
+          row.setAttribute('role', 'button');
+          row.setAttribute('tabindex', '0');
+          var mark = document.createElement('span');
+          mark.className = 'pl-mark';
+          mark.textContent = i === odIndex ? '▶' : '';
+          var title = document.createElement('span');
+          title.className = 'pl-title';
+          title.textContent = it.title;
+          title.title = it.title;
+          var dur = document.createElement('span');
+          dur.className = 'pl-dur';
+          dur.textContent = odFmtDur(it.duration_secs);
+          row.appendChild(mark); row.appendChild(title); row.appendChild(dur);
+          row.addEventListener('click', function() { odPlayIndex(i, 0); });
+          box.appendChild(row);
+        });
+      }
+
+      function odPlayIndex(i, offset) {
+        if (i < 0 || i >= odItems.length) return;
+        odIndex = i;
+        odRenderList();
+        fetch('/channel/' + odChannelId + '/item/' + odItems[i].id)
+          .then(function(r) { if (!r.ok) throw new Error('item ' + r.status); return r.json(); })
+          .then(function(d) {
+            currentChannel = Object.assign({ channel_id: odChannelId }, d);
+            renderInfoBar(currentChannel);
+            if (video) video.style.display = '';
+            hidePlayerError();
+            _loadSource(d.url, offset || 0, d.skip_proxy);
+            odSaveCursor();
+          })
+          .catch(function(err) {
+            if (typeof debugLog === 'function') debugLog('error', 'on-demand item: ' + err);
+            showPlayerError();
+          });
+      }
+
+      function odTune(channelId) {
+        odChannelId = channelId;
+        odItems = [];
+        odIndex = -1;
+        var btn = document.getElementById('ov-playlist');
+        if (btn) btn.hidden = false;
+        document.getElementById('player-panel').style.display = 'block';
+        fetch('/channel/' + channelId + '/playlist')
+          .then(function(r) { if (!r.ok) throw new Error('playlist ' + r.status); return r.json(); })
+          .then(function(items) {
+            odItems = items || [];
+            if (!odItems.length) { showPlayerError(); return; }
+            var cursor = odLoadCursor(channelId);
+            var start = 0, offset = 0;
+            if (cursor) {
+              for (var i = 0; i < odItems.length; i++) {
+                if (odItems[i].id === cursor.itemId) { start = i; offset = cursor.offset || 0; break; }
+              }
+            }
+            odRenderList();
+            odPlayIndex(start, offset);
+          })
+          .catch(function(err) {
+            if (typeof debugLog === 'function') debugLog('error', 'on-demand tune: ' + err);
+            showPlayerError();
+          });
+      }
+
+      function odChannelType(channelId) {
+        var channels = window.epgChannels || [];
+        for (var i = 0; i < channels.length; i++) {
+          if (channels[i].id === channelId) return channels[i].type;
+        }
+        return null;
+      }
+
       function tune(channelId) {
         currentChannelId = channelId;
         currentUrl = null;
+        if (odChannelType(channelId) === 'vod_on_demand') {
+          hidePlayerError();
+          odTune(channelId);
+          return;
+        }
+        var plBtn = document.getElementById('ov-playlist');
+        if (plBtn) plBtn.hidden = true;
+        odChannelId = null; odItems = []; odIndex = -1;
         hidePlayerError();
         endedAdvanceGen++;
         waitingGen++;
@@ -508,11 +630,13 @@
       if (video) {
         video.addEventListener('ended', function() {
           if (!currentChannelId) return;
+          if (odChannelId === currentChannelId) {
+            if (odIndex + 1 < odItems.length) odPlayIndex(odIndex + 1, 0);
+            // else: last item — stop silently (no auto-advance)
+            return;
+          }
           fetch('/channel/' + currentChannelId + '/next')
-            .then(function(r) {
-              if (!r.ok) throw new Error('next failed: ' + r.status);
-              return r.json();
-            })
+            .then(function(r) { if (!r.ok) throw new Error('next failed: ' + r.status); return r.json(); })
             .then(function(d) { applyTuneResponse(d); })
             .catch(function(err) { if (typeof debugLog === 'function') debugLog('error', 'next: ' + err); console.error('next error:', err); showPlayerError(); });
         });
@@ -556,6 +680,11 @@
       if (ovHelp) ovHelp.addEventListener('click', function() {
         if (helpBox) helpBox.hidden = !helpBox.hidden;
       });
+      var ovPlaylist = document.getElementById('ov-playlist');
+      var plBox = document.getElementById('player-playlist');
+      if (ovPlaylist) ovPlaylist.addEventListener('click', function() {
+        if (plBox) plBox.hidden = !plBox.hidden;
+      });
 
       // ── buffering overlay (#33) ───────────────────────────────
       function showBuffering() {
@@ -574,6 +703,17 @@
         video.addEventListener('pause', hideBuffering);
         video.addEventListener('error', hideBuffering);
       }
+
+      if (video) {
+        var odSaveT = null;
+        video.addEventListener('timeupdate', function() {
+          if (odChannelId == null) return;
+          if (odSaveT) return;
+          odSaveT = setTimeout(function() { odSaveT = null; odSaveCursor(); }, 2000);
+        });
+        video.addEventListener('pause', odSaveCursor);
+      }
+      window.addEventListener('beforeunload', odSaveCursor);
 
       var autoCid = window.__autoTuneChannelId;
       if (autoCid != null) {
