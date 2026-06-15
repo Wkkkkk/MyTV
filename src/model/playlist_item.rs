@@ -63,7 +63,7 @@ pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<PlaylistItem>> {
 /// List all playlist items for a channel ordered by sort_order.
 pub async fn list_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<PlaylistItem>> {
     sqlx::query_as::<_, PlaylistItem>(
-        "SELECT * FROM playlist_items WHERE channel_id = ? ORDER BY sort_order ASC",
+        "SELECT * FROM playlist_items WHERE channel_id = ? ORDER BY sort_order ASC, id ASC",
     )
     .bind(channel_id)
     .fetch_all(pool)
@@ -74,7 +74,7 @@ pub async fn list_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<
 /// List all playlist items across all channels ordered by channel_id then sort_order.
 pub async fn list_all(pool: &SqlitePool) -> Result<Vec<PlaylistItem>> {
     sqlx::query_as::<_, PlaylistItem>(
-        "SELECT * FROM playlist_items ORDER BY channel_id, sort_order ASC",
+        "SELECT * FROM playlist_items ORDER BY channel_id, sort_order ASC, id ASC",
     )
     .fetch_all(pool)
     .await
@@ -97,7 +97,7 @@ pub async fn list_active_for_channel(
     channel_id: i64,
 ) -> Result<Vec<PlaylistItem>> {
     sqlx::query_as::<_, PlaylistItem>(
-        "SELECT * FROM playlist_items WHERE channel_id = ? AND is_active = 1 ORDER BY sort_order ASC",
+        "SELECT * FROM playlist_items WHERE channel_id = ? AND is_active = 1 ORDER BY sort_order ASC, id ASC",
     )
     .bind(channel_id)
     .fetch_all(pool)
@@ -299,6 +299,21 @@ mod tests {
         assert_eq!(items[0].title, "ep1");
         assert_eq!(items[1].title, "ep2");
         assert_eq!(total_duration_secs(&items), 4200);
+    }
+
+    #[tokio::test]
+    async fn list_active_ties_break_by_insertion_order() {
+        // All same sort_order (as the admin add-item form leaves them): order
+        // must fall back to id (insertion / add-time), deterministically.
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let a = create(&pool, item(ch.id, "first", 10, 0)).await.unwrap();
+        let b = create(&pool, item(ch.id, "second", 10, 0)).await.unwrap();
+        let c = create(&pool, item(ch.id, "third", 10, 0)).await.unwrap();
+
+        let items = list_active_for_channel(&pool, ch.id).await.unwrap();
+        let ids: Vec<i64> = items.iter().map(|i| i.id).collect();
+        assert_eq!(ids, vec![a.id, b.id, c.id]);
     }
 
     #[tokio::test]
