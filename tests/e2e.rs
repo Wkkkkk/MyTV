@@ -309,6 +309,178 @@ async fn scenario_tune(client: &ApiClient, token: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// On-demand VOD lifecycle: create a `vod_on_demand` channel, UPDATE it via
+/// PATCH (the focus — full-replace keeping the type), add two playlist items,
+/// and verify them through the public on-demand endpoints. Deterministic:
+/// direct-MP4 URLs resolve to themselves (no yt-dlp), so no real stream is
+/// needed. Hard-fail; cleans up its channel (items cascade) before returning.
+async fn scenario_vod_on_demand(client: &ApiClient, token: &str) -> Result<(), String> {
+    use reqwest::Method;
+    let name = e2e_name("vod_od", token);
+
+    // CREATE vod_on_demand channel → 201, type echoed
+    let resp = client
+        .send(
+            Method::POST,
+            "/api/admin/channels",
+            Some(serde_json::json!({
+                "name": name, "category": "__e2e__", "type": "vod_on_demand", "sort_order": 0
+            })),
+        )
+        .await
+        .map_err(|e| format!("create: {e}"))?;
+    if resp.status().as_u16() != 201 {
+        return Err(format!("create: expected 201, got {}", resp.status()));
+    }
+    let created: mytv::model::channel::Channel = resp
+        .json()
+        .await
+        .map_err(|e| format!("create decode: {e}"))?;
+    if created.r#type != "vod_on_demand" {
+        return Err(format!("create: type {} != vod_on_demand", created.r#type));
+    }
+    let cid = created.id;
+
+    async fn cleanup(client: &ApiClient, cid: i64) {
+        let _ = client
+            .send(
+                reqwest::Method::DELETE,
+                &format!("/api/admin/channels/{cid}"),
+                None,
+            )
+            .await;
+    }
+
+    // All remaining steps run inside this block so we always clean up the
+    // channel (and its items, via cascade) before returning, pass or fail.
+    let result: Result<(), String> = async {
+        let edited = e2e_name("vod_od_edited", token);
+
+        // UPDATE via PATCH (full-replace) → 200; type stays vod_on_demand,
+        // name/category/sort_order change.
+        let resp = client
+            .send(
+                Method::PATCH,
+                &format!("/api/admin/channels/{cid}"),
+                Some(serde_json::json!({
+                    "name": edited, "category": "__e2e__edited",
+                    "type": "vod_on_demand", "sort_order": 2
+                })),
+            )
+            .await
+            .map_err(|e| format!("patch: {e}"))?;
+        if resp.status().as_u16() != 200 {
+            return Err(format!("patch: expected 200, got {}", resp.status()));
+        }
+        let patched: mytv::model::channel::Channel = resp
+            .json()
+            .await
+            .map_err(|e| format!("patch decode: {e}"))?;
+        if patched.r#type != "vod_on_demand" {
+            return Err(format!("patch: type changed to {}", patched.r#type));
+        }
+        if patched.name != edited || patched.category != "__e2e__edited" || patched.sort_order != 2
+        {
+            return Err("patch: fields not updated".into());
+        }
+        if patched.loop_anchor.is_some() {
+            return Err("patch: on-demand channel must not have a loop_anchor".into());
+        }
+
+        // ADD two items via the JSON API. Direct-MP4 URLs (resolve to self).
+        let items = [
+            (
+                "__e2e__ Ep 1",
+                "https://example.invalid/__e2e__od1.mp4",
+                120,
+                1,
+            ),
+            (
+                "__e2e__ Ep 2",
+                "https://example.invalid/__e2e__od2.mp4",
+                300,
+                2,
+            ),
+        ];
+        let mut first_item_id: Option<i64> = None;
+        for (title, url, dur, ord) in items {
+            let resp = client
+                .send(
+                    Method::POST,
+                    &format!("/api/admin/channels/{cid}/playlist"),
+                    Some(serde_json::json!({
+                        "title": title, "url": url, "duration_secs": dur, "sort_order": ord
+                    })),
+                )
+                .await
+                .map_err(|e| format!("add item: {e}"))?;
+            if resp.status().as_u16() != 201 {
+                return Err(format!("add item: expected 201, got {}", resp.status()));
+            }
+            let item: mytv::model::playlist_item::PlaylistItem =
+                resp.json().await.map_err(|e| format!("item decode: {e}"))?;
+            if first_item_id.is_none() {
+                first_item_id = Some(item.id);
+            }
+        }
+
+        // VERIFY via the public on-demand playlist endpoint → ordered list.
+        let resp = client
+            .send(Method::GET, &format!("/channel/{cid}/playlist"), None)
+            .await
+            .map_err(|e| format!("playlist: {e}"))?;
+        if resp.status().as_u16() != 200 {
+            return Err(format!("playlist: expected 200, got {}", resp.status()));
+        }
+        let list: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("playlist decode: {e}"))?;
+        let arr = list.as_array().ok_or("playlist: not a JSON array")?;
+        if arr.len() != 2 {
+            return Err(format!("playlist: expected 2 items, got {}", arr.len()));
+        }
+        if arr[0]["title"].as_str() != Some("__e2e__ Ep 1")
+            || arr[1]["title"].as_str() != Some("__e2e__ Ep 2")
+        {
+            return Err("playlist: items out of order or mistitled".into());
+        }
+        if arr[0]["duration_secs"].as_i64() != Some(120) {
+            return Err("playlist: duration_secs mismatch".into());
+        }
+
+        // VERIFY the per-item resolve endpoint → TuneResponse for item 1.
+        let item_id = first_item_id.ok_or("no item id captured")?;
+        let resp = client
+            .send(Method::GET, &format!("/channel/{cid}/item/{item_id}"), None)
+            .await
+            .map_err(|e| format!("item resolve: {e}"))?;
+        if resp.status().as_u16() != 200 {
+            return Err(format!("item resolve: expected 200, got {}", resp.status()));
+        }
+        let body: serde_json::Value = resp.json().await.map_err(|e| format!("item decode: {e}"))?;
+        if body["playlist_item_id"].as_i64() != Some(item_id) {
+            return Err(format!(
+                "item resolve: playlist_item_id {:?} != {item_id}",
+                body["playlist_item_id"]
+            ));
+        }
+        if body["start_offset_secs"].as_i64() != Some(0) {
+            return Err("item resolve: start_offset_secs != 0".into());
+        }
+        if body["url"].as_str() != Some("https://example.invalid/__e2e__od1.mp4") {
+            return Err(format!("item resolve: url mismatch ({:?})", body["url"]));
+        }
+        Ok(())
+    }
+    .await;
+
+    cleanup(client, cid).await;
+    result?;
+    println!("✓ scenario 5: vod_on_demand update + items");
+    Ok(())
+}
+
 /// Drive the compiled `mytvctl` binary against prod and assert exit codes:
 /// 0 = success (create→get→delete), 1 = non-2xx (GET missing id → 404),
 /// 2 = MYTV_ADMIN_PASSWORD unset. Advisory: returns Err (→ warning) on any
@@ -501,6 +673,9 @@ async fn e2e_smoke() {
     }
     if auth.is_ok() {
         auth = scenario_tune(&client, &token).await;
+    }
+    if auth.is_ok() {
+        auth = scenario_vod_on_demand(&client, &token).await;
     }
 
     let mut warnings: Vec<String> = Vec::new();
