@@ -41,8 +41,11 @@ promoted to a **first-class channel type** so the clock simply isn't there to fi
 ## Channel type & admin
 
 - Extend the `ChannelType` enum with `VodOnDemand` ↔ stored string `"vod_on_demand"`.
-- **No schema migration.** `channels.type` is already a free-form string column; `loop_anchor`
-  stays `NULL` (unused for on-demand).
+- **Migration `007_channel_vod_on_demand.sql`** extends the `channels.type` `CHECK` constraint to
+  `('live', 'vod_loop', 'vod_on_demand')` (SQLite can't `ALTER` a constraint, so the table is
+  recreated, following the `006` precedent). *(This corrects the original assumption of "no
+  migration" — the `001` CHECK constraint rejects unknown type strings.)* `loop_anchor` stays
+  `NULL` (unused for on-demand).
 - **Admin:** add the option to the channel create/edit **type dropdown**. Playlist items use
   the *same* `playlist_items` table and the *same* admin CRUD as `vod_loop`; duration auto-fill
   (#44) still applies.

@@ -130,6 +130,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/guide/partial", get(routes::guide::guide_partial))
         .route("/channel/:id/tune", get(routes::player::tune))
         .route("/channel/:id/next", get(routes::player::next))
+        .route("/channel/:id/playlist", get(routes::player::playlist))
+        .route("/channel/:id/item/:item_id", get(routes::player::item))
         .route("/stream-proxy", get(routes::player::stream_proxy))
         .route("/favicon.svg", get(routes::static_files::favicon_svg))
         .route("/manifest.json", get(routes::static_files::manifest_json))

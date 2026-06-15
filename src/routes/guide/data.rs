@@ -57,7 +57,7 @@ pub(super) async fn build_guide_data(
     let channels_json = serde_json::to_string(
         &all_channels
             .iter()
-            .map(|c| serde_json::json!({"id": c.id, "name": c.name}))
+            .map(|c| serde_json::json!({"id": c.id, "name": c.name, "type": c.r#type}))
             .collect::<Vec<_>>(),
     )
     .unwrap_or_else(|_| "[]".to_string())
@@ -103,7 +103,7 @@ pub(super) async fn build_guide_data(
                     first_active_url,
                 )
             }
-            ChannelType::VodLoop => {
+            ChannelType::VodLoop | ChannelType::VodOnDemand => {
                 let items = all_playlist_items.get(&ch.id).cloned().unwrap_or_default();
                 let entries = match ch.loop_anchor {
                     Some(anchor) => epg::vod_schedule(

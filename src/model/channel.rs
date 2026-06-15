@@ -22,12 +22,14 @@ pub struct Channel {
 pub enum ChannelType {
     Live,
     VodLoop,
+    VodOnDemand,
 }
 
 impl Channel {
     pub fn channel_type(&self) -> ChannelType {
         match self.r#type.as_str() {
             "vod_loop" => ChannelType::VodLoop,
+            "vod_on_demand" => ChannelType::VodOnDemand,
             _ => ChannelType::Live,
         }
     }
@@ -38,6 +40,7 @@ impl ChannelType {
         match self {
             ChannelType::Live => "live",
             ChannelType::VodLoop => "vod_loop",
+            ChannelType::VodOnDemand => "vod_on_demand",
         }
     }
 }
@@ -48,6 +51,7 @@ impl std::str::FromStr for ChannelType {
         match s {
             "live" => Ok(ChannelType::Live),
             "vod_loop" => Ok(ChannelType::VodLoop),
+            "vod_on_demand" => Ok(ChannelType::VodOnDemand),
             _ => anyhow::bail!("invalid channel_type: {s}"),
         }
     }
@@ -472,6 +476,16 @@ mod tests {
         assert!(!set_type_and_anchor_if_live(&pool, 9999, anchor)
             .await
             .unwrap());
+    }
+
+    #[test]
+    fn vod_on_demand_round_trips() {
+        use std::str::FromStr;
+        assert_eq!(ChannelType::VodOnDemand.as_str(), "vod_on_demand");
+        assert_eq!(
+            ChannelType::from_str("vod_on_demand").unwrap(),
+            ChannelType::VodOnDemand
+        );
     }
 
     #[test]

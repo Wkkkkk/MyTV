@@ -21,6 +21,7 @@
     <select id="channel_type" name="channel_type">
       <option value="live"{% if channel_type.as_str() == "live" %} selected{% endif %}>Live stream</option>
       <option value="vod_loop"{% if channel_type.as_str() == "vod_loop" %} selected{% endif %}>VOD loop</option>
+      <option value="vod_on_demand"{% if channel_type.as_str() == "vod_on_demand" %} selected{% endif %}>On-demand playlist</option>
     </select>
   </div>
   <div class="form-row">

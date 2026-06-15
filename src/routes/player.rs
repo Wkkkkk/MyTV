@@ -35,6 +35,13 @@ pub struct NextQuery {
     pub failed_url: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PlaylistEntry {
+    pub id: i64,
+    pub title: String,
+    pub duration_secs: i64,
+}
+
 pub async fn tune(
     State(state): State<AppState>,
     Path(channel_id): Path<i64>,
@@ -50,6 +57,7 @@ pub async fn tune(
             let now_secs = chrono::Utc::now().timestamp();
             tune_vod_at(&state, &ch, now_secs).await
         }
+        ChannelType::VodOnDemand => tune_vod_on_demand(&state, &ch).await,
     }
 }
 
@@ -69,7 +77,67 @@ pub async fn next(
             let now_secs = chrono::Utc::now().timestamp();
             next_vod_at(&state, &ch, now_secs).await
         }
+        ChannelType::VodOnDemand => tune_vod_on_demand(&state, &ch).await,
     }
+}
+
+pub async fn item(
+    State(state): State<AppState>,
+    Path((channel_id, item_id)): Path<(i64, i64)>,
+) -> Result<Json<TuneResponse>, StatusCode> {
+    let ch = channel::get(&state.pool, channel_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let items = playlist_item::list_active_for_channel(&state.pool, channel_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let item = items
+        .iter()
+        .find(|i| i.id == item_id)
+        .ok_or(StatusCode::UNPROCESSABLE_ENTITY)?;
+
+    match resolver::resolve_url(&item.url).await {
+        Ok(url) => Ok(tune_response(
+            &ch,
+            url,
+            0,
+            resolver::should_skip_proxy(&item.url),
+            None,
+            Some(item.id),
+        )),
+        Err(e) => {
+            tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }
+}
+
+pub async fn playlist(
+    State(state): State<AppState>,
+    Path(channel_id): Path<i64>,
+) -> Result<Json<Vec<PlaylistEntry>>, StatusCode> {
+    channel::get(&state.pool, channel_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let items = playlist_item::list_active_for_channel(&state.pool, channel_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(
+        items
+            .into_iter()
+            .map(|i| PlaylistEntry {
+                id: i.id,
+                title: i.title,
+                duration_secs: i.duration_secs,
+            })
+            .collect(),
+    ))
 }
 
 fn tune_response(
@@ -263,6 +331,30 @@ async fn tune_vod_at(
             ch,
             url,
             offset,
+            resolver::should_skip_proxy(&item.url),
+            None,
+            Some(item.id),
+        )),
+        Err(e) => {
+            tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }
+}
+
+async fn tune_vod_on_demand(
+    state: &AppState,
+    ch: &channel::Channel,
+) -> Result<Json<TuneResponse>, StatusCode> {
+    let items = playlist_item::list_active_for_channel(&state.pool, ch.id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let item = items.first().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    match resolver::resolve_url(&item.url).await {
+        Ok(url) => Ok(tune_response(
+            ch,
+            url,
+            0,
             resolver::should_skip_proxy(&item.url),
             None,
             Some(item.id),

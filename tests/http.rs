@@ -386,6 +386,18 @@ async fn test_tune_vod_empty_playlist_returns_503() {
 }
 
 #[tokio::test]
+async fn test_tune_on_demand_returns_first_item() {
+    let response = app().await.oneshot(req("/channel/6/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("od1.mp4"),
+        "should resolve the first active item"
+    );
+    assert!(body.contains("\"channel_type\":\"vod_on_demand\""));
+}
+
+#[tokio::test]
 async fn test_tune_vod_skips_disabled_item() {
     let app = app().await;
 
@@ -1523,5 +1535,127 @@ async fn test_guide_has_player_overlay_toolbar() {
     assert!(
         body.contains("id=\"player-buffering\""),
         "player must include the buffering overlay"
+    );
+}
+
+// ── /channel/:id/playlist ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_playlist_returns_items_in_order() {
+    let response = app()
+        .await
+        .oneshot(req("/channel/6/playlist"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("On-Demand 2"));
+    assert!(body.contains("\"duration_secs\":120"));
+}
+
+#[tokio::test]
+async fn test_playlist_empty_for_channel_without_items() {
+    // channel 5 is a vod_loop channel with no playlist items
+    let response = app()
+        .await
+        .oneshot(req("/channel/5/playlist"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_text(response).await, "[]");
+}
+
+#[tokio::test]
+async fn test_playlist_404_for_missing_channel() {
+    let response = app()
+        .await
+        .oneshot(req("/channel/999/playlist"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+// ── /channel/:id/item/:item_id ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_item_resolves_direct_url() {
+    let app = app().await;
+    // find channel 6's first item id from the playlist endpoint
+    let pl = app
+        .clone()
+        .oneshot(req("/channel/6/playlist"))
+        .await
+        .unwrap();
+    let body = body_text(pl).await;
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let item_id = json[0]["id"].as_i64().unwrap();
+
+    let response = app
+        .oneshot(req(&format!("/channel/6/item/{item_id}")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("od1.mp4"));
+    assert!(body.contains("\"start_offset_secs\":0"));
+    assert!(body.contains(&format!("\"playlist_item_id\":{item_id}")));
+}
+
+#[tokio::test]
+async fn test_item_404_for_missing_channel() {
+    let response = app()
+        .await
+        .oneshot(req("/channel/999/item/1"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_item_422_when_item_not_on_channel() {
+    // channel 6 does not contain item id 999999
+    let response = app()
+        .await
+        .oneshot(req("/channel/6/item/999999"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn test_guide_partial_channels_json_includes_type() {
+    let response = app().await.oneshot(req("/guide/partial")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("\"type\":\"vod_on_demand\""),
+        "channels_json must carry channel type so the client can branch"
+    );
+}
+
+#[tokio::test]
+async fn test_channel_new_form_has_on_demand_option() {
+    let response = app()
+        .await
+        .oneshot(authed("/admin/channels/new"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("value=\"vod_on_demand\""));
+}
+
+#[tokio::test]
+async fn test_guide_has_playlist_toolbar_markup() {
+    let response = app().await.oneshot(req("/guide")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("id=\"ov-playlist\""),
+        "playlist toggle button"
+    );
+    assert!(
+        body.contains("id=\"player-playlist\""),
+        "playlist list container"
     );
 }

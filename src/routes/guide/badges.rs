@@ -61,7 +61,7 @@ pub(super) fn derive_channel_status(
     source_urls: &[String],
 ) -> SourceStatus {
     match channel_type {
-        ChannelType::VodLoop => SourceStatus::Ok,
+        ChannelType::VodLoop | ChannelType::VodOnDemand => SourceStatus::Ok,
         ChannelType::Live => {
             if sources.is_empty() {
                 return SourceStatus::Unchecked;
