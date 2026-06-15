@@ -229,6 +229,27 @@ pub fn needs_resolution(url: &str) -> bool {
     url.contains("youtube.com") || url.contains("youtu.be") || url.contains("twitch.tv")
 }
 
+/// True when the URL is a self-contained media container playable directly via
+/// the browser's `<video src>` (no manifest, no proxy needed). Strips any query
+/// or fragment and is case-insensitive.
+pub fn is_direct_media_file(url: &str) -> bool {
+    let path = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .to_ascii_lowercase();
+    [".mp4", ".webm", ".m4v", ".mov"]
+        .iter()
+        .any(|ext| path.ends_with(ext))
+}
+
+/// Whether the player should bypass `/stream-proxy` for this URL: either it is
+/// resolved via yt-dlp (YouTube/Twitch) or it is a direct media file served
+/// from elsewhere (e.g. self-hosted object storage).
+pub fn should_skip_proxy(url: &str) -> bool {
+    needs_resolution(url) || is_direct_media_file(url)
+}
+
 /// Returns true if a resolved YouTube manifest URL belongs to an ended live
 /// broadcast. yt-dlp marks finished live HLS manifests with `force_finished/1`,
 /// which leaves the player on a frozen playlist (black screen).
@@ -344,6 +365,33 @@ pub async fn fetch_duration_secs(url: &str) -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_direct_media_file() {
+        assert!(is_direct_media_file("https://b.r2.dev/k/movie.mp4"));
+        assert!(is_direct_media_file("https://b/x.MP4")); // case-insensitive
+        assert!(is_direct_media_file("https://b/x.webm"));
+        assert!(is_direct_media_file("https://b/x.m4v"));
+        assert!(is_direct_media_file("https://b/x.mov"));
+        assert!(is_direct_media_file("https://b/x.mp4?sig=abc&e=1")); // query stripped
+        assert!(is_direct_media_file("https://b/x.mp4#t=10")); // fragment stripped
+        assert!(!is_direct_media_file("https://b/playlist.m3u8"));
+        assert!(!is_direct_media_file("https://b/manifest.mpd"));
+        assert!(!is_direct_media_file("https://b/readme.txt"));
+        assert!(!is_direct_media_file("https://b/video")); // no extension
+        assert!(!is_direct_media_file("https://www.youtube.com/watch?v=abc"));
+    }
+
+    #[test]
+    fn test_should_skip_proxy() {
+        // resolved-via-yt-dlp sources skip the proxy as before…
+        assert!(should_skip_proxy("https://www.youtube.com/watch?v=abc"));
+        // …and so do direct media files (the new case)
+        assert!(should_skip_proxy("https://bucket.r2.dev/k/movie.mp4"));
+        // manifests and plain IPTV still proxy
+        assert!(!should_skip_proxy("https://example.com/stream.m3u8"));
+        assert!(!should_skip_proxy("https://iptv.example.com/channel/1"));
+    }
 
     #[tokio::test]
     async fn run_under_cap_runs_when_permit_available() {
