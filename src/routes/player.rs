@@ -35,6 +35,13 @@ pub struct NextQuery {
     pub failed_url: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PlaylistEntry {
+    pub id: i64,
+    pub title: String,
+    pub duration_secs: i64,
+}
+
 pub async fn tune(
     State(state): State<AppState>,
     Path(channel_id): Path<i64>,
@@ -72,6 +79,31 @@ pub async fn next(
         }
         ChannelType::VodOnDemand => tune_vod_on_demand(&state, &ch).await,
     }
+}
+
+pub async fn playlist(
+    State(state): State<AppState>,
+    Path(channel_id): Path<i64>,
+) -> Result<Json<Vec<PlaylistEntry>>, StatusCode> {
+    channel::get(&state.pool, channel_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let items = playlist_item::list_active_for_channel(&state.pool, channel_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(
+        items
+            .into_iter()
+            .map(|i| PlaylistEntry {
+                id: i.id,
+                title: i.title,
+                duration_secs: i.duration_secs,
+            })
+            .collect(),
+    ))
 }
 
 fn tune_response(

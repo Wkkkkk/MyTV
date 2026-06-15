@@ -1537,3 +1537,40 @@ async fn test_guide_has_player_overlay_toolbar() {
         "player must include the buffering overlay"
     );
 }
+
+// ── /channel/:id/playlist ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_playlist_returns_items_in_order() {
+    let response = app()
+        .await
+        .oneshot(req("/channel/6/playlist"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("On-Demand 2"));
+    assert!(body.contains("\"duration_secs\":120"));
+}
+
+#[tokio::test]
+async fn test_playlist_empty_for_channel_without_items() {
+    // channel 5 is a vod_loop channel with no playlist items
+    let response = app()
+        .await
+        .oneshot(req("/channel/5/playlist"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_text(response).await, "[]");
+}
+
+#[tokio::test]
+async fn test_playlist_404_for_missing_channel() {
+    let response = app()
+        .await
+        .oneshot(req("/channel/999/playlist"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
