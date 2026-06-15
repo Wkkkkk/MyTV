@@ -120,10 +120,73 @@
     </div>
     <div class="form-row" style="margin:0;width:110px">
       <label for="pl-duration">Duration (secs)</label>
-      <input id="pl-duration" type="number" name="duration_secs" min="0" placeholder="3600 (auto for YouTube)">
+      <input id="pl-duration" type="number" name="duration_secs" min="0" placeholder="auto for YouTube/media files">
     </div>
     <button class="btn btn-primary btn-sm" type="submit" style="margin-bottom:1px">Add Item</button>
   </form>
+
+  <script>
+    // Direct media files (.mp4/.webm/.m4v/.mov) aren't manifests, so the server
+    // can't read their duration from a playlist/MPD. The browser already can:
+    // a throwaway <video> exposes .duration once metadata loads. Prefill the
+    // field client-side so the add never bounces with "enter it manually".
+    (function () {
+      var urlEl = document.getElementById('pl-url');
+      var durEl = document.getElementById('pl-duration');
+      var form = durEl && durEl.closest('form');
+      if (!urlEl || !durEl || !form) return;
+
+      function isDirectMedia(url) {
+        var path = (url.split(/[?#]/)[0] || '').toLowerCase();
+        return /\.(mp4|webm|m4v|mov)$/.test(path);
+      }
+
+      // Resolves to rounded seconds, or null if it can't be determined.
+      function probeDuration(url) {
+        return new Promise(function (resolve) {
+          var v = document.createElement('video');
+          v.preload = 'metadata';
+          var settled = false;
+          function finish(val) {
+            if (settled) return;
+            settled = true;
+            v.removeAttribute('src');
+            v.load();
+            resolve(val);
+          }
+          var timer = setTimeout(function () { finish(null); }, 10000);
+          v.addEventListener('loadedmetadata', function () {
+            clearTimeout(timer);
+            var d = v.duration;
+            finish(isFinite(d) && d > 0 ? Math.round(d) : null);
+          });
+          v.addEventListener('error', function () { clearTimeout(timer); finish(null); });
+          v.src = url;
+        });
+      }
+
+      // Prefill on URL change for immediate feedback (overridable).
+      urlEl.addEventListener('change', function () {
+        if (durEl.value.trim() !== '') return;
+        var url = urlEl.value.trim();
+        if (!isDirectMedia(url)) return;
+        probeDuration(url).then(function (secs) {
+          if (secs && durEl.value.trim() === '') durEl.value = secs;
+        });
+      });
+
+      // Guard submit: if still blank for a direct media URL, fill before POST.
+      form.addEventListener('submit', function (e) {
+        var url = urlEl.value.trim();
+        if (durEl.value.trim() !== '' || !isDirectMedia(url)) return;
+        e.preventDefault();
+        probeDuration(url).then(function (secs) {
+          if (secs) durEl.value = secs;
+          form.submit(); // re-submit; if still blank, server falls back as before
+        });
+      });
+    })();
+  </script>
 </div>
 {% endif %}
 {% endblock %}
