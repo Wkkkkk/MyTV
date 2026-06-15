@@ -1621,3 +1621,14 @@ async fn test_item_422_when_item_not_on_channel() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+#[tokio::test]
+async fn test_guide_partial_channels_json_includes_type() {
+    let response = app().await.oneshot(req("/guide/partial")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("\"type\":\"vod_on_demand\""),
+        "channels_json must carry channel type so the client can branch"
+    );
+}
