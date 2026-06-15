@@ -386,6 +386,18 @@ async fn test_tune_vod_empty_playlist_returns_503() {
 }
 
 #[tokio::test]
+async fn test_tune_on_demand_returns_first_item() {
+    let response = app().await.oneshot(req("/channel/6/tune")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("od1.mp4"),
+        "should resolve the first active item"
+    );
+    assert!(body.contains("\"channel_type\":\"vod_on_demand\""));
+}
+
+#[tokio::test]
 async fn test_tune_vod_skips_disabled_item() {
     let app = app().await;
 

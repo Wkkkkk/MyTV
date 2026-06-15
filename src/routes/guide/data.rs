@@ -103,7 +103,7 @@ pub(super) async fn build_guide_data(
                     first_active_url,
                 )
             }
-            ChannelType::VodLoop => {
+            ChannelType::VodLoop | ChannelType::VodOnDemand => {
                 let items = all_playlist_items.get(&ch.id).cloned().unwrap_or_default();
                 let entries = match ch.loop_anchor {
                     Some(anchor) => epg::vod_schedule(

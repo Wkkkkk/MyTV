@@ -50,6 +50,7 @@ pub async fn tune(
             let now_secs = chrono::Utc::now().timestamp();
             tune_vod_at(&state, &ch, now_secs).await
         }
+        ChannelType::VodOnDemand => tune_vod_on_demand(&state, &ch).await,
     }
 }
 
@@ -69,6 +70,7 @@ pub async fn next(
             let now_secs = chrono::Utc::now().timestamp();
             next_vod_at(&state, &ch, now_secs).await
         }
+        ChannelType::VodOnDemand => tune_vod_on_demand(&state, &ch).await,
     }
 }
 
@@ -263,6 +265,30 @@ async fn tune_vod_at(
             ch,
             url,
             offset,
+            resolver::should_skip_proxy(&item.url),
+            None,
+            Some(item.id),
+        )),
+        Err(e) => {
+            tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }
+}
+
+async fn tune_vod_on_demand(
+    state: &AppState,
+    ch: &channel::Channel,
+) -> Result<Json<TuneResponse>, StatusCode> {
+    let items = playlist_item::list_active_for_channel(&state.pool, ch.id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let item = items.first().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    match resolver::resolve_url(&item.url).await {
+        Ok(url) => Ok(tune_response(
+            ch,
+            url,
+            0,
             resolver::should_skip_proxy(&item.url),
             None,
             Some(item.id),
