@@ -1574,3 +1574,50 @@ async fn test_playlist_404_for_missing_channel() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+// ── /channel/:id/item/:item_id ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_item_resolves_direct_url() {
+    let app = app().await;
+    // find channel 6's first item id from the playlist endpoint
+    let pl = app
+        .clone()
+        .oneshot(req("/channel/6/playlist"))
+        .await
+        .unwrap();
+    let body = body_text(pl).await;
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let item_id = json[0]["id"].as_i64().unwrap();
+
+    let response = app
+        .oneshot(req(&format!("/channel/6/item/{item_id}")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("od1.mp4"));
+    assert!(body.contains("\"start_offset_secs\":0"));
+    assert!(body.contains(&format!("\"playlist_item_id\":{item_id}")));
+}
+
+#[tokio::test]
+async fn test_item_404_for_missing_channel() {
+    let response = app()
+        .await
+        .oneshot(req("/channel/999/item/1"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_item_422_when_item_not_on_channel() {
+    // channel 6 does not contain item id 999999
+    let response = app()
+        .await
+        .oneshot(req("/channel/6/item/999999"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
