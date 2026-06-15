@@ -45,11 +45,11 @@
       background:rgba(10,10,10,0.92);border:1px solid var(--border-strong);
       border-radius:5px;padding:10px 14px;font-size:0.8rem;color:var(--text);line-height:1.7}
     #player-help strong{display:block;margin-bottom:4px;color:var(--accent)}
+    /* Visible whenever not [hidden] — like #player-help. NOT gated on
+       show-controls, so the item list stays clickable without hovering. */
     #player-playlist{position:absolute;bottom:100px;right:12px;z-index:7;
       max-height:50vh;width:min(360px,80vw);overflow-y:auto;
-      background:rgba(0,0,0,0.92);border:1px solid var(--border);border-radius:6px;
-      opacity:0;pointer-events:none;transition:opacity .15s}
-    #player-panel.show-controls #player-playlist:not([hidden]){opacity:1;pointer-events:auto}
+      background:rgba(0,0,0,0.92);border:1px solid var(--border);border-radius:6px}
     .pl-row{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;
       line-height:1.4;border-bottom:1px solid var(--border-subtle)}
     .pl-row:hover{background:rgba(255,255,255,0.08)}
@@ -582,6 +582,9 @@
               }
             }
             odRenderList();
+            // Open the playlist by default so items are immediately clickable.
+            var box = document.getElementById('player-playlist');
+            if (box) box.hidden = false;
             odPlayIndex(start, offset);
           })
           .catch(function(err) {
@@ -608,6 +611,8 @@
         }
         var plBtn = document.getElementById('ov-playlist');
         if (plBtn) plBtn.hidden = true;
+        var plList = document.getElementById('player-playlist');
+        if (plList) plList.hidden = true;
         odChannelId = null; odItems = []; odIndex = -1;
         hidePlayerError();
         endedAdvanceGen++;
@@ -681,6 +686,7 @@
       if (ovClose) ovClose.addEventListener('click', function() {
         stopPlayback();
         if (panel) panel.style.display = 'none';
+        if (plBox) plBox.hidden = true;
         currentChannelId = null;
         odChannelId = null; odItems = []; odIndex = -1;
       });
