@@ -1623,6 +1623,20 @@ async fn test_item_422_when_item_not_on_channel() {
 }
 
 #[tokio::test]
+async fn test_guide_on_demand_channel_is_clickable() {
+    // Channel 6 (vod_on_demand, seeded) must have a clickable program block in
+    // the guide so it can be tuned — on-demand has no schedule, but without a
+    // block there is nothing to click to start the channel.
+    let response = app().await.oneshot(req("/guide/partial")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("tune(6)"),
+        "on-demand channel row must have a clickable block to tune it"
+    );
+}
+
+#[tokio::test]
 async fn test_guide_partial_channels_json_includes_type() {
     let response = app().await.oneshot(req("/guide/partial")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);

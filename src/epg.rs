@@ -32,6 +32,27 @@ pub fn live_entry(
     }
 }
 
+/// Returns the single EPG entry for an on-demand channel spanning the given
+/// window. On-demand channels have no schedule (items are navigated in the
+/// player, not the guide), but the guide still needs one clickable block so the
+/// viewer can tune in. Not marked live.
+pub fn on_demand_entry(
+    channel_id: i64,
+    name: &str,
+    window_start: DateTime<Utc>,
+    window_end: DateTime<Utc>,
+) -> ProgramEntry {
+    ProgramEntry {
+        channel_id,
+        title: format!("{} — On demand", name),
+        url: String::new(),
+        start_time: window_start,
+        end_time: window_end,
+        is_live: false,
+        start_offset_secs: 0,
+    }
+}
+
 /// Computes program entries for a VOD loop channel over the given time window.
 /// Entries are in chronological order. The first entry may start with a non-zero
 /// offset if the window starts mid-item. The last entry is clipped to window_end.
@@ -113,6 +134,18 @@ mod tests {
         assert_eq!(entry.end_time, end);
         assert_eq!(entry.channel_id, 1);
         assert!(entry.title.contains("CNN"));
+    }
+
+    #[test]
+    fn test_on_demand_entry_spans_window_not_live() {
+        let start = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let end = start + Duration::hours(24);
+        let entry = on_demand_entry(7, "Saved Videos", start, end);
+        assert!(!entry.is_live);
+        assert_eq!(entry.start_time, start);
+        assert_eq!(entry.end_time, end);
+        assert_eq!(entry.channel_id, 7);
+        assert!(entry.title.contains("Saved Videos"));
     }
 
     #[test]

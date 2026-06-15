@@ -103,7 +103,7 @@ pub(super) async fn build_guide_data(
                     first_active_url,
                 )
             }
-            ChannelType::VodLoop | ChannelType::VodOnDemand => {
+            ChannelType::VodLoop => {
                 let items = all_playlist_items.get(&ch.id).cloned().unwrap_or_default();
                 let entries = match ch.loop_anchor {
                     Some(anchor) => epg::vod_schedule(
@@ -117,6 +117,22 @@ pub(super) async fn build_guide_data(
                 };
                 let budget_url = vod_budget_url(&items, ch.loop_anchor, now);
                 (entries, budget_url)
+            }
+            ChannelType::VodOnDemand => {
+                // On-demand channels have no schedule, but the guide still needs
+                // one clickable block so the viewer can tune in (items are then
+                // navigated in the player's playlist).
+                let items = all_playlist_items.get(&ch.id).cloned().unwrap_or_default();
+                let budget_url = vod_budget_url(&items, None, now);
+                (
+                    vec![epg::on_demand_entry(
+                        ch.id,
+                        &ch.name,
+                        window_start,
+                        window_end,
+                    )],
+                    budget_url,
+                )
             }
         };
         let programs: Vec<ProgramSlot> = entries
