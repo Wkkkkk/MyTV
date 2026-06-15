@@ -11,6 +11,7 @@ A personal web app that repackages live internet streams and VOD content into a 
 - **EPG guide** at `/guide` — channel grid organized by category, 24-hour window, now-line, category tabs and time scrolling
 - **Live channels** — multiple failover sources per channel; yt-dlp resolves YouTube and Twitch URLs to direct HLS at tune-in time
 - **VOD loop channels** — playlists that run continuously like a FAST channel; every viewer sees the same position. YouTube VOD plays as direct MP4 straight from the CDN (no proxy hop)
+- **On-demand VOD channels** — a viewer-controlled playlist: items play in order, you click any item to jump or replay, and the player remembers your position in the browser. No shared clock and no loop — playback stops after the last item. Ideal for self-hosted MP4 files; seeking uses the native video timeline
 - **Ended-live → VOD** — when a YouTube live broadcast ends, the player shows a brief overlay, auto-advances to the next channel, and the dead channel is converted into a replayable VOD loop in the background
 - **Budget badges** — the guide marks each channel ⚡ (loads direct from the CDN) or ☁ (routed through the proxy) based on probed CORS support, including resolved YouTube/Twitch live streams
 - **Admin UI** at `/admin` — manage channels, sources, and playlist items
@@ -21,7 +22,9 @@ A personal web app that repackages live internet streams and VOD content into a 
 
 ## How it works
 
-**VOD sync** — each VOD channel has a fixed anchor timestamp. The server computes the current playback position by dividing elapsed time since the anchor by the total playlist duration. Every viewer requesting `/tune` at the same moment gets the same offset, giving the illusion of a shared broadcast.
+**VOD sync** — each VOD *loop* channel has a fixed anchor timestamp. The server computes the current playback position by dividing elapsed time since the anchor by the total playlist duration. Every viewer requesting `/tune` at the same moment gets the same offset, giving the illusion of a shared broadcast.
+
+**On-demand playback** — an on-demand channel has no anchor and no shared clock. The browser drives it: it loads the item list from `/channel/:id/playlist`, plays each item via `/channel/:id/item/:item_id`, advances to the next on `ended`, and stores the current item and offset in `localStorage` so you resume where you left off. Playback stops after the last item (no loop).
 
 **Live failover** — sources are tried in order. When a source fails mid-stream, the player calls `/next` with the failed URL so the server can skip it and return the next available source. The cycle restarts from the top once all sources have been tried.
 
@@ -50,9 +53,29 @@ mytvctl discover youtube --keyword "lofi" --type video
 | `Space` | Play / pause |
 | `F` | Toggle fullscreen |
 | `↑` / `↓` | Previous / next channel (respects active EPG category filter) |
-| `←` / `→` | Seek −10s / +10s (VOD channels only) |
+| `←` / `→` | Seek −10s / +10s (VOD loop channels only) |
 
-The channel info bar below the video shows the channel logo (or a coloured initial tile if no logo is set), name, category, and position in the current channel list.
+The channel info bar below the video shows the channel logo (or a coloured initial tile if no logo is set), name, category, and position in the current channel list. On **on-demand** channels, use the on-screen playlist (☰ in the player toolbar) to click between items, and the native video timeline to seek.
+
+---
+
+## Creating an on-demand channel
+
+In the admin UI (`/admin`):
+
+1. **Channels → New Channel** — set **Type** to **On-demand playlist**, add a name and category, and save. (No loop anchor is needed.)
+2. Open the channel and use the **Playlist** section's **Add Item** form — one title and media URL per item. For a direct `.mp4`/`.webm`/`.m4v`/`.mov` URL the duration auto-fills from the browser; otherwise type it in. Items play in the order you add them.
+3. Watch at `/watch/<id>` (or click the channel in the guide): click any item in the on-screen playlist (☰) to jump or replay, and drag the video timeline to seek.
+
+Scriptable via `mytvctl` (or the JSON API behind it):
+
+```bash
+# create the channel — note the id in the JSON output
+mytvctl channel create --name "Movie Night" --category "Film" --type vod_on_demand
+# add items to it (use the id from above)
+mytvctl playlist create --channel 7 --title "Part 1" --url https://example.com/p1.mp4 --duration-secs 1800
+mytvctl playlist create --channel 7 --title "Part 2" --url https://example.com/p2.mp4 --duration-secs 1500
+```
 
 ---
 
