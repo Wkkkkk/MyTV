@@ -1648,6 +1648,23 @@ async fn test_guide_partial_channels_json_includes_type() {
 }
 
 #[tokio::test]
+async fn test_channels_list_labels_on_demand() {
+    // Seed channel 6 is vod_on_demand — the admin channels list must label it
+    // "on demand", not "vod loop".
+    let response = app()
+        .await
+        .oneshot(authed("/admin/channels"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains(">on demand<"),
+        "channels list must label vod_on_demand as 'on demand'"
+    );
+}
+
+#[tokio::test]
 async fn test_channel_new_form_has_on_demand_option() {
     let response = app()
         .await

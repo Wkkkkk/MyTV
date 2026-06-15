@@ -26,6 +26,8 @@
       <td>
         {% if ch.type_str.as_str() == "live" %}
         <span class="badge badge-live">live</span>
+        {% else if ch.type_str.as_str() == "vod_on_demand" %}
+        <span class="badge badge-vod">on demand</span>
         {% else %}
         <span class="badge badge-vod">vod loop</span>
         {% endif %}
