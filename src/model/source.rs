@@ -149,21 +149,16 @@ pub fn is_observed_down(kind: &str, last_status: Option<&str>, consecutive_failu
 }
 
 /// Sources the tune path may try, ordered by priority: active and not
-/// observed-Down. A regular source is Down once `last_status='error'` and
-/// `consecutive_failures >= 3`; `youtube_live` sources are exempt (kept in
-/// rotation so the resolve-time waiting/backoff for idea #38 can fire). `is_active`
-/// is the manual gate and is never mutated by health.
+/// observed-Down. "Down" is computed in Rust by `is_observed_down` (the single
+/// source of truth), not in SQL — a non-`youtube_live` source is Down once
+/// `last_status='error'` and `consecutive_failures >= FAILURE_THRESHOLD`.
+/// `is_active` is the manual gate and is never mutated by health.
 pub async fn list_tunable_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<Source>> {
-    sqlx::query_as::<_, Source>(
-        "SELECT * FROM sources \
-         WHERE channel_id = ? AND is_active = 1 \
-           AND NOT (kind != 'youtube_live' AND last_status = 'error' AND consecutive_failures >= 3) \
-         ORDER BY priority ASC",
-    )
-    .bind(channel_id)
-    .fetch_all(pool)
-    .await
-    .map_err(Into::into)
+    Ok(list_active_for_channel(pool, channel_id)
+        .await?
+        .into_iter()
+        .filter(|s| !is_observed_down(&s.kind, s.last_status.as_deref(), s.consecutive_failures))
+        .collect())
 }
 
 /// Delete a source by id; returns true if a row was removed.
@@ -325,8 +320,6 @@ mod tests {
         }
     }
 
-    const FAILURE_DOWN_THRESHOLD: i64 = 3;
-
     #[tokio::test]
     async fn test_list_tunable_skips_down_regular_keeps_youtube_and_disabled_excluded() {
         let pool = test_pool().await;
@@ -345,7 +338,7 @@ mod tests {
             down.id,
             "error",
             Some("dead"),
-            FAILURE_DOWN_THRESHOLD,
+            FAILURE_THRESHOLD,
             None,
         )
         .await
@@ -374,7 +367,7 @@ mod tests {
             yt.id,
             "error",
             Some("not currently live"),
-            FAILURE_DOWN_THRESHOLD,
+            FAILURE_THRESHOLD,
             None,
         )
         .await
