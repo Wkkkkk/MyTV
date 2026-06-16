@@ -257,6 +257,8 @@
         }
 
         bar.querySelector('.pi-name').textContent = channel.name || '';
+        var titleEl = document.getElementById('ov-title');
+        if (titleEl) titleEl.textContent = channel.name || '';
         bar.querySelector('.pi-cat-icon').textContent = channelIcon(channel.category);
         bar.querySelector('.pi-cat-text').textContent = channel.category ? ' ' + channel.category : '';
 
