@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyTV Architecture Diagram</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'JetBrains Mono', monospace; background: #020617; min-height: 100vh; padding: 2rem; color: white; }
+    .container { max-width: 1280px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot { width: 12px; height: 12px; background: #22d3ee; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+    .diagram-container { background: rgba(15, 23, 42, 0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1.5rem; overflow-x: auto; }
+    svg { width: 100%; min-width: 980px; display: block; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 2rem; }
+    .card { background: rgba(15, 23, 42, 0.5); border-radius: 0.75rem; border: 1px solid #1e293b; padding: 1.25rem; }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.rose { background: #fb7185; }
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; }
+    .card li { margin-bottom: 0.375rem; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+    .section-head { margin: 3rem 0 0.5rem; display: flex; align-items: center; gap: 0.75rem; }
+    .section-head .bar { width: 4px; height: 1.2rem; background: #a78bfa; border-radius: 2px; }
+    .section-head h2 { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.025em; }
+    .section-sub { color: #94a3b8; font-size: 0.8rem; margin: 0 0 1.25rem 1rem; }
+    .toolbar { display: flex; gap: 0.5rem; margin-left: auto; flex-shrink: 0; align-items: center; }
+    .toolbar-toggle { background: transparent; border: none; color: #475569; cursor: pointer; font-size: 1.25rem; line-height: 1; padding: 0.25rem 0.5rem; border-radius: 0.375rem; transition: color 0.2s, background 0.2s; }
+    .toolbar-toggle:hover { color: #94a3b8; background: rgba(30, 41, 59, 0.5); }
+    .toolbar-actions { display: none; gap: 0.5rem; }
+    .toolbar.expanded .toolbar-actions { display: flex; }
+    .toolbar-actions button { background: rgba(30, 41, 59, 0.8); border: 1px solid #334155; color: #94a3b8; padding: 0.375rem 0.75rem; border-radius: 0.375rem; font-family: inherit; font-size: 0.75rem; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+    .toolbar-actions button:hover { background: rgba(51, 65, 85, 0.8); color: white; border-color: #475569; }
+    @media print { body { background: #020617; padding: 1rem; } .toolbar { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="container" id="report-container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>MyTV Architecture</h1>
+        <div class="toolbar">
+          <div class="toolbar-actions">
+            <button onclick="copyAsImage(this)">📋 Copy</button>
+            <button onclick="downloadPNG(this)">🖼️ PNG</button>
+            <button onclick="downloadPDF(this)">📄 PDF</button>
+          </div>
+          <button class="toolbar-toggle" onclick="this.parentElement.classList.toggle('expanded')" title="Export options" aria-label="Export options">⋯</button>
+        </div>
+      </div>
+      <p class="subtitle">Personal IPTV web app — Rust/Axum routes, stream proxy, yt-dlp resolver, SQLite. Generated 2026-06-16.</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1240 840">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="arrowcyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" />
+          </marker>
+          <marker id="arrowviolet" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa" />
+          </marker>
+          <marker id="arrowamber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- ============ ARROWS (drawn first → render behind boxes) ============ -->
+        <!-- clients → reverse proxy -->
+        <line x1="154" y1="183" x2="188" y2="270" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowcyan)"/>
+        <line x1="154" y1="283" x2="188" y2="285" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowcyan)"/>
+        <line x1="154" y1="383" x2="188" y2="300" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowcyan)"/>
+
+        <!-- reverse proxy → router -->
+        <line x1="310" y1="285" x2="363" y2="205" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="320" y="232" fill="#94a3b8" font-size="8">HTTP :3000</text>
+
+        <!-- router → routes (spine fan-out) -->
+        <line x1="515" y1="200" x2="528" y2="200" stroke="#64748b" stroke-width="1.5"/>
+        <line x1="528" y1="136" x2="528" y2="464" stroke="#64748b" stroke-width="1.5"/>
+        <line x1="528" y1="136" x2="543" y2="136" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="528" y1="218" x2="543" y2="218" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="528" y1="300" x2="543" y2="300" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="528" y1="382" x2="543" y2="382" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="528" y1="464" x2="543" y2="464" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- routes → core modules -->
+        <line x1="695" y1="130" x2="728" y2="134" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="695" y1="142" x2="728" y2="218" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="695" y1="152" x2="728" y2="298" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="695" y1="224" x2="728" y2="382" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="695" y1="306" x2="728" y2="460" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="695" y1="388" x2="728" y2="470" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- resolver → broadcast -->
+        <line x1="810" y1="254" x2="810" y2="280" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- core → data -->
+        <line x1="890" y1="214" x2="903" y2="182" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="890" y1="309" x2="903" y2="332" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowviolet)"/>
+        <line x1="890" y1="462" x2="903" y2="348" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowviolet)"/>
+        <line x1="890" y1="548" x2="903" y2="400" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowviolet)"/>
+        <text x="912" y="430" fill="#a78bfa" font-size="8">SQLx</text>
+
+        <!-- proxy → stream origins (via clear left channel) -->
+        <path d="M728 150 L712 150 L712 708 L650 708 L650 716" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="600" y="700" fill="#94a3b8" font-size="8">fetch + rewrite</text>
+
+        <!-- resolver → youtube (dashed, via clear left channel) -->
+        <path d="M728 224 L722 224 L722 698 L862 698 L862 716" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrowamber)"/>
+        <text x="890" y="694" fill="#fbbf24" font-size="8">yt-dlp subprocess</text>
+
+        <!-- ============ FLY.IO REGION BOUNDARY ============ -->
+        <rect x="345" y="70" width="720" height="600" rx="12" fill="rgba(251, 191, 36, 0.04)" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="357" y="90" fill="#fbbf24" font-size="10" font-weight="600">Fly.io · app=kunstv · single 256 MB VM · /health check</text>
+
+        <!-- ============ CLIENTS ============ -->
+        <rect x="24" y="150" width="130" height="66" rx="6" fill="#0f172a"/>
+        <rect x="24" y="150" width="130" height="66" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="89" y="178" fill="white" font-size="11" font-weight="600" text-anchor="middle">Web Player</text>
+        <text x="89" y="196" fill="#94a3b8" font-size="9" text-anchor="middle">HTMX + &lt;video&gt;</text>
+
+        <rect x="24" y="250" width="130" height="66" rx="6" fill="#0f172a"/>
+        <rect x="24" y="250" width="130" height="66" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="89" y="278" fill="white" font-size="11" font-weight="600" text-anchor="middle">Admin UI</text>
+        <text x="89" y="296" fill="#94a3b8" font-size="9" text-anchor="middle">HTMX forms</text>
+
+        <rect x="24" y="350" width="130" height="66" rx="6" fill="#0f172a"/>
+        <rect x="24" y="350" width="130" height="66" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="89" y="378" fill="white" font-size="11" font-weight="600" text-anchor="middle">mytvctl</text>
+        <text x="89" y="396" fill="#94a3b8" font-size="9" text-anchor="middle">JSON API client</text>
+
+        <!-- ============ REVERSE PROXY ============ -->
+        <rect x="190" y="250" width="120" height="70" rx="6" fill="#0f172a"/>
+        <rect x="190" y="250" width="120" height="70" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="250" y="280" fill="white" font-size="11" font-weight="600" text-anchor="middle">Reverse Proxy</text>
+        <text x="250" y="298" fill="#94a3b8" font-size="9" text-anchor="middle">TLS termination</text>
+        <text x="250" y="312" fill="#fb7185" font-size="8" text-anchor="middle">no native HTTPS</text>
+
+        <!-- ============ AXUM ROUTER / MIDDLEWARE ============ -->
+        <rect x="365" y="130" width="150" height="140" rx="6" fill="#0f172a"/>
+        <rect x="365" y="130" width="150" height="140" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="440" y="154" fill="white" font-size="12" font-weight="600" text-anchor="middle">Axum Router</text>
+        <text x="440" y="174" fill="#94a3b8" font-size="8" text-anchor="middle">redirect_trailing_slash</text>
+        <text x="440" y="190" fill="#94a3b8" font-size="8" text-anchor="middle">track_metrics mw</text>
+        <text x="440" y="206" fill="#94a3b8" font-size="8" text-anchor="middle">basic_auth /admin·/api</text>
+        <text x="440" y="222" fill="#94a3b8" font-size="8" text-anchor="middle">AppState · pool · caches</text>
+        <text x="440" y="244" fill="#34d399" font-size="8" text-anchor="middle">lib.rs · build_router</text>
+
+        <!-- ============ ROUTE HANDLERS ============ -->
+        <rect x="545" y="110" width="150" height="52" rx="6" fill="#0f172a"/>
+        <rect x="545" y="110" width="150" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="620" y="132" fill="white" font-size="11" font-weight="600" text-anchor="middle">player.rs</text>
+        <text x="620" y="148" fill="#94a3b8" font-size="8" text-anchor="middle">tune · next · stream-proxy</text>
+
+        <rect x="545" y="192" width="150" height="52" rx="6" fill="#0f172a"/>
+        <rect x="545" y="192" width="150" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="620" y="214" fill="white" font-size="11" font-weight="600" text-anchor="middle">guide/</text>
+        <text x="620" y="230" fill="#94a3b8" font-size="8" text-anchor="middle">EPG guide + partial</text>
+
+        <rect x="545" y="274" width="150" height="52" rx="6" fill="#0f172a"/>
+        <rect x="545" y="274" width="150" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="620" y="296" fill="white" font-size="11" font-weight="600" text-anchor="middle">admin/</text>
+        <text x="620" y="312" fill="#94a3b8" font-size="8" text-anchor="middle">CRUD · discovery · badges</text>
+
+        <rect x="545" y="356" width="150" height="52" rx="6" fill="#0f172a"/>
+        <rect x="545" y="356" width="150" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="620" y="378" fill="white" font-size="11" font-weight="600" text-anchor="middle">api/</text>
+        <text x="620" y="394" fill="#94a3b8" font-size="8" text-anchor="middle">/api/admin JSON · ApiError</text>
+
+        <rect x="545" y="438" width="150" height="52" rx="6" fill="#0f172a"/>
+        <rect x="545" y="438" width="150" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="620" y="460" fill="white" font-size="11" font-weight="600" text-anchor="middle">health.rs</text>
+        <text x="620" y="476" fill="#94a3b8" font-size="8" text-anchor="middle">/health · static_files</text>
+
+        <!-- ============ CORE / DOMAIN MODULES ============ -->
+        <rect x="730" y="110" width="160" height="58" rx="6" fill="#0f172a"/>
+        <rect x="730" y="110" width="160" height="58" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="810" y="134" fill="white" font-size="11" font-weight="600" text-anchor="middle">proxy.rs</text>
+        <text x="810" y="150" fill="#94a3b8" font-size="8" text-anchor="middle">HLS/DASH rewrite · SSRF</text>
+        <text x="810" y="162" fill="#34d399" font-size="7" text-anchor="middle">fetch_rewritten · ssrf.rs</text>
+
+        <rect x="730" y="196" width="160" height="58" rx="6" fill="#0f172a"/>
+        <rect x="730" y="196" width="160" height="58" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="810" y="220" fill="white" font-size="11" font-weight="600" text-anchor="middle">media/resolver</text>
+        <text x="810" y="236" fill="#94a3b8" font-size="8" text-anchor="middle">yt-dlp · 2-permit cap</text>
+        <text x="810" y="248" fill="#34d399" font-size="7" text-anchor="middle">m3u · hls · mpd</text>
+
+        <rect x="730" y="282" width="160" height="54" rx="6" fill="#0f172a"/>
+        <rect x="730" y="282" width="160" height="54" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="810" y="304" fill="white" font-size="11" font-weight="600" text-anchor="middle">broadcast.rs</text>
+        <text x="810" y="320" fill="#94a3b8" font-size="8" text-anchor="middle">ended live → vod_loop</text>
+
+        <rect x="730" y="362" width="160" height="54" rx="6" fill="#0f172a"/>
+        <rect x="730" y="362" width="160" height="54" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="810" y="384" fill="white" font-size="11" font-weight="600" text-anchor="middle">epg / budget</text>
+        <text x="810" y="400" fill="#94a3b8" font-size="8" text-anchor="middle">time windows · ⚡/☁ badges</text>
+
+        <rect x="730" y="440" width="160" height="58" rx="6" fill="#0f172a"/>
+        <rect x="730" y="440" width="160" height="58" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="810" y="464" fill="white" font-size="11" font-weight="600" text-anchor="middle">model/</text>
+        <text x="810" y="480" fill="#94a3b8" font-size="8" text-anchor="middle">Channel · Source · Item</text>
+        <text x="810" y="492" fill="#34d399" font-size="7" text-anchor="middle">DB query layer</text>
+
+        <rect x="730" y="524" width="160" height="58" rx="6" fill="#0f172a"/>
+        <rect x="730" y="524" width="160" height="58" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="810" y="548" fill="white" font-size="11" font-weight="600" text-anchor="middle">health task</text>
+        <text x="810" y="564" fill="#94a3b8" font-size="8" text-anchor="middle">15-min · auto-disable</text>
+        <text x="810" y="576" fill="#34d399" font-size="7" text-anchor="middle">detached tokio task</text>
+
+        <!-- ============ DATA ============ -->
+        <rect x="905" y="150" width="150" height="66" rx="6" fill="#0f172a"/>
+        <rect x="905" y="150" width="150" height="66" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="980" y="178" fill="white" font-size="11" font-weight="600" text-anchor="middle">live_cache</text>
+        <text x="980" y="196" fill="#94a3b8" font-size="8" text-anchor="middle">60s TTL · yt-dlp status</text>
+
+        <rect x="905" y="300" width="150" height="120" rx="6" fill="#0f172a"/>
+        <rect x="905" y="300" width="150" height="120" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="980" y="326" fill="white" font-size="12" font-weight="600" text-anchor="middle">SQLite</text>
+        <text x="980" y="348" fill="#94a3b8" font-size="8" text-anchor="middle">SQLx · compile-time</text>
+        <text x="980" y="364" fill="#94a3b8" font-size="8" text-anchor="middle">migrations 001–007</text>
+        <text x="980" y="380" fill="#94a3b8" font-size="8" text-anchor="middle">channels · sources</text>
+        <text x="980" y="396" fill="#94a3b8" font-size="8" text-anchor="middle">playlist_items</text>
+        <text x="980" y="412" fill="#a78bfa" font-size="7" text-anchor="middle">single file · health cols</text>
+
+        <!-- ============ EXTERNAL UPSTREAMS (outside region) ============ -->
+        <rect x="560" y="720" width="180" height="80" rx="6" fill="#0f172a"/>
+        <rect x="560" y="720" width="180" height="80" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="650" y="752" fill="white" font-size="11" font-weight="600" text-anchor="middle">Stream Origins</text>
+        <text x="650" y="770" fill="#94a3b8" font-size="9" text-anchor="middle">IPTV · HLS · DASH · MP4</text>
+        <text x="650" y="786" fill="#94a3b8" font-size="8" text-anchor="middle">redirect-follow · SSRF-checked</text>
+
+        <rect x="780" y="720" width="170" height="80" rx="6" fill="#0f172a"/>
+        <rect x="780" y="720" width="170" height="80" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="865" y="752" fill="white" font-size="11" font-weight="600" text-anchor="middle">YouTube</text>
+        <text x="865" y="770" fill="#94a3b8" font-size="9" text-anchor="middle">yt-dlp resolve + probe</text>
+        <text x="865" y="786" fill="#fbbf24" font-size="8" text-anchor="middle">live / VOD / Data API</text>
+
+        <!-- ============ LEGEND (outside region, right) ============ -->
+        <text x="1085" y="96" fill="white" font-size="10" font-weight="600">Legend</text>
+        <rect x="1085" y="108" width="16" height="10" rx="2" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="1107" y="116" fill="#94a3b8" font-size="8">Client / UI</text>
+        <rect x="1085" y="126" width="16" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="1107" y="134" fill="#94a3b8" font-size="8">App code (Axum)</text>
+        <rect x="1085" y="144" width="16" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="1107" y="152" fill="#94a3b8" font-size="8">Database</text>
+        <rect x="1085" y="162" width="16" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="1107" y="170" fill="#94a3b8" font-size="8">Cache / external</text>
+        <rect x="1085" y="180" width="16" height="10" rx="2" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="1107" y="188" fill="#94a3b8" font-size="8">Cloud (YouTube)</text>
+        <rect x="1085" y="198" width="16" height="10" rx="2" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="1107" y="206" fill="#94a3b8" font-size="8">Reverse proxy</text>
+        <rect x="1085" y="216" width="16" height="10" rx="2" fill="transparent" stroke="#fbbf24" stroke-width="1" stroke-dasharray="4,4"/>
+        <text x="1107" y="224" fill="#94a3b8" font-size="8">Fly.io region</text>
+        <line x1="1085" y1="240" x2="1101" y2="240" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="1107" y="243" fill="#94a3b8" font-size="8">yt-dlp call</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot cyan"></div>
+          <h3>Request Flow</h3>
+        </div>
+        <ul>
+          <li>• Clients hit a reverse proxy (TLS) → Axum on :3000</li>
+          <li>• /channel/:id/tune & /next return JSON 200/503</li>
+          <li>• /stream-proxy fetches + rewrites HLS/DASH manifests</li>
+          <li>• guide & admin use HTMX partials; auth on /admin·/api</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot emerald"></div>
+          <h3>Core Modules</h3>
+        </div>
+        <ul>
+          <li>• proxy.rs — redirect-follow, SSRF guard, manifest rewrite</li>
+          <li>• media/resolver — yt-dlp behind a 2-permit semaphore</li>
+          <li>• broadcast.rs — ended live broadcast → vod_loop conversion</li>
+          <li>• health task — 15-min loop, auto-disable/re-enable sources</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot violet"></div>
+          <h3>Data &amp; Deploy</h3>
+        </div>
+        <ul>
+          <li>• SQLite via SQLx compile-time checked queries</li>
+          <li>• migrations 001–007; model/ wraps all DB access</li>
+          <li>• live_cache: in-memory yt-dlp status, 60s TTL</li>
+          <li>• Fly.io single 256 MB VM; /health check</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ================= SECTION: VOD LOOP TIMING ================= -->
+    <div class="section-head">
+      <div class="bar"></div>
+      <h2>EPG / VOD Timing — loop position math</h2>
+    </div>
+    <p class="section-sub">How wall-clock time maps to a playlist position. Every request recomputes it from <code>loop_anchor</code> + <code>Utc::now()</code> — nothing is stored.</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1240 470">
+        <defs>
+          <marker id="ah2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <pattern id="grid2" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid2)" />
+
+        <!-- time axis -->
+        <line x1="110" y1="210" x2="1175" y2="210" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+        <text x="640" y="232" fill="#94a3b8" font-size="9" text-anchor="middle">wall-clock time — loop repeats every Σ duration; player & guide both recompute on every request</text>
+
+        <!-- connecting arrows (drawn behind boxes) -->
+        <line x1="620" y1="270" x2="700" y2="300" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+        <line x1="780" y1="350" x2="400" y2="368" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+        <line x1="1010" y1="350" x2="930" y2="368" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+
+        <!-- playlist item blocks (loop 1) -->
+        <rect x="150" y="150" width="222" height="60" rx="4" fill="#0f172a"/>
+        <rect x="150" y="150" width="222" height="60" rx="4" fill="rgba(76, 29, 149, 0.45)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="261" y="184" fill="white" font-size="11" font-weight="600" text-anchor="middle">item A</text>
+        <text x="261" y="200" fill="#94a3b8" font-size="8" text-anchor="middle">40 min</text>
+
+        <rect x="372" y="150" width="111" height="60" rx="4" fill="#0f172a"/>
+        <rect x="372" y="150" width="111" height="60" rx="4" fill="rgba(76, 29, 149, 0.3)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="427" y="184" fill="white" font-size="11" font-weight="600" text-anchor="middle">item B</text>
+        <text x="427" y="200" fill="#94a3b8" font-size="8" text-anchor="middle">20 min</text>
+
+        <rect x="483" y="150" width="167" height="60" rx="4" fill="#0f172a"/>
+        <rect x="483" y="150" width="167" height="60" rx="4" fill="rgba(76, 29, 149, 0.38)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="566" y="184" fill="white" font-size="11" font-weight="600" text-anchor="middle">item C</text>
+        <text x="566" y="200" fill="#94a3b8" font-size="8" text-anchor="middle">30 min</text>
+
+        <!-- playlist item blocks (loop 2) -->
+        <rect x="650" y="150" width="222" height="60" rx="4" fill="#0f172a"/>
+        <rect x="650" y="150" width="222" height="60" rx="4" fill="rgba(76, 29, 149, 0.45)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="761" y="186" fill="white" font-size="11" font-weight="600" text-anchor="middle">item A</text>
+
+        <rect x="872" y="150" width="111" height="60" rx="4" fill="#0f172a"/>
+        <rect x="872" y="150" width="111" height="60" rx="4" fill="rgba(76, 29, 149, 0.3)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="927" y="186" fill="white" font-size="11" font-weight="600" text-anchor="middle">item B</text>
+
+        <rect x="983" y="150" width="167" height="60" rx="4" fill="#0f172a"/>
+        <rect x="983" y="150" width="167" height="60" rx="4" fill="rgba(76, 29, 149, 0.38)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="1066" y="186" fill="white" font-size="11" font-weight="600" text-anchor="middle">item C</text>
+
+        <!-- current item highlight (C in loop 1) -->
+        <rect x="483" y="150" width="167" height="60" rx="4" fill="none" stroke="#22d3ee" stroke-width="2"/>
+
+        <!-- anchor tick -->
+        <line x1="150" y1="120" x2="150" y2="252" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="150" y="112" fill="#fbbf24" font-size="9" text-anchor="middle">loop_anchor (t₀)</text>
+
+        <!-- now tick -->
+        <line x1="560" y1="108" x2="560" y2="270" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="560" y="100" fill="#22d3ee" font-size="9" text-anchor="middle">now = Utc::now()</text>
+
+        <!-- offset bar inside current item -->
+        <line x1="483" y1="222" x2="560" y2="222" stroke="#22d3ee" stroke-width="1.5"/>
+        <line x1="483" y1="218" x2="483" y2="226" stroke="#22d3ee" stroke-width="1.5"/>
+        <line x1="560" y1="218" x2="560" y2="226" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="521" y="244" fill="#22d3ee" font-size="8" text-anchor="middle">offset</text>
+
+        <!-- elapsed bracket -->
+        <line x1="150" y1="284" x2="560" y2="284" stroke="#94a3b8" stroke-width="1.2"/>
+        <line x1="150" y1="280" x2="150" y2="288" stroke="#94a3b8" stroke-width="1.2"/>
+        <line x1="560" y1="280" x2="560" y2="288" stroke="#94a3b8" stroke-width="1.2"/>
+        <text x="355" y="302" fill="#94a3b8" font-size="9" text-anchor="middle">elapsed = now − anchor</text>
+
+        <!-- formula box -->
+        <rect x="700" y="268" width="470" height="84" rx="6" fill="#0f172a"/>
+        <rect x="700" y="268" width="470" height="84" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="720" y="292" fill="white" font-size="10" font-weight="600">current_position(items, now, anchor)</text>
+        <text x="720" y="312" fill="#94a3b8" font-size="9">elapsed = (now − anchor).rem_euclid(Σ duration_secs)</text>
+        <text x="720" y="330" fill="#94a3b8" font-size="9">walk items, accumulate duration → (index, offset)</text>
+        <text x="720" y="346" fill="#a78bfa" font-size="8">model::playlist_item::current_position</text>
+
+        <!-- consumer: guide -->
+        <rect x="150" y="368" width="480" height="80" rx="6" fill="#0f172a"/>
+        <rect x="150" y="368" width="480" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="170" y="392" fill="white" font-size="10" font-weight="600">guide/ · vod_schedule(window_start, window_end)</text>
+        <text x="170" y="412" fill="#94a3b8" font-size="9">projects N ProgramEntry blocks across the EPG window</text>
+        <text x="170" y="428" fill="#94a3b8" font-size="9">first entry clipped by offset · last clipped to window_end</text>
+        <text x="170" y="442" fill="#34d399" font-size="8">live → single live_entry · on-demand → on_demand_entry</text>
+
+        <!-- consumer: player -->
+        <rect x="690" y="368" width="480" height="80" rx="6" fill="#0f172a"/>
+        <rect x="690" y="368" width="480" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="710" y="392" fill="white" font-size="10" font-weight="600">player · tune_vod_at(now_secs)</text>
+        <text x="710" y="412" fill="#94a3b8" font-size="9">returns ONE item + seek offset for &lt;video&gt; src</text>
+        <text x="710" y="428" fill="#94a3b8" font-size="9">URL depends on now → tests assert url.contains(...)</text>
+        <text x="710" y="442" fill="#34d399" font-size="8">next_vod_at advances to the following item</text>
+      </svg>
+    </div>
+
+    <!-- ================= SECTION: LIVE → ENDED → VOD LIFECYCLE ================= -->
+    <div class="section-head">
+      <div class="bar"></div>
+      <h2>Live → Ended → VOD lifecycle</h2>
+    </div>
+    <p class="section-sub">A live broadcast resolves through a closed <code>LiveResolution</code> enum; when it ends, a detached task converts the channel into a looping VOD recording.</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1240 340">
+        <defs>
+          <marker id="ah3" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="ah3a" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" />
+          </marker>
+          <marker id="ah3v" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa" />
+          </marker>
+          <pattern id="grid3" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid3)" />
+
+        <text x="620" y="40" fill="white" font-size="11" font-weight="600" text-anchor="middle">resolver::resolve_live(src.url) → LiveResolution { Waiting | Playable | Ended }</text>
+
+        <!-- transition arrows (behind boxes) -->
+        <line x1="210" y1="155" x2="268" y2="155" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah3)"/>
+        <text x="239" y="148" fill="#94a3b8" font-size="8" text-anchor="middle">goes live</text>
+        <line x1="450" y1="155" x2="508" y2="155" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah3)"/>
+        <text x="479" y="148" fill="#94a3b8" font-size="8" text-anchor="middle">ends</text>
+        <line x1="690" y1="155" x2="748" y2="155" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ah3a)"/>
+        <text x="719" y="148" fill="#fbbf24" font-size="8" text-anchor="middle">tokio::spawn</text>
+        <line x1="960" y1="155" x2="1018" y2="155" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah3v)"/>
+        <text x="989" y="148" fill="#a78bfa" font-size="8" text-anchor="middle">atomic flip</text>
+
+        <!-- fallback self-loop on Playable -->
+        <path d="M310 110 C310 78 410 78 410 110" fill="none" stroke="#64748b" stroke-width="1.2" marker-end="url(#ah3)"/>
+        <text x="360" y="74" fill="#94a3b8" font-size="8" text-anchor="middle">next_live tries fallback sources</text>
+
+        <!-- branch: Ended → client -->
+        <line x1="600" y1="200" x2="600" y2="246" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#ah3)"/>
+
+        <!-- State: Waiting -->
+        <rect x="30" y="110" width="180" height="90" rx="6" fill="#0f172a"/>
+        <rect x="30" y="110" width="180" height="90" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="120" y="138" fill="white" font-size="12" font-weight="600" text-anchor="middle">Waiting</text>
+        <text x="120" y="158" fill="#94a3b8" font-size="8" text-anchor="middle">offline / upcoming</text>
+        <text x="120" y="174" fill="#94a3b8" font-size="8" text-anchor="middle">tune → 200, waiting</text>
+        <text x="120" y="190" fill="#94a3b8" font-size="8" text-anchor="middle">client retries later</text>
+
+        <!-- State: Playable -->
+        <rect x="270" y="110" width="180" height="90" rx="6" fill="#0f172a"/>
+        <rect x="270" y="110" width="180" height="90" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="360" y="138" fill="white" font-size="12" font-weight="600" text-anchor="middle">Playable { url }</text>
+        <text x="360" y="158" fill="#94a3b8" font-size="8" text-anchor="middle">live HLS via stream-proxy</text>
+        <text x="360" y="174" fill="#94a3b8" font-size="8" text-anchor="middle">tune → 200 { url }</text>
+        <text x="360" y="190" fill="#34d399" font-size="8" text-anchor="middle">skip_proxy=false</text>
+
+        <!-- State: Ended -->
+        <rect x="510" y="110" width="180" height="90" rx="6" fill="#0f172a"/>
+        <rect x="510" y="110" width="180" height="90" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="600" y="138" fill="white" font-size="12" font-weight="600" text-anchor="middle">Ended</text>
+        <text x="600" y="156" fill="#94a3b8" font-size="8" text-anchor="middle">live_status WasLive/PostLive</text>
+        <text x="600" y="170" fill="#94a3b8" font-size="8" text-anchor="middle">or url has force_finished/1</text>
+        <text x="600" y="190" fill="#fb7185" font-size="8" text-anchor="middle">classify_resolved()</text>
+
+        <!-- State: Conversion -->
+        <rect x="750" y="110" width="210" height="90" rx="6" fill="#0f172a"/>
+        <rect x="750" y="110" width="210" height="90" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="855" y="136" fill="white" font-size="10" font-weight="600" text-anchor="middle">broadcast::convert_if_ended</text>
+        <text x="855" y="154" fill="#94a3b8" font-size="8" text-anchor="middle">spawn_conversion (detached)</text>
+        <text x="855" y="168" fill="#94a3b8" font-size="8" text-anchor="middle">resolve recording (closure)</text>
+        <text x="855" y="184" fill="#fbbf24" font-size="8" text-anchor="middle">append item · deactivate sources</text>
+
+        <!-- State: vod_loop -->
+        <rect x="1020" y="110" width="190" height="90" rx="6" fill="#0f172a"/>
+        <rect x="1020" y="110" width="190" height="90" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="1115" y="138" fill="white" font-size="12" font-weight="600" text-anchor="middle">vod_loop</text>
+        <text x="1115" y="158" fill="#94a3b8" font-size="8" text-anchor="middle">loops the recording</text>
+        <text x="1115" y="174" fill="#94a3b8" font-size="8" text-anchor="middle">tune via tune_vod_at</text>
+        <text x="1115" y="190" fill="#a78bfa" font-size="8" text-anchor="middle">no migration needed</text>
+
+        <!-- client branch box -->
+        <rect x="470" y="246" width="260" height="56" rx="6" fill="#0f172a"/>
+        <rect x="470" y="246" width="260" height="56" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="600" y="270" fill="white" font-size="9" font-weight="600" text-anchor="middle">client: { ended: true, url: "" }</text>
+        <text x="600" y="288" fill="#94a3b8" font-size="8" text-anchor="middle">player auto-advances (calls /next)</text>
+
+        <!-- idempotency note -->
+        <text x="855" y="222" fill="#fbbf24" font-size="8" text-anchor="middle">resolve runs before the atomic flip = idempotency gate</text>
+      </svg>
+    </div>
+
+    <!-- ================= SECTION: VOD ON-DEMAND CHANNELS ================= -->
+    <div class="section-head">
+      <div class="bar"></div>
+      <h2>VOD On-Demand channels — viewer-driven playback</h2>
+    </div>
+    <p class="section-sub">A third channel type (migration 007). Unlike <code>vod_loop</code>, there is no clock and no <code>loop_anchor</code> — the viewer explicitly picks items, and playback always starts at offset 0.</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1240 500">
+        <defs>
+          <marker id="ah4" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="ah4c" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" />
+          </marker>
+          <pattern id="grid4" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid4)" />
+
+        <!-- comparison pills -->
+        <rect x="130" y="56" width="440" height="62" rx="8" fill="#0f172a"/>
+        <rect x="130" y="56" width="440" height="62" rx="8" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="350" y="82" fill="white" font-size="10" font-weight="600" text-anchor="middle">vod_loop — linear / clock-driven</text>
+        <text x="350" y="100" fill="#94a3b8" font-size="8" text-anchor="middle">loop_anchor set · position = current_position(now) · auto-advances</text>
+
+        <text x="620" y="92" fill="#475569" font-size="10" font-weight="600" text-anchor="middle">vs</text>
+
+        <rect x="670" y="56" width="460" height="62" rx="8" fill="#0f172a"/>
+        <rect x="670" y="56" width="460" height="62" rx="8" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="900" y="82" fill="white" font-size="10" font-weight="600" text-anchor="middle">vod_on_demand — viewer-driven</text>
+        <text x="900" y="100" fill="#94a3b8" font-size="8" text-anchor="middle">loop_anchor = None · viewer picks items · start_offset always 0</text>
+
+        <!-- arrows (behind boxes) -->
+        <line x1="190" y1="300" x2="256" y2="194" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah4)"/>
+        <line x1="190" y1="312" x2="256" y2="284" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah4)"/>
+        <line x1="190" y1="324" x2="256" y2="374" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah4)"/>
+        <line x1="530" y1="194" x2="598" y2="280" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah4)"/>
+        <line x1="530" y1="290" x2="598" y2="300" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah4)"/>
+        <line x1="530" y1="374" x2="598" y2="330" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah4)"/>
+        <text x="560" y="250" fill="#94a3b8" font-size="8" text-anchor="middle">list_active_for_channel</text>
+        <line x1="800" y1="305" x2="878" y2="305" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah4)"/>
+        <text x="839" y="298" fill="#94a3b8" font-size="8" text-anchor="middle">selected url</text>
+        <line x1="970" y1="340" x2="970" y2="368" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah4c)"/>
+
+        <!-- Web Player -->
+        <rect x="40" y="270" width="150" height="90" rx="6" fill="#0f172a"/>
+        <rect x="40" y="270" width="150" height="90" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="115" y="300" fill="white" font-size="11" font-weight="600" text-anchor="middle">Web Player</text>
+        <text x="115" y="320" fill="#94a3b8" font-size="8" text-anchor="middle">HTMX + &lt;video&gt;</text>
+        <text x="115" y="336" fill="#94a3b8" font-size="8" text-anchor="middle">renders pick list,</text>
+        <text x="115" y="350" fill="#94a3b8" font-size="8" text-anchor="middle">drives navigation</text>
+
+        <!-- Handler: tune -->
+        <rect x="260" y="162" width="270" height="64" rx="6" fill="#0f172a"/>
+        <rect x="260" y="162" width="270" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="275" y="184" fill="white" font-size="9" font-weight="600">GET /channel/:id/tune</text>
+        <text x="275" y="200" fill="#94a3b8" font-size="8">→ tune_vod_on_demand · plays items.first()</text>
+        <text x="275" y="216" fill="#34d399" font-size="8">/next also returns first item (no auto-advance)</text>
+
+        <!-- Handler: playlist -->
+        <rect x="260" y="252" width="270" height="64" rx="6" fill="#0f172a"/>
+        <rect x="260" y="252" width="270" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="275" y="274" fill="white" font-size="9" font-weight="600">GET /channel/:id/playlist</text>
+        <text x="275" y="290" fill="#94a3b8" font-size="8">→ Vec&lt;PlaylistEntry&gt; { id, title, duration }</text>
+        <text x="275" y="306" fill="#34d399" font-size="8">the viewer's pick list (no resolve)</text>
+
+        <!-- Handler: item -->
+        <rect x="260" y="342" width="270" height="64" rx="6" fill="#0f172a"/>
+        <rect x="260" y="342" width="270" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="275" y="364" fill="white" font-size="9" font-weight="600">GET /channel/:id/item/:item_id</text>
+        <text x="275" y="380" fill="#94a3b8" font-size="8">→ resolve the chosen item · offset 0</text>
+        <text x="275" y="396" fill="#34d399" font-size="8">422 if item_id not in active list</text>
+
+        <!-- playlist_items table -->
+        <rect x="600" y="250" width="200" height="110" rx="6" fill="#0f172a"/>
+        <rect x="600" y="250" width="200" height="110" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="700" y="278" fill="white" font-size="11" font-weight="600" text-anchor="middle">playlist_items</text>
+        <text x="700" y="298" fill="#94a3b8" font-size="8" text-anchor="middle">active · ordered by sort_order</text>
+        <text x="700" y="314" fill="#94a3b8" font-size="8" text-anchor="middle">first() = default item</text>
+        <text x="700" y="330" fill="#94a3b8" font-size="8" text-anchor="middle">no schedule · no anchor</text>
+        <text x="700" y="348" fill="#a78bfa" font-size="8" text-anchor="middle">shared with vod_loop / live recordings</text>
+
+        <!-- resolver -->
+        <rect x="880" y="270" width="180" height="70" rx="6" fill="#0f172a"/>
+        <rect x="880" y="270" width="180" height="70" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="970" y="294" fill="white" font-size="10" font-weight="600" text-anchor="middle">media/resolver</text>
+        <text x="970" y="312" fill="#94a3b8" font-size="8" text-anchor="middle">resolve_url(item.url)</text>
+        <text x="970" y="326" fill="#94a3b8" font-size="8" text-anchor="middle">should_skip_proxy</text>
+
+        <!-- TuneResponse -->
+        <rect x="880" y="368" width="180" height="76" rx="6" fill="#0f172a"/>
+        <rect x="880" y="368" width="180" height="76" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="970" y="390" fill="white" font-size="10" font-weight="600" text-anchor="middle">TuneResponse</text>
+        <text x="970" y="408" fill="#94a3b8" font-size="8" text-anchor="middle">url · skip_proxy</text>
+        <text x="970" y="422" fill="#94a3b8" font-size="8" text-anchor="middle">playlist_item_id</text>
+        <text x="970" y="436" fill="#22d3ee" font-size="8" text-anchor="middle">start_offset_secs = 0</text>
+
+        <!-- guide note -->
+        <rect x="40" y="392" width="190" height="86" rx="6" fill="#0f172a"/>
+        <rect x="40" y="392" width="190" height="86" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="135" y="416" fill="white" font-size="10" font-weight="600" text-anchor="middle">guide/ EPG</text>
+        <text x="135" y="434" fill="#94a3b8" font-size="8" text-anchor="middle">epg::on_demand_entry</text>
+        <text x="135" y="448" fill="#94a3b8" font-size="8" text-anchor="middle">one clickable block,</text>
+        <text x="135" y="462" fill="#94a3b8" font-size="8" text-anchor="middle">labelled "— On demand"</text>
+        <text x="135" y="474" fill="#94a3b8" font-size="7" text-anchor="middle">not live · no schedule projected</text>
+      </svg>
+    </div>
+
+    <p class="footer">
+      MyTV • Rust/Axum + SQLite + Askama/HTMX • single-user IPTV • kunstv.fly.dev
+    </p>
+  </div>
+
+  <script>
+    async function copyAsImage(btn) {
+      const orig = btn.textContent;
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        btn.textContent = '✓ Copied!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function downloadPNG(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const link = document.createElement('a');
+        link.download = 'mytv-architecture.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        btn.textContent = '✓ Done!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function downloadPDF(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
+        const pdf = new jsPDF({ orientation, unit: 'px', format: [canvas.width, canvas.height], hotfixes: ['px_scaling'] });
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save('mytv-architecture.pdf');
+        btn.textContent = '✓ Done!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+  </script>
+</body>
+</html>
