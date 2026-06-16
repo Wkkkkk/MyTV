@@ -192,6 +192,15 @@ pub async fn update_health(
     Ok(())
 }
 
+/// An on-demand/VOD playlist item is "dead" when its last health probe errored
+/// and it has failed at least `source::FAILURE_THRESHOLD` consecutive times.
+/// Unlike `source::is_observed_down`, there is no `youtube_live` exemption: a
+/// playlist item is never a live broadcast, so an errored item past threshold is
+/// always dead (a deleted R2 object never recovers on its own).
+pub fn is_dead(last_status: Option<&str>, consecutive_failures: i64) -> bool {
+    last_status == Some("error") && consecutive_failures >= crate::model::source::FAILURE_THRESHOLD
+}
+
 /// Raw, transport-decoded playlist-item fields awaiting validation.
 /// `duration_secs` and `sort_order` are already resolved by the adapter
 /// (the form auto-fetches duration and derives sort_order from the DB max).
@@ -689,5 +698,19 @@ mod tests {
         assert_eq!(upd.url, "https://x.example/e2.mp4");
         assert_eq!(upd.duration_secs, 600);
         assert_eq!(upd.sort_order, 2);
+    }
+
+    #[test]
+    fn test_is_dead_truth_table() {
+        let t = crate::model::source::FAILURE_THRESHOLD;
+        // ok / null status → never dead, even past threshold
+        assert!(!is_dead(Some("ok"), t + 5));
+        assert!(!is_dead(None, t + 5));
+        // errored but below threshold → not dead
+        assert!(!is_dead(Some("error"), t - 1));
+        // errored exactly at threshold → dead
+        assert!(is_dead(Some("error"), t));
+        // errored above threshold → dead
+        assert!(is_dead(Some("error"), t + 1));
     }
 }
