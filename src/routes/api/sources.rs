@@ -50,7 +50,7 @@ pub async fn create(
     let new = source::SourceInput {
         kind: req.kind,
         url: req.url,
-        priority: req.priority.unwrap_or(1),
+        priority: req.priority.unwrap_or(crate::model::DEFAULT_PRIORITY),
     }
     .validate_new(channel_id)?;
     let src = source::create(&state.pool, new).await.map_err(internal)?;

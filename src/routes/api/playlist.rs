@@ -54,7 +54,7 @@ pub async fn create(
         title: req.title,
         url: req.url,
         duration_secs: req.duration_secs,
-        sort_order: req.sort_order.unwrap_or(0),
+        sort_order: req.sort_order.unwrap_or(crate::model::DEFAULT_SORT_ORDER),
     }
     .validate_new(channel_id)?;
     let item = playlist_item::create(&state.pool, new)
