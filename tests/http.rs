@@ -859,6 +859,19 @@ async fn source_create_rejects_invalid_kind() {
 }
 
 #[tokio::test]
+async fn source_create_rejects_invalid_priority() {
+    let response = app()
+        .await
+        .oneshot(authed_form_post(
+            "/admin/channels/1/sources",
+            "kind=hls&url=https%3A%2F%2Fexample.com%2Ftest.m3u8&priority=abc",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn source_create_rejects_empty_url() {
     let response = app()
         .await
