@@ -68,19 +68,6 @@ pub struct ChannelForm {
     pub loop_anchor: String,
 }
 
-// ── helpers ────────────────────────────────────────────────────────────────
-
-fn parse_sort_order(s: &str) -> Result<i64, StatusCode> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        Ok(0)
-    } else {
-        trimmed
-            .parse()
-            .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)
-    }
-}
-
 // ── handlers ───────────────────────────────────────────────────────────────
 
 pub async fn admin_index() -> impl IntoResponse {
@@ -110,7 +97,8 @@ pub async fn channel_create(
     State(state): State<AppState>,
     Form(form): Form<ChannelForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let sort_order = parse_sort_order(&form.sort_order)?;
+    let sort_order = crate::model::coerce_i64(&form.sort_order, crate::model::DEFAULT_SORT_ORDER)
+        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
     let new = channel::ChannelInput {
         name: form.name,
         category: form.category,
@@ -163,7 +151,8 @@ pub async fn channel_update(
         .map_err(internal_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let sort_order = parse_sort_order(&form.sort_order)?;
+    let sort_order = crate::model::coerce_i64(&form.sort_order, crate::model::DEFAULT_SORT_ORDER)
+        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
     let upd = channel::ChannelInput {
         name: form.name,
         category: form.category,
