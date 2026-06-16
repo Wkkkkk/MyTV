@@ -18,6 +18,9 @@ pub struct PlaylistItem {
     pub last_status: Option<String>,
     pub consecutive_failures: i64,
     pub failure_reason: Option<String>,
+    /// Unix seconds when the item transitioned active→disabled; NULL while active.
+    /// Drives the stale-disabled reaper (see `health::reap_stale_disabled_items`).
+    pub disabled_at: Option<i64>,
 }
 
 /// Input for creating a new playlist item.
@@ -106,13 +109,22 @@ pub async fn list_active_for_channel(
 }
 
 /// Set the is_active flag on a playlist item; returns true if a row was updated.
+/// Maintains the reap clock invariant: disabling stamps `disabled_at` (preserving
+/// any existing stamp, so a re-disable never resets the clock); enabling clears it.
 pub async fn set_active(pool: &SqlitePool, id: i64, active: bool) -> Result<bool> {
-    let rows = sqlx::query("UPDATE playlist_items SET is_active = ? WHERE id = ?")
-        .bind(active)
-        .bind(id)
-        .execute(pool)
-        .await?
-        .rows_affected();
+    let rows = sqlx::query(
+        "UPDATE playlist_items
+         SET is_active = ?,
+             disabled_at = CASE WHEN ? THEN NULL
+                                ELSE COALESCE(disabled_at, strftime('%s','now')) END
+         WHERE id = ?",
+    )
+    .bind(active)
+    .bind(active)
+    .bind(id)
+    .execute(pool)
+    .await?
+    .rows_affected();
     Ok(rows > 0)
 }
 
@@ -157,18 +169,22 @@ pub async fn update_health(
     is_active: Option<bool>,
 ) -> Result<()> {
     if let Some(active) = is_active {
+        // Maintain the reap clock invariant alongside is_active (see `set_active`).
         sqlx::query(
             "UPDATE playlist_items
              SET last_checked_at = strftime('%s','now'),
                  last_status = ?,
                  failure_reason = ?,
                  consecutive_failures = ?,
-                 is_active = ?
+                 is_active = ?,
+                 disabled_at = CASE WHEN ? THEN NULL
+                                    ELSE COALESCE(disabled_at, strftime('%s','now')) END
              WHERE id = ?",
         )
         .bind(status)
         .bind(reason)
         .bind(consecutive_failures)
+        .bind(active)
         .bind(active)
         .bind(id)
         .execute(pool)
@@ -190,6 +206,28 @@ pub async fn update_health(
         .await?;
     }
     Ok(())
+}
+
+/// Hard-delete playlist items that have stayed disabled longer than
+/// `older_than_secs`, regardless of how they were disabled (auto via health, or a
+/// manual admin toggle). Returns the `(id, title)` of each reaped item so the
+/// caller can log what vanished. Active items (`disabled_at IS NULL`) and items
+/// disabled more recently are left untouched.
+pub async fn reap_stale_disabled(
+    pool: &SqlitePool,
+    older_than_secs: i64,
+) -> Result<Vec<(i64, String)>> {
+    sqlx::query_as::<_, (i64, String)>(
+        "DELETE FROM playlist_items
+         WHERE is_active = 0
+           AND disabled_at IS NOT NULL
+           AND disabled_at < strftime('%s','now') - ?
+         RETURNING id, title",
+    )
+    .bind(older_than_secs)
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
 }
 
 /// An on-demand/VOD playlist item is "dead" when its last health probe errored
@@ -393,6 +431,7 @@ mod tests {
                 last_status: None,
                 consecutive_failures: 0,
                 failure_reason: None,
+                disabled_at: None,
             },
             PlaylistItem {
                 id: 2,
@@ -406,6 +445,7 @@ mod tests {
                 last_status: None,
                 consecutive_failures: 0,
                 failure_reason: None,
+                disabled_at: None,
             },
         ];
         // 500 seconds into the loop — still in item A
@@ -429,6 +469,7 @@ mod tests {
                 last_status: None,
                 consecutive_failures: 0,
                 failure_reason: None,
+                disabled_at: None,
             },
             PlaylistItem {
                 id: 2,
@@ -442,6 +483,7 @@ mod tests {
                 last_status: None,
                 consecutive_failures: 0,
                 failure_reason: None,
+                disabled_at: None,
             },
         ];
         // 4000 seconds in — 400 seconds into item B (after A's 3600)
@@ -465,6 +507,7 @@ mod tests {
                 last_status: None,
                 consecutive_failures: 0,
                 failure_reason: None,
+                disabled_at: None,
             },
             PlaylistItem {
                 id: 2,
@@ -478,6 +521,7 @@ mod tests {
                 last_status: None,
                 consecutive_failures: 0,
                 failure_reason: None,
+                disabled_at: None,
             },
         ];
         // total = 5400; 5500 seconds in wraps to 100 seconds into item A
@@ -532,6 +576,54 @@ mod tests {
         let active = list_active_for_channel(&pool, ch.id).await.unwrap();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].title, "ep2");
+    }
+
+    #[tokio::test]
+    async fn set_active_stamps_and_clears_disabled_at() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let it = create(&pool, item(ch.id, "ep1", 1800, 0)).await.unwrap();
+        assert!(
+            it.disabled_at.is_none(),
+            "active item starts with NULL clock"
+        );
+
+        set_active(&pool, it.id, false).await.unwrap();
+        let disabled = get(&pool, it.id).await.unwrap().unwrap();
+        assert!(
+            disabled.disabled_at.is_some(),
+            "disabling stamps disabled_at"
+        );
+
+        set_active(&pool, it.id, true).await.unwrap();
+        let reenabled = get(&pool, it.id).await.unwrap().unwrap();
+        assert!(
+            reenabled.disabled_at.is_none(),
+            "re-enabling clears the clock"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_active_false_preserves_original_disabled_at() {
+        // Re-disabling an already-disabled item must NOT reset the clock — otherwise
+        // a repeatedly-failing item's reap clock would never elapse.
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let it = create(&pool, item(ch.id, "ep1", 1800, 0)).await.unwrap();
+
+        set_active(&pool, it.id, false).await.unwrap();
+        let first = get(&pool, it.id).await.unwrap().unwrap().disabled_at;
+        // Backdate so a re-stamp (if it wrongly happened) would be observably different.
+        sqlx::query("UPDATE playlist_items SET disabled_at = 1000 WHERE id = ?")
+            .bind(it.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(first.is_some());
+
+        set_active(&pool, it.id, false).await.unwrap();
+        let second = get(&pool, it.id).await.unwrap().unwrap().disabled_at;
+        assert_eq!(second, Some(1000), "re-disable must preserve the clock");
     }
 
     #[tokio::test]
@@ -599,6 +691,70 @@ mod tests {
         assert_eq!(
             updated.failure_reason.as_deref(),
             Some("connection refused")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_health_maintains_disabled_at_clock() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let it = create(&pool, item(ch.id, "ep1", 1800, 0)).await.unwrap();
+
+        // is_active = None must NOT touch the clock.
+        update_health(&pool, it.id, "error", Some("timeout"), 1, None)
+            .await
+            .unwrap();
+        assert!(
+            get(&pool, it.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .disabled_at
+                .is_none(),
+            "a health update that doesn't disable must leave the clock NULL"
+        );
+
+        // Disabling via the health path stamps the clock.
+        update_health(&pool, it.id, "error", Some("dead"), 3, Some(false))
+            .await
+            .unwrap();
+        assert!(
+            get(&pool, it.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .disabled_at
+                .is_some(),
+            "disabling via update_health stamps disabled_at"
+        );
+
+        // Re-disable must preserve the original stamp.
+        sqlx::query("UPDATE playlist_items SET disabled_at = 1000 WHERE id = ?")
+            .bind(it.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        update_health(&pool, it.id, "error", Some("dead"), 4, Some(false))
+            .await
+            .unwrap();
+        assert_eq!(
+            get(&pool, it.id).await.unwrap().unwrap().disabled_at,
+            Some(1000),
+            "repeated disable must not reset the clock"
+        );
+
+        // Re-enabling clears the clock.
+        update_health(&pool, it.id, "ok", None, 0, Some(true))
+            .await
+            .unwrap();
+        assert!(
+            get(&pool, it.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .disabled_at
+                .is_none(),
+            "re-enabling clears the clock"
         );
     }
 
@@ -727,6 +883,48 @@ mod tests {
         assert_eq!(upd.url, "https://x.example/e2.mp4");
         assert_eq!(upd.duration_secs, 600);
         assert_eq!(upd.sort_order, 2);
+    }
+
+    #[tokio::test]
+    async fn reap_stale_disabled_deletes_only_long_disabled_items() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let ttl = 3 * 86_400;
+
+        let active = create(&pool, item(ch.id, "active", 60, 0)).await.unwrap();
+        let fresh = create(&pool, item(ch.id, "fresh", 60, 1)).await.unwrap();
+        let stale = create(&pool, item(ch.id, "stale", 60, 2)).await.unwrap();
+
+        // `fresh` disabled just now; `stale` disabled 4 days ago.
+        set_active(&pool, fresh.id, false).await.unwrap();
+        set_active(&pool, stale.id, false).await.unwrap();
+        sqlx::query(
+            "UPDATE playlist_items SET disabled_at = strftime('%s','now') - ? WHERE id = ?",
+        )
+        .bind(4 * 86_400)
+        .bind(stale.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let reaped = reap_stale_disabled(&pool, ttl).await.unwrap();
+
+        assert_eq!(reaped, vec![(stale.id, "stale".to_string())]);
+        assert!(get(&pool, stale.id).await.unwrap().is_none(), "stale gone");
+        assert!(get(&pool, fresh.id).await.unwrap().is_some(), "fresh kept");
+        assert!(
+            get(&pool, active.id).await.unwrap().is_some(),
+            "active kept"
+        );
+    }
+
+    #[tokio::test]
+    async fn reap_stale_disabled_noop_when_nothing_stale() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        create(&pool, item(ch.id, "a", 60, 0)).await.unwrap();
+        let reaped = reap_stale_disabled(&pool, 3 * 86_400).await.unwrap();
+        assert!(reaped.is_empty());
     }
 
     #[test]

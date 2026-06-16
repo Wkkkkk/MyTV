@@ -100,6 +100,7 @@ mod tests {
             last_status: None,
             consecutive_failures: 0,
             failure_reason: None,
+            disabled_at: None,
         }
     }
 

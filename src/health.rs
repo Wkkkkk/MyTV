@@ -11,6 +11,11 @@ use crate::LiveStatusCache;
 const CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How long a playlist item may stay disabled before the reaper hard-deletes it.
+/// Not env-configurable (matches `source::FAILURE_THRESHOLD`); 3 days gives a
+/// generous window for a transient outage to recover or an admin to intervene.
+const STALE_DISABLED_TTL_SECS: i64 = 3 * 86_400;
+
 /// Dependencies for the background health checker.
 pub struct HealthClients {
     pub pool: SqlitePool,
@@ -77,6 +82,25 @@ async fn check_all(
                 probe_and_cache_cors(client, cors_cache, &item.url).await;
             }
         }
+    }
+
+    reap_stale_disabled_items(pool).await;
+}
+
+/// One pass of the stale-disabled-item garbage collector. Hard-deletes playlist
+/// items disabled longer than `STALE_DISABLED_TTL_SECS` and logs what vanished.
+/// A DB error is logged and swallowed so the health loop never crashes on it.
+async fn reap_stale_disabled_items(pool: &SqlitePool) {
+    match crate::model::playlist_item::reap_stale_disabled(pool, STALE_DISABLED_TTL_SECS).await {
+        Ok(reaped) if !reaped.is_empty() => {
+            tracing::info!(
+                count = reaped.len(),
+                items = ?reaped,
+                "health: reaped stale disabled playlist items"
+            );
+        }
+        Ok(_) => {}
+        Err(e) => tracing::error!("health: failed to reap stale disabled items: {e}"),
     }
 }
 
@@ -771,6 +795,105 @@ mod tests {
             cors_cache.read().await.get(&host).copied(),
             Some(true),
             "needs-resolution VOD item host must be marked Direct"
+        );
+    }
+
+    #[tokio::test]
+    async fn check_all_reaps_long_disabled_items() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Server answers both items' health probes with 200.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            for _ in 0..2u8 {
+                let (mut conn, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 512];
+                let _ = conn.read(&mut buf).await;
+                conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let pool = crate::db::connect("sqlite::memory:").await.unwrap();
+        let ch = crate::model::channel::create(
+            &pool,
+            crate::model::channel::NewChannel {
+                name: "vod".to_string(),
+                category: "test".to_string(),
+                logo_url: None,
+                channel_type: crate::model::channel::ChannelType::VodLoop,
+                sort_order: 0,
+                loop_anchor: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let keep = crate::model::playlist_item::create(
+            &pool,
+            crate::model::playlist_item::NewPlaylistItem {
+                channel_id: ch.id,
+                title: "keep".to_string(),
+                url: format!("http://127.0.0.1:{}/keep.mp4", port),
+                duration_secs: 3600,
+                sort_order: 0,
+            },
+        )
+        .await
+        .unwrap();
+
+        let reap = crate::model::playlist_item::create(
+            &pool,
+            crate::model::playlist_item::NewPlaylistItem {
+                channel_id: ch.id,
+                title: "reap".to_string(),
+                url: format!("http://127.0.0.1:{}/reap.mp4", port),
+                duration_secs: 3600,
+                sort_order: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        // `reap` disabled 4 days ago — past the 3-day TTL.
+        crate::model::playlist_item::set_active(&pool, reap.id, false)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE playlist_items SET disabled_at = strftime('%s','now') - ? WHERE id = ?",
+        )
+        .bind(4 * 86_400)
+        .bind(reap.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let cors_cache: crate::CorsCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let live_cache: LiveStatusCache =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap();
+
+        check_all(&pool, &client, &cors_cache, &live_cache).await;
+
+        assert!(
+            crate::model::playlist_item::get(&pool, reap.id)
+                .await
+                .unwrap()
+                .is_none(),
+            "a long-disabled item must be reaped by the tick"
+        );
+        assert!(
+            crate::model::playlist_item::get(&pool, keep.id)
+                .await
+                .unwrap()
+                .is_some(),
+            "an active item must survive the reaper"
         );
     }
 

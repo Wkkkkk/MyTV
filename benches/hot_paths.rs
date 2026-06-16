@@ -17,6 +17,7 @@ fn bench_vod_schedule(c: &mut Criterion) {
             last_status: None,
             consecutive_failures: 0,
             failure_reason: None,
+            disabled_at: None,
         })
         .collect();
     let start = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
