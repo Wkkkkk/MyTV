@@ -426,9 +426,9 @@
       // failed (to play or to resolve). Forward-only: if nothing follows, show
       // the error overlay. Never wraps, so an all-dead playlist terminates.
       function odSkipFrom(failedIndex) {
-        var failed = odItems[failedIndex];
-        if (failed) showToast(failed.title + ' unavailable — skipping…');
         if (failedIndex + 1 < odItems.length) {
+          var failed = odItems[failedIndex];
+          if (failed) showToast(failed.title + ' unavailable — skipping…');
           odPlayIndex(failedIndex + 1, 0);
         } else {
           showPlayerError();
