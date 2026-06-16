@@ -571,7 +571,7 @@
           });
       }
 
-      function odTune(channelId) {
+      function odTune(channelId, startItemId) {
         odChannelId = channelId;
         odItems = [];
         odIndex = -1;
@@ -583,11 +583,17 @@
           .then(function(items) {
             odItems = items || [];
             if (!odItems.length) { showPlayerError(); return; }
-            var cursor = odLoadCursor(channelId);
             var start = 0, offset = 0;
-            if (cursor) {
+            if (startItemId != null) {
               for (var i = 0; i < odItems.length; i++) {
-                if (odItems[i].id === cursor.itemId) { start = i; offset = cursor.offset || 0; break; }
+                if (odItems[i].id === startItemId) { start = i; offset = 0; break; }
+              }
+            } else {
+              var cursor = odLoadCursor(channelId);
+              if (cursor) {
+                for (var i = 0; i < odItems.length; i++) {
+                  if (odItems[i].id === cursor.itemId) { start = i; offset = cursor.offset || 0; break; }
+                }
               }
             }
             odRenderList();
@@ -610,12 +616,12 @@
         return null;
       }
 
-      function tune(channelId) {
+      function tune(channelId, itemId) {
         currentChannelId = channelId;
         currentUrl = null;
         if (odChannelType(channelId) === 'vod_on_demand') {
           hidePlayerError();
-          odTune(channelId);
+          odTune(channelId, itemId);
           return;
         }
         var plBtn = document.getElementById('ov-playlist');

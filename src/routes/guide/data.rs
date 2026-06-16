@@ -14,7 +14,8 @@ use super::badges::{
     budget_for_url, category_icon, derive_channel_status, vod_budget_url, SourceFacts,
 };
 use super::layout::{
-    compute_window, entry_to_slot, now_line_pct, time_labels, ProgramSlot, TimeLabel,
+    compute_window, entry_to_slot, now_line_pct, on_demand_slots, time_labels, ProgramSlot,
+    TimeLabel, ON_DEMAND_ITEM_WIDTH_PCT,
 };
 
 pub(super) struct ChannelRow {
@@ -93,13 +94,25 @@ pub(super) async fn build_guide_data(
 
     let mut rows = Vec::new();
     for ch in &channels {
-        let (entries, budget_url) = match ch.channel_type() {
+        let to_slots = |entries: Vec<epg::ProgramEntry>| -> Vec<ProgramSlot> {
+            entries
+                .iter()
+                .filter_map(|e| entry_to_slot(e, window_start, window_end))
+                .collect()
+        };
+
+        let (programs, budget_url): (Vec<ProgramSlot>, Option<String>) = match ch.channel_type() {
             ChannelType::Live => {
                 let first_active_url = sources_by_channel
                     .get(&ch.id)
                     .and_then(|v| v.iter().find(|s| s.is_active).map(|s| s.url.clone()));
                 (
-                    vec![epg::live_entry(ch.id, &ch.name, window_start, window_end)],
+                    to_slots(vec![epg::live_entry(
+                        ch.id,
+                        &ch.name,
+                        window_start,
+                        window_end,
+                    )]),
                     first_active_url,
                 )
             }
@@ -116,29 +129,15 @@ pub(super) async fn build_guide_data(
                     None => vec![],
                 };
                 let budget_url = vod_budget_url(&items, ch.loop_anchor, now);
-                (entries, budget_url)
+                (to_slots(entries), budget_url)
             }
             ChannelType::VodOnDemand => {
-                // On-demand channels have no schedule, but the guide still needs
-                // one clickable block so the viewer can tune in (items are then
-                // navigated in the player's playlist).
                 let items = all_playlist_items.get(&ch.id).cloned().unwrap_or_default();
                 let budget_url = vod_budget_url(&items, None, now);
-                (
-                    vec![epg::on_demand_entry(
-                        ch.id,
-                        &ch.name,
-                        window_start,
-                        window_end,
-                    )],
-                    budget_url,
-                )
+                let programs = on_demand_slots(ch.id, &ch.name, &items, ON_DEMAND_ITEM_WIDTH_PCT);
+                (programs, budget_url)
             }
         };
-        let programs: Vec<ProgramSlot> = entries
-            .iter()
-            .filter_map(|e| entry_to_slot(e, window_start, window_end))
-            .collect();
         let empty: Vec<source::Source> = Vec::new();
         let chan_sources = sources_by_channel.get(&ch.id).unwrap_or(&empty);
         let facts: Vec<SourceFacts> = chan_sources
