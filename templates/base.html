@@ -762,6 +762,38 @@
 
       window.tune = tune;
 
+      // ── custom transport (idea #51) ───────────────────────────
+      function togglePlay() {
+        if (!video) return;
+        if (video.paused) { video.play().catch(function(){}); }
+        else { video.pause(); }
+      }
+
+      function syncPlayPauseIcon() {
+        var pp = document.getElementById('ov-playpause');
+        var cp = document.getElementById('ov-center-play');
+        var paused = !video || video.paused;
+        if (pp) pp.textContent = paused ? '▶' : '⏸';
+        if (cp) cp.textContent = paused ? '▶' : '⏸';
+      }
+
+      function closePlayer() {
+        stopPlayback();
+        var p = document.getElementById('player-panel');
+        if (p) p.style.display = 'none';
+        var pl = document.getElementById('player-playlist');
+        if (pl) pl.hidden = true;
+        currentChannelId = null;
+        odChannelId = null; odItems = []; odIndex = -1;
+      }
+
+      function toggleFullscreen() {
+        var p = document.getElementById('player-panel');
+        if (!p) return;
+        if (document.fullscreenElement) { document.exitFullscreen(); }
+        else { p.requestFullscreen().catch(function(){}); }
+      }
+
       // ── player overlay toolbar (#32) ──────────────────────────
       var panel = document.getElementById('player-panel');
       var helpBox = document.getElementById('player-help');
@@ -780,34 +812,30 @@
         panel.addEventListener('touchstart', showControls, {passive: true});
         panel.addEventListener('focusin', showControls);
       }
-      var ovPrev = document.getElementById('ov-prev');
-      var ovNext = document.getElementById('ov-next');
       var ovClose = document.getElementById('ov-close');
       var ovHelp = document.getElementById('ov-help');
-      if (ovPrev) ovPrev.addEventListener('click', function() {
-        var id = nextChannelId('up'); if (id) tune(id);
-      });
-      if (ovNext) ovNext.addEventListener('click', function() {
-        var id = nextChannelId('down'); if (id) tune(id);
-      });
-      if (ovClose) ovClose.addEventListener('click', function() {
-        stopPlayback();
-        if (panel) panel.style.display = 'none';
-        if (plBox) plBox.hidden = true;
-        currentChannelId = null;
-        odChannelId = null; odItems = []; odIndex = -1;
-      });
+      var ovPlayPause = document.getElementById('ov-playpause');
+      var ovCenterPlay = document.getElementById('ov-center-play');
+      var ovFull = document.getElementById('ov-fullscreen');
+      if (ovClose) ovClose.addEventListener('click', closePlayer);
       if (ovHelp) ovHelp.addEventListener('click', function() {
         if (helpBox) helpBox.hidden = !helpBox.hidden;
       });
+      if (ovPlayPause) ovPlayPause.addEventListener('click', togglePlay);
+      if (ovCenterPlay) ovCenterPlay.addEventListener('click', togglePlay);
+      if (ovFull) ovFull.addEventListener('click', toggleFullscreen);
+
       var ovPlaylist = document.getElementById('ov-playlist');
       var plBox = document.getElementById('player-playlist');
       if (ovPlaylist) ovPlaylist.addEventListener('click', function() {
-        // Only toggle a panel that belongs to the channel currently playing —
-        // never reveal a stale list left over from a previous on-demand channel.
         if (!plBox || odChannelId !== currentChannelId || !odItems.length) return;
         plBox.hidden = !plBox.hidden;
       });
+
+      if (video) {
+        video.addEventListener('play', syncPlayPauseIcon);
+        video.addEventListener('pause', syncPlayPauseIcon);
+      }
 
       // ── buffering overlay (#33) ───────────────────────────────
       function showBuffering() {
