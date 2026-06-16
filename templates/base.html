@@ -277,6 +277,7 @@
         }
 
         bar.style.display = 'flex';
+        updateTransport(channel);
       }
 
       if (video && Hls.isSupported()) {
@@ -797,6 +798,26 @@
         else { p.requestFullscreen().catch(function(){}); }
       }
 
+      function fmtTime(secs) {
+        if (!isFinite(secs) || secs < 0) secs = 0;
+        secs = Math.floor(secs);
+        var m = Math.floor(secs / 60), s = secs % 60;
+        return m + ':' + (s < 10 ? '0' : '') + s;
+      }
+
+      // Show/hide transport pieces for the current channel type.
+      // Called from renderInfoBar so it always matches the playing channel.
+      function updateTransport(channel) {
+        var seekable = channel && (channel.channel_type === 'vod_loop'
+                                || channel.channel_type === 'vod_on_demand');
+        var seek = document.getElementById('ov-seek');
+        var time = document.getElementById('ov-time');
+        if (seek) seek.style.display = seekable ? '' : 'none';
+        if (time) time.style.display = seekable ? '' : 'none';
+        // ⏮/⏭ stay visible for all types: they call navigate() (prev/next in
+        // the continuous feed — item on on-demand, channel otherwise).
+      }
+
       // ── player overlay toolbar (#32) ──────────────────────────
       var panel = document.getElementById('player-panel');
       var helpBox = document.getElementById('player-help');
@@ -839,6 +860,29 @@
         video.addEventListener('play', syncPlayPauseIcon);
         video.addEventListener('pause', syncPlayPauseIcon);
         syncPlayPauseIcon();
+        var seekBar = document.getElementById('ov-seek');
+        var timeEl = document.getElementById('ov-time');
+        var dragging = false;
+        video.addEventListener('timeupdate', function() {
+          if (dragging || !seekBar) return;
+          var d = video.duration;
+          if (isFinite(d) && d > 0) seekBar.value = Math.round(video.currentTime / d * 1000);
+          if (timeEl) timeEl.textContent = fmtTime(video.currentTime) + ' / ' + fmtTime(d);
+        });
+        if (seekBar) {
+          seekBar.addEventListener('input', function() {
+            dragging = true;
+            var d = video.duration;
+            if (isFinite(d) && d > 0 && timeEl) {
+              timeEl.textContent = fmtTime(seekBar.value / 1000 * d) + ' / ' + fmtTime(d);
+            }
+          });
+          seekBar.addEventListener('change', function() {
+            var d = video.duration;
+            if (isFinite(d) && d > 0) video.currentTime = seekBar.value / 1000 * d;
+            dragging = false;
+          });
+        }
       }
 
       // ── buffering overlay (#33) ───────────────────────────────
