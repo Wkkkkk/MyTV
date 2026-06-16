@@ -10,8 +10,6 @@ use crate::LiveStatusCache;
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(test)]
-const FAILURE_THRESHOLD: i64 = 3;
 
 /// Dependencies for the background health checker.
 pub struct HealthClients {
@@ -366,6 +364,7 @@ fn process_failures(consecutive_failures: i64, ok: bool) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::source::FAILURE_THRESHOLD;
 
     #[test]
     fn test_live_status_health_mapping() {
