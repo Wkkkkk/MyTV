@@ -201,6 +201,33 @@ pub fn is_dead(last_status: Option<&str>, consecutive_failures: i64) -> bool {
     last_status == Some("error") && consecutive_failures >= crate::model::source::FAILURE_THRESHOLD
 }
 
+/// Records one health-probe result against an item and applies the auto-disable
+/// rule. This is the single owner of the disable decision: both the background
+/// health loop and the interactive tune path call it, so the rule lives in one
+/// place even with two writers.
+///
+/// - `ok == true` resets failures (status "ok"); never re-enables — re-enabling
+///   a disabled item is a manual admin action.
+/// - `ok == false` counts a failure (status "error"); disables once `is_dead`.
+///
+/// Returns `ok` for the caller's convenience.
+pub async fn apply_health_result(
+    pool: &SqlitePool,
+    item: &PlaylistItem,
+    ok: bool,
+    reason: Option<&str>,
+) -> Result<bool> {
+    let new_failures = if ok { 0 } else { item.consecutive_failures + 1 };
+    let status = if ok { "ok" } else { "error" };
+    let is_active = if is_dead(Some(status), new_failures) {
+        Some(false)
+    } else {
+        None
+    };
+    update_health(pool, item.id, status, reason, new_failures, is_active).await?;
+    Ok(ok)
+}
+
 /// Raw, transport-decoded playlist-item fields awaiting validation.
 /// `duration_secs` and `sort_order` are already resolved by the adapter
 /// (the form auto-fetches duration and derives sort_order from the DB max).
@@ -712,5 +739,62 @@ mod tests {
         assert!(is_dead(Some("error"), t));
         // errored above threshold → dead
         assert!(is_dead(Some("error"), t + 1));
+    }
+
+    #[tokio::test]
+    async fn apply_health_result_disables_only_at_threshold() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let it = create(&pool, item(ch.id, "dead", 60, 0)).await.unwrap();
+
+        // Fail up to (threshold - 1): stays active.
+        let mut cur = it.clone();
+        for _ in 0..(crate::model::source::FAILURE_THRESHOLD - 1) {
+            apply_health_result(&pool, &cur, false, Some("HTTP 404"))
+                .await
+                .unwrap();
+            cur = get(&pool, it.id).await.unwrap().unwrap();
+            assert!(cur.is_active, "must stay active below threshold");
+        }
+
+        // The failure that reaches threshold disables it.
+        apply_health_result(&pool, &cur, false, Some("HTTP 404"))
+            .await
+            .unwrap();
+        let after = get(&pool, it.id).await.unwrap().unwrap();
+        assert!(!after.is_active, "must be disabled at threshold");
+        assert_eq!(after.last_status.as_deref(), Some("error"));
+        assert_eq!(after.failure_reason.as_deref(), Some("HTTP 404"));
+
+        // A disabled item is gone from the active list → skipped on playback.
+        let active = list_active_for_channel(&pool, ch.id).await.unwrap();
+        assert!(active.iter().all(|i| i.id != it.id));
+    }
+
+    #[tokio::test]
+    async fn apply_health_result_recovery_resets_failures_but_not_active() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let it = create(&pool, item(ch.id, "recovers", 60, 0)).await.unwrap();
+
+        // Drive it dead.
+        let mut cur = it.clone();
+        for _ in 0..crate::model::source::FAILURE_THRESHOLD {
+            apply_health_result(&pool, &cur, false, Some("HTTP 404"))
+                .await
+                .unwrap();
+            cur = get(&pool, it.id).await.unwrap().unwrap();
+        }
+        assert!(!cur.is_active);
+
+        // A later OK probe resets failures/status but does NOT auto-re-enable.
+        apply_health_result(&pool, &cur, true, None).await.unwrap();
+        let after = get(&pool, it.id).await.unwrap().unwrap();
+        assert_eq!(after.consecutive_failures, 0);
+        assert_eq!(after.last_status.as_deref(), Some("ok"));
+        assert!(
+            !after.is_active,
+            "recovery never re-enables; admin does that"
+        );
     }
 }
