@@ -28,3 +28,9 @@ VALUES (4, 'YT Episode', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 212, 3, 
 INSERT INTO playlist_items (channel_id, title, url, duration_secs, sort_order) VALUES
   (6, '点播 First',  'https://vod.example.com/od1.mp4', 120, 1),
   (6, 'On-Demand 2', 'https://vod.example.com/od2.mp4', 300, 2);
+
+-- Auto-disabled on-demand item (idea #53): dead R2 object, past FAILURE_THRESHOLD.
+INSERT INTO playlist_items
+  (channel_id, title, url, duration_secs, sort_order, is_active, last_status, consecutive_failures, failure_reason)
+VALUES
+  (6, 'Dead Item', 'https://vod.example.com/gone.mp4', 90, 3, 0, 'error', 3, 'HTTP 404');

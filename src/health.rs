@@ -141,25 +141,15 @@ async fn check_playlist_item(
     item: &crate::model::playlist_item::PlaylistItem,
 ) -> bool {
     let kind = crate::model::source::SourceKind::detect(&item.url);
-    run_check(
-        client,
-        &item.url,
-        kind.as_str(),
-        item.consecutive_failures,
-        None,
-        |status, reason, failures| async move {
-            crate::model::playlist_item::update_health(
-                pool,
-                item.id,
-                status,
-                reason.as_deref(),
-                failures,
-                None,
-            )
-            .await
-        },
-    )
-    .await
+    let (ok, reason) = do_http_check(client, &item.url, kind.as_str(), None).await;
+    match crate::model::playlist_item::apply_health_result(pool, item, ok, reason.as_deref()).await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("health: failed to update {}: {e}", item.url);
+            false
+        }
+    }
 }
 
 /// A health-probe target: a live/VOD source row, or a playlist item. `probe`

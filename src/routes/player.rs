@@ -110,6 +110,9 @@ pub async fn item(
         )),
         Err(e) => {
             tracing::warn!(url = %item.url, error = %e, "resolver failed for vod item");
+            let _ =
+                playlist_item::apply_health_result(&state.pool, item, false, Some(&e.to_string()))
+                    .await;
             Err(StatusCode::SERVICE_UNAVAILABLE)
         }
     }

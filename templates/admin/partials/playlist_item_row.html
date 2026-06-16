@@ -9,6 +9,8 @@
     {% when Some(reason) %}
     {% if item.is_active %}
     <div style="font-size:0.7rem;color:#e94560;margin-top:2px">{{ reason }}</div>
+    {% else %}
+    <div style="font-size:0.7rem;color:#e94560;margin-top:2px">auto-disabled — {{ reason }}</div>
     {% endif %}
     {% when None %}
     {% endmatch %}
