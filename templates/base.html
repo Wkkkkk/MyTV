@@ -785,6 +785,9 @@
         if (pl) pl.hidden = true;
         currentChannelId = null;
         odChannelId = null; odItems = []; odIndex = -1;
+        // Neutralize any pending retry/advance timers so a late ended-advance
+        // or waiting-retry can't re-open the player after it's been closed.
+        endedAdvanceGen++; waitingGen++;
       }
 
       function toggleFullscreen() {
@@ -835,6 +838,7 @@
       if (video) {
         video.addEventListener('play', syncPlayPauseIcon);
         video.addEventListener('pause', syncPlayPauseIcon);
+        syncPlayPauseIcon();
       }
 
       // ── buffering overlay (#33) ───────────────────────────────
