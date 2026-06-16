@@ -40,6 +40,9 @@ pub struct PlaylistEntry {
     pub id: i64,
     pub title: String,
     pub duration_secs: i64,
+    /// False for disabled items — the ☰ panel renders them dimmed and
+    /// non-clickable instead of hiding them (and playback skips them).
+    pub available: bool,
 }
 
 pub async fn tune(
@@ -127,7 +130,7 @@ pub async fn playlist(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let items = playlist_item::list_active_for_channel(&state.pool, channel_id)
+    let items = playlist_item::list_for_channel(&state.pool, channel_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -138,6 +141,7 @@ pub async fn playlist(
                 id: i.id,
                 title: i.title,
                 duration_secs: i.duration_secs,
+                available: i.is_active,
             })
             .collect(),
     ))

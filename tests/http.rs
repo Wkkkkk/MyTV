@@ -1593,6 +1593,34 @@ async fn test_playlist_returns_items_in_order() {
 }
 
 #[tokio::test]
+async fn test_playlist_includes_disabled_items_flagged_unavailable() {
+    // The ☰ panel marks unavailable items instead of hiding them, so the endpoint
+    // must return disabled items too, each carrying an `available` flag. Channel 6
+    // (seed) has two active items plus the auto-disabled "Dead Item".
+    let response = app()
+        .await
+        .oneshot(req("/channel/6/playlist"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().expect("array");
+    assert_eq!(items.len(), 3, "active + disabled items are all returned");
+
+    let dead = items
+        .iter()
+        .find(|i| i["title"] == "Dead Item")
+        .expect("disabled item is present");
+    assert_eq!(dead["available"], serde_json::json!(false));
+
+    let active = items
+        .iter()
+        .find(|i| i["title"] == "On-Demand 2")
+        .expect("active item is present");
+    assert_eq!(active["available"], serde_json::json!(true));
+}
+
+#[tokio::test]
 async fn test_playlist_empty_for_channel_without_items() {
     // channel 5 is a vod_loop channel with no playlist items
     let response = app()

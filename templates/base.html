@@ -61,6 +61,9 @@
     .pl-title{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .pl-dur{flex:0 0 auto;font-variant-numeric:tabular-nums;color:var(--text-muted)}
     .pl-row.current .pl-dur{color:#fff}
+    .pl-row.unavailable{opacity:0.4;cursor:default}
+    .pl-row.unavailable:hover{background:transparent}
+    .pl-row.unavailable .pl-mark{color:var(--text-dim)}
     #player-buffering{display:none;position:absolute;top:0;left:0;right:0;bottom:0;z-index:5;
       align-items:center;justify-content:center;gap:10px;
       background:#000;color:#fff;font-size:0.95rem}
@@ -364,6 +367,7 @@
           if (hls) { hls.stopLoad(); hls.detachMedia(); }
           if (dash) { dash.reset(); dash = null; }
           video.onerror = function() {
+            if (typeof debugLog === 'function') debugLog('warn', 'video error (direct): code ' + (video.error ? video.error.code : '?'));
             // On-demand: a failed item must not fall back to /next (which would
             // jump to item 1). Show the error and leave the playlist for the viewer.
             if (odChannelId === currentChannelId) { odSkipFrom(odIndex); return; }
@@ -426,11 +430,16 @@
       // failed (to play or to resolve). Forward-only: if nothing follows, show
       // the error overlay. Never wraps, so an all-dead playlist terminates.
       function odSkipFrom(failedIndex) {
-        if (failedIndex + 1 < odItems.length) {
-          var failed = odItems[failedIndex];
+        var next = odNextAvailable(failedIndex + 1);
+        var failed = odItems[failedIndex];
+        if (next >= 0) {
           if (failed) showToast(failed.title + ' unavailable — skipping…');
-          odPlayIndex(failedIndex + 1, 0);
+          if (typeof debugLog === 'function') {
+            debugLog('warn', 'skip item ' + (failed ? failed.title : failedIndex) + ' → ' + odItems[next].title);
+          }
+          odPlayIndex(next, 0);
         } else {
+          if (typeof debugLog === 'function') debugLog('warn', 'no playable item after ' + failedIndex);
           showPlayerError();
         }
       }
@@ -458,6 +467,7 @@
           showPlayerError();
           return;
         }
+        if (typeof debugLog === 'function') debugLog('info', 'broadcast ended — advancing channel');
         var notice = document.getElementById('player-ended');
         if (notice) notice.style.display = 'block';
         var nextId = nextChannelId('down');
@@ -541,18 +551,29 @@
         return m + ':' + (s < 10 ? '0' : '') + s;
       }
 
+      // Disabled items carry available=false; treat a missing flag as available
+      // for backward-compat with any cached/older response shape.
+      function odAvailable(it) { return !it || it.available !== false; }
+
+      // First playable index at or after `from`, or -1 if none remain.
+      function odNextAvailable(from) {
+        for (var i = Math.max(0, from); i < odItems.length; i++) {
+          if (odAvailable(odItems[i])) return i;
+        }
+        return -1;
+      }
+
       function odRenderList() {
         var box = document.getElementById('player-playlist');
         if (!box) return;
         box.innerHTML = '';
         odItems.forEach(function(it, i) {
+          var avail = odAvailable(it);
           var row = document.createElement('div');
-          row.className = 'pl-row' + (i === odIndex ? ' current' : '');
-          row.setAttribute('role', 'button');
-          row.setAttribute('tabindex', '0');
+          row.className = 'pl-row' + (i === odIndex ? ' current' : '') + (avail ? '' : ' unavailable');
           var mark = document.createElement('span');
           mark.className = 'pl-mark';
-          mark.textContent = i === odIndex ? '▶' : '';
+          mark.textContent = i === odIndex ? '▶' : (avail ? '' : '⊘');
           var title = document.createElement('span');
           title.className = 'pl-title';
           title.textContent = it.title;
@@ -561,10 +582,18 @@
           dur.className = 'pl-dur';
           dur.textContent = odFmtDur(it.duration_secs);
           row.appendChild(mark); row.appendChild(title); row.appendChild(dur);
-          row.addEventListener('click', function() { odPlayIndex(i, 0); });
-          row.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); odPlayIndex(i, 0); }
-          });
+          // Unavailable (disabled) items are shown but inert: no click/keyboard
+          // selection and out of the tab order.
+          if (avail) {
+            row.setAttribute('role', 'button');
+            row.setAttribute('tabindex', '0');
+            row.addEventListener('click', function() { odPlayIndex(i, 0); });
+            row.addEventListener('keydown', function(e) {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); odPlayIndex(i, 0); }
+            });
+          } else {
+            row.setAttribute('aria-disabled', 'true');
+          }
           box.appendChild(row);
         });
       }
@@ -601,15 +630,20 @@
         odChannelId = channelId;
         odItems = [];
         odIndex = -1;
+        // Clear the panel now so the previous channel's items never linger while
+        // this channel's playlist is still loading (fixes cross-channel leak).
+        odRenderList();
         var btn = document.getElementById('ov-playlist');
         if (btn) btn.hidden = false;
         document.getElementById('player-panel').style.display = 'block';
         fetch('/channel/' + channelId + '/playlist')
           .then(function(r) { if (!r.ok) throw new Error('playlist ' + r.status); return r.json(); })
           .then(function(items) {
+            if (channelId !== odChannelId) return; // superseded by a newer switch
             odItems = items || [];
+            if (typeof debugLog === 'function') debugLog('info', 'playlist loaded: ' + odItems.length + ' item(s)');
             if (!odItems.length) { showPlayerError(); return; }
-            var start = 0, offset = 0;
+            var start = -1, offset = 0;
             if (startItemId != null) {
               for (var i = 0; i < odItems.length; i++) {
                 if (odItems[i].id === startItemId) { start = i; offset = 0; break; }
@@ -622,10 +656,15 @@
                 }
               }
             }
+            // Land on the first playable item at/after the requested start (the
+            // saved/clicked item may since have been disabled).
+            if (start < 0 || !odAvailable(odItems[start])) { start = odNextAvailable(start < 0 ? 0 : start); offset = 0; }
+            if (start < 0) start = odNextAvailable(0);
             odRenderList();
             // Open the playlist by default so items are immediately clickable.
             var box = document.getElementById('player-playlist');
             if (box) box.hidden = false;
+            if (start < 0) { showPlayerError(); return; } // every item disabled
             odPlayIndex(start, offset);
           })
           .catch(function(err) {
@@ -645,6 +684,7 @@
       function tune(channelId, itemId) {
         currentChannelId = channelId;
         currentUrl = null;
+        if (typeof debugLog === 'function') debugLog('info', 'switch → channel ' + channelId + ' (' + (odChannelType(channelId) || '?') + ')');
         if (odChannelType(channelId) === 'vod_on_demand') {
           hidePlayerError();
           odTune(channelId, itemId);
@@ -655,6 +695,7 @@
         var plList = document.getElementById('player-playlist');
         if (plList) plList.hidden = true;
         odChannelId = null; odItems = []; odIndex = -1;
+        odRenderList(); // drop the previous channel's items so they can't be revealed
         hidePlayerError();
         endedAdvanceGen++;
         waitingGen++;
@@ -672,6 +713,7 @@
             return r.json();
           })
           .then(function(d) {
+            if (typeof debugLog === 'function') debugLog('info', 'tune resp: ' + (d.ended ? 'ended' : d.waiting ? 'waiting' : (d.url ? 'playing' : 'no url')) + (d.skip_proxy ? ' (direct)' : ''));
             currentChannel = Object.assign({ channel_id: channelId }, d);
             renderInfoBar(currentChannel);
             applyTuneResponse(d);
@@ -683,8 +725,14 @@
         video.addEventListener('ended', function() {
           if (!currentChannelId) return;
           if (odChannelId === currentChannelId) {
-            if (odIndex + 1 < odItems.length) odPlayIndex(odIndex + 1, 0);
-            // else: last item — stop silently (no auto-advance)
+            var n = odNextAvailable(odIndex + 1);
+            if (n >= 0) {
+              if (typeof debugLog === 'function') debugLog('info', 'auto-advance → ' + odItems[n].title);
+              odPlayIndex(n, 0);
+            } else if (typeof debugLog === 'function') {
+              debugLog('info', 'end of playlist');
+            }
+            // else: no playable item left — stop silently (no auto-advance)
             return;
           }
           fetch('/channel/' + currentChannelId + '/next')
@@ -737,7 +785,10 @@
       var ovPlaylist = document.getElementById('ov-playlist');
       var plBox = document.getElementById('player-playlist');
       if (ovPlaylist) ovPlaylist.addEventListener('click', function() {
-        if (plBox) plBox.hidden = !plBox.hidden;
+        // Only toggle a panel that belongs to the channel currently playing —
+        // never reveal a stale list left over from a previous on-demand channel.
+        if (!plBox || odChannelId !== currentChannelId || !odItems.length) return;
+        plBox.hidden = !plBox.hidden;
       });
 
       // ── buffering overlay (#33) ───────────────────────────────
