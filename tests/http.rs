@@ -1740,6 +1740,25 @@ async fn test_on_demand_channel_detail_shows_playlist_form() {
 }
 
 #[tokio::test]
+async fn admin_channel_detail_shows_auto_disabled_reason() {
+    let response = app()
+        .await
+        .oneshot(authed("/admin/channels/6"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&bytes);
+    // The dead item's reason shows even though it is inactive, marked auto-disabled.
+    assert!(
+        body.contains("auto-disabled — HTTP 404"),
+        "admin should surface the auto-disable reason on a disabled item; got: {body}"
+    );
+}
+
+#[tokio::test]
 async fn test_guide_has_playlist_toolbar_markup() {
     let response = app().await.oneshot(req("/guide")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
