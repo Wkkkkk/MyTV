@@ -8,22 +8,30 @@
 <div id="player-panel">
   <div id="player-toolbar">
     <button type="button" class="ov-btn" id="ov-close" title="Close" aria-label="Close player">✕</button>
-    <button type="button" class="ov-btn" id="ov-prev" title="Previous channel" aria-label="Previous channel">↑</button>
-    <button type="button" class="ov-btn" id="ov-next" title="Next channel" aria-label="Next channel">↓</button>
+    <span id="ov-title"></span>
     <span class="ov-spacer"></span>
-    <button type="button" class="ov-btn" id="ov-playlist" title="Playlist" aria-label="Playlist" hidden>☰</button>
-    <button type="button" class="ov-btn" id="ov-help" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+    <button type="button" class="ov-btn" id="ov-help" title="Controls" aria-label="Controls help">?</button>
   </div>
+  <button type="button" id="ov-center-play" aria-label="Play / pause">▶</button>
   <div id="player-help" hidden>
-    <strong>Keyboard shortcuts</strong>
-    <div>↑ / ↓ — change channel</div>
-    <div>Space — play / pause</div>
-    <div>← / → — seek 10s (VOD)</div>
-    <div>F — fullscreen</div>
+    <strong>Controls</strong>
+    <div>Tap center / Space — play / pause</div>
+    <div>Swipe ↑↓ / ↑ ↓ keys — prev / next (item, then channel)</div>
+    <div>Double-tap edge / ← → — seek 10s</div>
+    <div>⛶ / F — fullscreen · ✕ / Esc — close</div>
   </div>
   <div id="player-playlist" hidden></div>
   <div id="player-buffering"><span class="spinner-lg"></span> Loading…</div>
-  <video id="video" controls></video>
+  <video id="video" playsinline></video>
+  <div id="player-transport">
+    <button type="button" class="ov-btn" id="ov-prev-item" title="Previous" aria-label="Previous">⏮</button>
+    <button type="button" class="ov-btn" id="ov-playpause" title="Play / pause" aria-label="Play / pause">⏸</button>
+    <input type="range" id="ov-seek" min="0" max="1000" value="0" step="1" aria-label="Seek">
+    <span id="ov-time" class="ov-time">0:00 / 0:00</span>
+    <button type="button" class="ov-btn" id="ov-next-item" title="Next" aria-label="Next">⏭</button>
+    <button type="button" class="ov-btn" id="ov-playlist" title="Playlist" aria-label="Playlist" hidden>☰</button>
+    <button type="button" class="ov-btn" id="ov-fullscreen" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+  </div>
   <div id="player-error">Channel unavailable</div>
   <div id="player-ended">Stream ended — switching to next channel…</div>
   <div id="player-toast" hidden></div>
