@@ -1053,12 +1053,19 @@
         }
 
         if (e.key === 'f' || e.key === 'F') {
-          if (!video) return;
-          if (document.fullscreenElement) {
-            document.exitFullscreen();
-          } else {
-            video.requestFullscreen().catch(function(){});
-          }
+          toggleFullscreen();
+          return;
+        }
+
+        if (e.key === 'Escape') {
+          if (document.fullscreenElement) return; // let native fullscreen handle Esc
+          var p = document.getElementById('player-panel');
+          if (p && p.style.display !== 'none') { closePlayer(); }
+          return;
+        }
+
+        if (e.key === '?') {
+          if (helpBox) helpBox.hidden = !helpBox.hidden;
           return;
         }
 
