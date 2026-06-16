@@ -7,40 +7,57 @@ use crate::{
     model::{channel::ChannelType, playlist_item},
 };
 
+/// Maps a free-form channel category to an on-brand inline SVG icon. The icon
+/// uses `currentColor` (no hardcoded fill) so it tints to the surrounding text
+/// in both the guide channel column and the player info-bar. The same
+/// category→icon mapping is mirrored in `channelIcon()` in `base.html` for the
+/// client-rendered info-bar.
 pub(super) fn category_icon(category: &str) -> &'static str {
     let c = category.to_lowercase();
     if c.contains("news") {
-        return "📰";
+        return CAT_NEWS;
     }
     if c.contains("sport") {
-        return "⚽";
+        return CAT_SPORT;
     }
     if c.contains("movie") || c.contains("film") || c.contains("cinema") {
-        return "🎬";
+        return CAT_MOVIE;
     }
     if c.contains("music") {
-        return "🎵";
+        return CAT_MUSIC;
     }
     if c.contains("kid") || c.contains("child") {
-        return "🧒";
+        return CAT_KIDS;
     }
     if c.contains("documentary") || c.contains("docu") {
-        return "🎥";
+        return CAT_DOCUMENTARY;
     }
     if c.contains("entertainment") {
-        return "🎭";
+        return CAT_ENTERTAINMENT;
     }
     if c.contains("cooking") || c.contains("food") {
-        return "🍳";
+        return CAT_COOKING;
     }
     if c.contains("travel") {
-        return "✈️";
+        return CAT_TRAVEL;
     }
     if c.contains("science") || c.contains("tech") {
-        return "🔬";
+        return CAT_SCIENCE;
     }
-    "📺"
+    CAT_GENERAL
 }
+
+const CAT_NEWS: &str = r#"<svg class="cat-icon" data-cat="news" viewBox="0 0 100 100" aria-hidden="true"><rect x="22" y="22" width="56" height="56" rx="11" fill="none" stroke="currentColor" stroke-width="7"/><g stroke="currentColor" stroke-linecap="round"><line x1="33" y1="38" x2="67" y2="38" stroke-width="7"/><line x1="33" y1="51" x2="67" y2="51" stroke-width="5"/><line x1="33" y1="61" x2="56" y2="61" stroke-width="5"/></g></svg>"#;
+const CAT_SPORT: &str = r#"<svg class="cat-icon" data-cat="sport" viewBox="0 0 100 100" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round"><circle cx="50" cy="50" r="29" stroke-width="7"/><line x1="50" y1="21" x2="50" y2="79" stroke-width="5"/><line x1="21" y1="50" x2="79" y2="50" stroke-width="5"/><path d="M 31 28 Q 45 50 31 72" stroke-width="5"/><path d="M 69 28 Q 55 50 69 72" stroke-width="5"/></g></svg>"#;
+const CAT_MOVIE: &str = r#"<svg class="cat-icon" data-cat="movie" viewBox="0 0 100 100" aria-hidden="true"><rect x="24" y="30" width="52" height="40" rx="9" fill="none" stroke="currentColor" stroke-width="7"/><g fill="currentColor"><circle cx="34" cy="37" r="2.6"/><circle cx="46" cy="37" r="2.6"/><circle cx="58" cy="37" r="2.6"/><circle cx="66" cy="37" r="2.6"/><circle cx="34" cy="63" r="2.6"/><circle cx="46" cy="63" r="2.6"/><circle cx="58" cy="63" r="2.6"/><circle cx="66" cy="63" r="2.6"/></g><path d="M 46 45 L 46 55 L 58 50 Z" fill="currentColor" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>"#;
+const CAT_MUSIC: &str = r#"<svg class="cat-icon" data-cat="music" viewBox="0 0 100 100" aria-hidden="true"><circle cx="38" cy="68" r="11" fill="currentColor"/><path d="M 49 68 L 49 30" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M 49 30 Q 68 33 65 52" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>"#;
+const CAT_KIDS: &str = r#"<svg class="cat-icon" data-cat="kids" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="29" fill="none" stroke="currentColor" stroke-width="7"/><circle cx="40" cy="44" r="3.6" fill="currentColor"/><circle cx="60" cy="44" r="3.6" fill="currentColor"/><path d="M 37 58 Q 50 70 63 58" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/></svg>"#;
+const CAT_DOCUMENTARY: &str = r#"<svg class="cat-icon" data-cat="documentary" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="28" fill="none" stroke="currentColor" stroke-width="7"/><line x1="22" y1="50" x2="78" y2="50" stroke="currentColor" stroke-width="5"/><ellipse cx="50" cy="50" rx="13" ry="28" fill="none" stroke="currentColor" stroke-width="5"/></svg>"#;
+const CAT_ENTERTAINMENT: &str = r#"<svg class="cat-icon" data-cat="entertainment" viewBox="0 0 100 100" aria-hidden="true"><path d="M 50 18 Q 55 45 82 50 Q 55 55 50 82 Q 45 55 18 50 Q 45 45 50 18 Z" fill="currentColor" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>"#;
+const CAT_COOKING: &str = r#"<svg class="cat-icon" data-cat="cooking" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><circle cx="37" cy="44" r="13"/><circle cx="63" cy="44" r="13"/><circle cx="50" cy="37" r="15"/><rect x="33" y="44" width="34" height="20" rx="8"/><rect x="35" y="60" width="30" height="16" rx="4"/></g></svg>"#;
+const CAT_TRAVEL: &str = r#"<svg class="cat-icon" data-cat="travel" viewBox="0 0 100 100" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"><path d="M 22 52 L 82 24 L 62 80 L 50 58 Z"/><path d="M 82 24 L 50 58"/></g></svg>"#;
+const CAT_SCIENCE: &str = r#"<svg class="cat-icon" data-cat="science" viewBox="0 0 100 100" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="5"><ellipse cx="50" cy="50" rx="31" ry="12"/><ellipse cx="50" cy="50" rx="31" ry="12" transform="rotate(60 50 50)"/><ellipse cx="50" cy="50" rx="31" ry="12" transform="rotate(120 50 50)"/></g><circle cx="50" cy="50" r="6.5" fill="currentColor"/></svg>"#;
+const CAT_GENERAL: &str = r#"<svg class="cat-icon" data-cat="general" viewBox="0 0 100 100" aria-hidden="true"><rect x="16" y="24" width="68" height="50" rx="14" fill="none" stroke="currentColor" stroke-width="7" stroke-linejoin="round"/><path d="M 43 40 L 43 58 L 61 49 Z" fill="currentColor" stroke="currentColor" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/></svg>"#;
 
 /// Minimal per-source facts the guide needs to compute a channel's status.
 pub(super) struct SourceFacts {
@@ -140,26 +157,41 @@ mod tests {
         }
     }
 
+    fn has_cat(category: &str, key: &str) -> bool {
+        let svg = category_icon(category);
+        svg.starts_with("<svg") && svg.contains(&format!(r#"data-cat="{key}""#))
+    }
+
     #[test]
     fn test_category_icon_known_categories() {
-        assert_eq!(category_icon("News"), "📰");
-        assert_eq!(category_icon("SPORTS"), "⚽");
-        assert_eq!(category_icon("Movies"), "🎬");
-        assert_eq!(category_icon("Films"), "🎬");
-        assert_eq!(category_icon("cinema"), "🎬");
-        assert_eq!(category_icon("Music"), "🎵");
-        assert_eq!(category_icon("Kids"), "🧒");
-        assert_eq!(category_icon("Children"), "🧒");
-        assert_eq!(category_icon("Documentary"), "🎥");
-        assert_eq!(category_icon("Docu"), "🎥");
-        assert_eq!(category_icon("Entertainment"), "🎭");
-        assert_eq!(category_icon("Cooking"), "🍳");
-        assert_eq!(category_icon("Food"), "🍳");
-        assert_eq!(category_icon("Travel"), "✈️");
-        assert_eq!(category_icon("Science"), "🔬");
-        assert_eq!(category_icon("Tech"), "🔬");
-        assert_eq!(category_icon("Unknown"), "📺");
-        assert_eq!(category_icon(""), "📺");
+        assert!(has_cat("News", "news"));
+        assert!(has_cat("SPORTS", "sport"));
+        assert!(has_cat("Movies", "movie"));
+        assert!(has_cat("Films", "movie"));
+        assert!(has_cat("cinema", "movie"));
+        assert!(has_cat("Music", "music"));
+        assert!(has_cat("Kids", "kids"));
+        assert!(has_cat("Children", "kids"));
+        assert!(has_cat("Documentary", "documentary"));
+        assert!(has_cat("Docu", "documentary"));
+        assert!(has_cat("Entertainment", "entertainment"));
+        assert!(has_cat("Cooking", "cooking"));
+        assert!(has_cat("Food", "cooking"));
+        assert!(has_cat("Travel", "travel"));
+        assert!(has_cat("Science", "science"));
+        assert!(has_cat("Tech", "science"));
+        assert!(has_cat("Unknown", "general"));
+        assert!(has_cat("", "general"));
+    }
+
+    #[test]
+    fn test_category_icon_inherits_currentcolor() {
+        // Icons must not hardcode a fill color; they inherit currentColor so
+        // they tint to the surrounding text in both the guide and info-bar.
+        let svg = category_icon("News");
+        assert!(svg.contains("currentColor"));
+        assert!(!svg.contains("#e94560"));
+        assert!(svg.contains(r#"class="cat-icon""#));
     }
 
     #[test]
