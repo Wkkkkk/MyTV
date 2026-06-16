@@ -880,7 +880,6 @@
       }
       if (panel) {
         panel.addEventListener('mousemove', showControls);
-        panel.addEventListener('touchstart', showControls, {passive: true});
         panel.addEventListener('focusin', showControls);
       }
       var ovClose = document.getElementById('ov-close');
@@ -907,6 +906,67 @@
         if (!plBox || odChannelId !== currentChannelId || !odItems.length) return;
         plBox.hidden = !plBox.hidden;
       });
+
+      // ── touch gestures (idea #51) ─────────────────────────────
+      // Bound to the panel. Distinguishes: vertical swipe (navigate),
+      // double-tap near an edge (seek), single tap (toggle chrome).
+      (function() {
+        var panelEl = document.getElementById('player-panel');
+        if (!panelEl) return;
+        var sx = 0, sy = 0, st = 0, moved = false;
+        var lastTapT = 0, lastTapX = 0;
+        var SWIPE = 40;      // px to count as a swipe
+        var TAP_MS = 300;    // max ms between taps for a double-tap
+
+        panelEl.addEventListener('touchstart', function(e) {
+          if (e.touches.length !== 1) return;
+          sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+          st = e.timeStamp; moved = false;
+        }, {passive: true});
+
+        panelEl.addEventListener('touchmove', function(e) {
+          if (e.touches.length !== 1) return;
+          var dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy;
+          if (Math.abs(dx) > 10 || Math.abs(dy) > 10) moved = true;
+          // vertical swipe: prevent the page from scrolling under us
+          if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) e.preventDefault();
+        }, {passive: false});
+
+        panelEl.addEventListener('touchend', function(e) {
+          var ex = (e.changedTouches[0] || {}).clientX || sx;
+          var ey = (e.changedTouches[0] || {}).clientY || sy;
+          var dx = ex - sx, dy = ey - sy;
+          // ignore touches that land on a real control
+          if (e.target.closest && e.target.closest('.ov-btn, #ov-seek, #ov-center-play, .pl-row, #player-playlist')) return;
+
+          if (Math.abs(dy) > SWIPE && Math.abs(dy) > Math.abs(dx)) {
+            navigate(dy < 0 ? 'down' : 'up');   // swipe up = next, swipe down = prev
+            return;
+          }
+          if (!moved) {
+            var now = e.timeStamp;
+            var rect = panelEl.getBoundingClientRect();
+            var edge = rect.width * 0.3;
+            if (now - lastTapT < TAP_MS && Math.abs(ex - lastTapX) < 60) {
+              // double-tap: seek if near an edge and the channel is seekable
+              var t = currentChannel && currentChannel.channel_type;
+              if ((t === 'vod_loop' || t === 'vod_on_demand') && video && video.readyState >= 1) {
+                if (ex - rect.left < edge) { video.currentTime -= 10; }
+                else if (rect.right - ex < edge) { video.currentTime += 10; }
+              }
+              lastTapT = 0;
+              return;
+            }
+            lastTapT = now; lastTapX = ex;
+            // single tap: toggle chrome
+            if (panelEl.classList.contains('show-controls')) {
+              panelEl.classList.remove('show-controls');
+            } else {
+              showControls();
+            }
+          }
+        }, {passive: true});
+      })();
 
       if (video) {
         video.addEventListener('play', syncPlayPauseIcon);
