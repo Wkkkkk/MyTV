@@ -51,8 +51,8 @@
         <div class="program{% if prog.is_live %} live{% endif %}"
              style="left: {{ prog.left_pct }}%; width: {{ prog.width_pct }}%"
              role="button" tabindex="0"
-             onclick="tune({{ prog.channel_id }})"
-             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();tune({{ prog.channel_id }})}">
+             onclick="tune({{ prog.channel_id }}{% match prog.item_id %}{% when Some with (id) %}, {{ id }}{% when None %}{% endmatch %})"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();tune({{ prog.channel_id }}{% match prog.item_id %}{% when Some with (id) %}, {{ id }}{% when None %}{% endmatch %})}">
           {% if prog.is_live %}<span class="live-badge">LIVE</span>{% endif %}
           <span class="program-title">{{ prog.title }}</span>
         </div>

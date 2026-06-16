@@ -584,6 +584,32 @@ async fn test_guide_excludes_inactive_playlist_items() {
 }
 
 #[tokio::test]
+async fn test_guide_renders_on_demand_items_as_per_item_blocks() {
+    // Channel 6 ("On Demand", vod_on_demand) has two active items in seed.sql.
+    // The guide must render one clickable block per item (with its title and a
+    // per-item tune(channel, item) handler), not a single "— On demand" block.
+    let response = app().await.oneshot(req("/guide")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains("点播 First"),
+        "guide should render the first on-demand item title"
+    );
+    assert!(
+        body.contains("On-Demand 2"),
+        "guide should render the second on-demand item title"
+    );
+    assert!(
+        body.contains("tune(6, 4)"),
+        "first on-demand block should tune channel 6 -> item 4"
+    );
+    assert!(
+        body.contains("tune(6, 5)"),
+        "second on-demand block should tune channel 6 -> item 5"
+    );
+}
+
+#[tokio::test]
 async fn test_source_test_youtube_live_routes_through_resolution() {
     // Source 5 (seed) is a YouTube-live URL -> needs_resolution() is true, so the
     // handler takes the resolve+probe branch. Its bogus video id makes yt-dlp fail
@@ -1637,15 +1663,17 @@ async fn test_item_422_when_item_not_on_channel() {
 
 #[tokio::test]
 async fn test_guide_on_demand_channel_is_clickable() {
-    // Channel 6 (vod_on_demand, seeded) must have a clickable program block in
-    // the guide so it can be tuned — on-demand has no schedule, but without a
-    // block there is nothing to click to start the channel.
+    // Channel 6 (vod_on_demand, seeded with two active items) must have at least
+    // one clickable program block in the guide so it can be tuned — on-demand has
+    // no schedule, but without a block there is nothing to click. With items it
+    // renders per-item blocks (tune(channel, item)); empty it falls back to a
+    // single tune(channel) block.
     let response = app().await.oneshot(req("/guide/partial")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
     assert!(
-        body.contains("tune(6)"),
-        "on-demand channel row must have a clickable block to tune it"
+        body.contains("tune(6,"),
+        "on-demand channel row must have a clickable per-item block to tune it"
     );
 }
 
