@@ -32,7 +32,8 @@ pub async fn source_create(
     Path(channel_id): Path<i64>,
     axum::extract::Form(form): axum::extract::Form<SourceForm>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let priority: i64 = form.priority.trim().parse().unwrap_or(1);
+    let priority = crate::model::coerce_i64(&form.priority, crate::model::DEFAULT_PRIORITY)
+        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
     let new = source::SourceInput {
         kind: Some(form.kind),
         url: form.url,
