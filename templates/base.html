@@ -863,6 +863,9 @@
         var seekBar = document.getElementById('ov-seek');
         var timeEl = document.getElementById('ov-time');
         var dragging = false;
+        // A new source clears any half-finished drag (e.g. channel switched
+        // mid-scrub before 'change' fired), so the bar can't get stuck.
+        video.addEventListener('loadstart', function() { dragging = false; });
         video.addEventListener('timeupdate', function() {
           if (dragging || !seekBar) return;
           var d = video.duration;
