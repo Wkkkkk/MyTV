@@ -58,6 +58,9 @@
       opacity:0;transition:opacity 0.2s;pointer-events:none}
     #player-panel.show-controls #player-transport{opacity:1;pointer-events:auto}
     #ov-seek{flex:1;height:4px;cursor:pointer;accent-color:var(--accent)}
+    /* right-align next/fullscreen group; on live (seek hidden) the auto margin
+       supplies the spacer the flex:1 scrubber gives on VOD */
+    #ov-next-item{margin-left:auto}
     .ov-time{font-size:0.75rem;color:#ddd;font-variant-numeric:tabular-nums;flex-shrink:0}
     /* fullscreen: panel fills the screen so custom chrome stays visible */
     #player-panel:fullscreen{display:flex;align-items:center;justify-content:center;background:#000}
