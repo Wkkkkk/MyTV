@@ -74,9 +74,9 @@ single entries.
   its **first item** if that channel is on-demand, otherwise just starting it normally.
 - **Up / prev:** go to the previous item. At the **first** item (or on live/`vod_loop`), go to the
   **previous channel** — landing on its **last item** if on-demand, otherwise starting it normally.
-- **Boundaries:** at the very top (first item of the first channel) and bottom (last item of the last
-  channel) the feed **stops — no wrap**, matching today's channel navigation. (The current
-  `nextChannelId` no-wrap behavior is to be confirmed during planning and preserved.)
+- **Boundaries:** the feed **wraps**, preserving today's `nextChannelId` behavior — `↓` past the
+  last channel's last item returns to the first channel; `↑` from the very first item goes to the
+  last. (Confirmed with the user 2026-06-16.)
 
 ### Per-channel-type behavior
 
@@ -137,5 +137,4 @@ expected, but they confirm nothing regressed and the templates still compile via
 
 ## Open items to confirm during planning
 
-- Verify and preserve the no-wrap behavior of `nextChannelId` for the feed boundaries.
 - Confirm the scrubber behaves sensibly for `live` HLS (hidden; play/pause only).
