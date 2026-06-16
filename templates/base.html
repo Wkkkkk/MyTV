@@ -682,6 +682,10 @@
         odChannelId = channelId;
         odItems = [];
         odIndex = -1;
+        // Capture and clear the overflow flag synchronously so it can't poison a
+        // later tune if this one early-returns (superseded / empty / fetch reject).
+        var startAtLast = odStartAtLast;
+        odStartAtLast = false;
         // Clear the panel now so the previous channel's items never linger while
         // this channel's playlist is still loading (fixes cross-channel leak).
         odRenderList();
@@ -695,8 +699,7 @@
             odItems = items || [];
             if (typeof debugLog === 'function') debugLog('info', 'playlist loaded: ' + odItems.length + ' item(s)');
             if (!odItems.length) { showPlayerError(); return; }
-            if (odStartAtLast) {
-              odStartAtLast = false;
+            if (startAtLast) {
               var lastIdx = odPrevAvailable(odItems.length - 1);
               odRenderList();
               var box0 = document.getElementById('player-playlist');
@@ -757,6 +760,7 @@
         var plList = document.getElementById('player-playlist');
         if (plList) plList.hidden = true;
         odChannelId = null; odItems = []; odIndex = -1;
+        odStartAtLast = false; // a stray set must never leak into a live/vod_loop tune
         odRenderList(); // drop the previous channel's items so they can't be revealed
         hidePlayerError();
         endedAdvanceGen++;
