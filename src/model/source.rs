@@ -132,6 +132,22 @@ pub async fn list_active_for_channel(pool: &SqlitePool, channel_id: i64) -> Resu
     .map_err(Into::into)
 }
 
+/// Consecutive failed health checks before a non-`youtube_live` source is
+/// considered Down and excluded from the tune path. The single source of truth
+/// for this threshold — `is_observed_down` is the only consumer.
+pub const FAILURE_THRESHOLD: i64 = 3;
+
+/// Whether a source is currently "Down": excluded from the tune path because it
+/// has failed health checks past `FAILURE_THRESHOLD`. `youtube_live` sources are
+/// exempt — they stay in rotation so resolve-time waiting/backoff (idea #38) can
+/// fire. `is_active` is the *manual* gate and is handled separately (by
+/// `list_active_for_channel`); health never mutates it.
+pub fn is_observed_down(kind: &str, last_status: Option<&str>, consecutive_failures: i64) -> bool {
+    kind != SourceKind::YoutubeLive.as_str()
+        && last_status == Some("error")
+        && consecutive_failures >= FAILURE_THRESHOLD
+}
+
 /// Sources the tune path may try, ordered by priority: active and not
 /// observed-Down. A regular source is Down once `last_status='error'` and
 /// `consecutive_failures >= 3`; `youtube_live` sources are exempt (kept in
@@ -672,6 +688,25 @@ mod tests {
         .unwrap();
         assert_eq!(upd.url, "https://x.example/s.m3u8");
         assert_eq!(upd.priority, 9);
+    }
+
+    #[test]
+    fn test_is_observed_down_truth_table() {
+        let t = FAILURE_THRESHOLD;
+        let yt = SourceKind::YoutubeLive.as_str();
+        let hls = SourceKind::Hls.as_str();
+
+        // youtube_live is never Down, even errored past threshold
+        assert!(!is_observed_down(yt, Some("error"), t + 5));
+        // ok / null status → never Down
+        assert!(!is_observed_down(hls, Some("ok"), t + 5));
+        assert!(!is_observed_down(hls, None, t + 5));
+        // non-yt errored but BELOW threshold → not Down
+        assert!(!is_observed_down(hls, Some("error"), t - 1));
+        // boundary: exactly at threshold → Down
+        assert!(is_observed_down(hls, Some("error"), t));
+        // above threshold → Down
+        assert!(is_observed_down(hls, Some("error"), t + 1));
     }
 
     #[test]
