@@ -198,40 +198,6 @@ fn tune_response_waiting(ch: &channel::Channel) -> Json<TuneResponse> {
     })
 }
 
-/// A live source is "ended" when yt-dlp reports the broadcast finished
-/// (was_live: recording processed; post_live: just ended) or, as a fallback
-/// for extractors without live_status, when the resolved manifest carries the
-/// force_finished marker.
-fn is_ended_live(status: resolver::LiveStatus, resolved_url: &str) -> bool {
-    matches!(
-        status,
-        resolver::LiveStatus::WasLive | resolver::LiveStatus::PostLive
-    ) || resolver::is_finished_live(resolved_url)
-}
-
-enum LiveOutcome {
-    Play,
-    Ended,
-    Waiting,
-}
-
-/// Maps a resolver result to the action `next_live` takes. `None` means "not
-/// usable" (a genuine failure, or an empty URL whose status is not
-/// offline/upcoming) — the caller should try the next source.
-fn classify_live_outcome(url: &str, status: resolver::LiveStatus) -> Option<LiveOutcome> {
-    if is_ended_live(status, url) {
-        return Some(LiveOutcome::Ended);
-    }
-    if url.is_empty() {
-        return matches!(
-            status,
-            resolver::LiveStatus::Offline | resolver::LiveStatus::Upcoming(_)
-        )
-        .then_some(LiveOutcome::Waiting);
-    }
-    Some(LiveOutcome::Play)
-}
-
 async fn next_live(
     state: &AppState,
     ch: &channel::Channel,
@@ -246,40 +212,35 @@ async fn next_live(
         .iter()
         .filter(|s| Some(s.url.as_str()) != failed_url)
     {
-        match resolver::resolve_url_with_status(&src.url).await {
-            Ok((url, status)) => match classify_live_outcome(&url, status) {
-                Some(LiveOutcome::Ended) => {
-                    crate::broadcast::spawn_conversion(
-                        state.pool.clone(),
-                        ch.id,
-                        ch.name.clone(),
-                        src.url.clone(),
-                    );
-                    return Ok(tune_response_ended(ch));
-                }
-                Some(LiveOutcome::Play) => {
-                    crate::health::record_source_liveness(&state.pool, src, true).await;
-                    return Ok(tune_response(
-                        ch,
-                        url,
-                        0,
-                        resolver::needs_resolution(&src.url),
-                        Some(src),
-                        None,
-                    ));
-                }
-                Some(LiveOutcome::Waiting) => {
-                    // Offline/Upcoming: keep the source ACTIVE so the backoff poll can
-                    // resume it the moment the stream returns. Persisting "offline" to
-                    // source health (and the eventual auto-disable) is owned by the
-                    // liveness-aware background checker — disabling here would drop the
-                    // source from list_active_for_channel and break resume mid-backoff.
-                    saw_waiting = true;
-                }
-                None => {
-                    tracing::warn!(url = %src.url, ?status, "resolver returned no usable URL")
-                }
-            },
+        match resolver::resolve_live(&src.url).await {
+            Ok(resolver::LiveResolution::Ended) => {
+                crate::broadcast::spawn_conversion(
+                    state.pool.clone(),
+                    ch.id,
+                    ch.name.clone(),
+                    src.url.clone(),
+                );
+                return Ok(tune_response_ended(ch));
+            }
+            Ok(resolver::LiveResolution::Playable { url }) => {
+                crate::health::record_source_liveness(&state.pool, src, true).await;
+                return Ok(tune_response(
+                    ch,
+                    url,
+                    0,
+                    resolver::needs_resolution(&src.url),
+                    Some(src),
+                    None,
+                ));
+            }
+            Ok(resolver::LiveResolution::Waiting) => {
+                // Offline/Upcoming: keep the source ACTIVE so the backoff poll can
+                // resume it the moment the stream returns. Persisting "offline" to
+                // source health (and the eventual auto-disable) is owned by the
+                // liveness-aware background checker — disabling here would drop the
+                // source from list_active_for_channel and break resume mid-backoff.
+                saw_waiting = true;
+            }
             Err(e) => {
                 // Liveness lifecycle (disable/re-enable) is owned by the background
                 // health checker; the tune path only ever confirms liveness, never
@@ -826,61 +787,5 @@ mod tests {
 
         let err = tune_vod_at(&state, &ch, 1000).await.unwrap_err();
         assert_eq!(err, StatusCode::SERVICE_UNAVAILABLE);
-    }
-
-    #[test]
-    fn classify_live_outcome_decision() {
-        use crate::media::resolver::LiveStatus::*;
-        assert!(matches!(
-            classify_live_outcome("https://x/v.m3u8", Live),
-            Some(LiveOutcome::Play)
-        ));
-        assert!(matches!(
-            classify_live_outcome("https://x/v.m3u8", Unknown),
-            Some(LiveOutcome::Play)
-        ));
-        assert!(matches!(
-            classify_live_outcome("https://x/v.mp4", WasLive),
-            Some(LiveOutcome::Ended)
-        ));
-        assert!(matches!(
-            classify_live_outcome("https://x/a/force_finished/1/i.m3u8", Unknown),
-            Some(LiveOutcome::Ended)
-        ));
-        assert!(matches!(
-            classify_live_outcome("https://x/v.m3u8", NotLive),
-            Some(LiveOutcome::Play)
-        ));
-        assert!(matches!(
-            classify_live_outcome("https://x/v.mp4", PostLive),
-            Some(LiveOutcome::Ended)
-        ));
-        assert!(matches!(
-            classify_live_outcome("", Offline),
-            Some(LiveOutcome::Waiting)
-        ));
-        assert!(matches!(
-            classify_live_outcome("", Upcoming(None)),
-            Some(LiveOutcome::Waiting)
-        ));
-        assert!(matches!(
-            classify_live_outcome("", Upcoming(Some(1234))),
-            Some(LiveOutcome::Waiting)
-        ));
-        assert!(classify_live_outcome("", Unknown).is_none());
-    }
-
-    #[test]
-    fn is_ended_live_decision() {
-        use crate::media::resolver::LiveStatus::*;
-        assert!(is_ended_live(WasLive, "https://x.test/v.mp4"));
-        assert!(is_ended_live(PostLive, "https://x.test/v.m3u8"));
-        assert!(!is_ended_live(Live, "https://x.test/v.m3u8"));
-        assert!(!is_ended_live(NotLive, "https://x.test/v.mp4"));
-        assert!(!is_ended_live(Unknown, "https://x.test/v.m3u8"));
-        assert!(is_ended_live(
-            Unknown,
-            "https://r5---sn.googlevideo.com/a/force_finished/1/b/index.m3u8"
-        ));
     }
 }

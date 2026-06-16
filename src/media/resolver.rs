@@ -286,16 +286,49 @@ fn parse_status_and_url(stdout: &str) -> Option<(String, LiveStatus)> {
     Some((url.to_string(), status))
 }
 
-/// Returns a directly playable URL plus the stream's lifecycle state.
-/// HLS/IPTV URLs are returned unchanged (status Unknown, no yt-dlp spawn).
+/// Outcome of resolving a live source. A non-playable state is unrepresentable
+/// as a URL: `Ended`/`Waiting` carry no string, so a caller cannot accidentally
+/// treat them as playable. This replaces the old `(String, LiveStatus)` shape,
+/// where an *empty* URL secretly meant "not playable".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiveResolution {
+    /// A directly playable stream URL.
+    Playable { url: String },
+    /// The broadcast finished (recording available); the caller converts the
+    /// channel to a VOD loop.
+    Ended,
+    /// The stream is offline or upcoming. The source stays active so the player
+    /// backoff poll can resume it once the stream returns.
+    Waiting,
+}
+
+/// Classifies a successfully resolved `(status, url)` pair. A finished live
+/// broadcast — `was_live`/`post_live`, or a manifest carrying the
+/// `force_finished` marker (the fallback for extractors without `live_status`)
+/// — is `Ended`; anything else with a URL is `Playable`.
+fn classify_resolved(status: LiveStatus, url: &str) -> LiveResolution {
+    if matches!(status, LiveStatus::WasLive | LiveStatus::PostLive) || is_finished_live(url) {
+        LiveResolution::Ended
+    } else {
+        LiveResolution::Playable {
+            url: url.to_string(),
+        }
+    }
+}
+
+/// Resolves a source URL to its lifecycle outcome. HLS/IPTV URLs pass through
+/// without a yt-dlp spawn — but still through `classify_resolved`, so a manifest
+/// already carrying the `force_finished` marker is `Ended`, not `Playable`.
 /// YouTube/Twitch are resolved via a single yt-dlp call that also reports
-/// `live_status` — `next_live` uses it to detect ended broadcasts.
-pub async fn resolve_url_with_status(url: &str) -> Result<(String, LiveStatus)> {
+/// `live_status`, distinguishing a `Playable` stream from one that has `Ended`
+/// (→ VOD conversion) or is `Waiting` (offline/upcoming). A genuine failure is
+/// `Err`.
+pub async fn resolve_live(url: &str) -> Result<LiveResolution> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         bail!("invalid URL scheme: {}", url);
     }
     if !needs_resolution(url) {
-        return Ok((url.to_string(), LiveStatus::Unknown));
+        return Ok(classify_resolved(LiveStatus::Unknown, url));
     }
     let output = yt_dlp_output(
         &[
@@ -315,25 +348,26 @@ pub async fn resolve_url_with_status(url: &str) -> Result<(String, LiveStatus)> 
     .map_err(|e| yt_dlp_anyhow(e, url))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if let Some(status) = recoverable_status(&stderr) {
-            // INVARIANT: empty URL here means "not playable, but live_status is
-            // known (Offline/Upcoming)"; callers must check url.is_empty().
-            return Ok((String::new(), status));
+        if recoverable_status(&stderr).is_some() {
+            return Ok(LiveResolution::Waiting);
         }
         bail!("yt-dlp failed for {}: {}", url, stderr.trim());
     }
     parse_status_and_url(&String::from_utf8_lossy(&output.stdout))
+        .map(|(resolved, status)| classify_resolved(status, &resolved))
         .ok_or_else(|| anyhow::anyhow!("yt-dlp returned empty output for {}", url))
 }
 
 /// Returns a directly playable URL.
 /// HLS/IPTV URLs are returned unchanged. YouTube/Twitch are resolved via yt-dlp.
 pub async fn resolve_url(url: &str) -> Result<String> {
-    let (resolved, _) = resolve_url_with_status(url).await?;
-    if resolved.is_empty() {
-        bail!("no playable URL for {url} (stream offline or upcoming)");
+    match resolve_live(url).await? {
+        LiveResolution::Playable { url } => Ok(url),
+        LiveResolution::Ended => bail!("broadcast ended for {url} (no live stream)"),
+        LiveResolution::Waiting => {
+            bail!("no playable URL for {url} (stream offline or upcoming)")
+        }
     }
-    Ok(resolved)
 }
 
 /// Fetches the title of a video via yt-dlp.
@@ -733,18 +767,55 @@ mod tests {
         assert_eq!(recoverable_status(""), None);
     }
 
-    #[tokio::test]
-    async fn resolve_url_with_status_passthrough_for_hls() {
-        let (url, status) = resolve_url_with_status("https://example.com/stream.m3u8")
-            .await
-            .unwrap();
-        assert_eq!(url, "https://example.com/stream.m3u8");
-        assert_eq!(status, LiveStatus::Unknown);
+    #[test]
+    fn classify_resolved_truth_table() {
+        use LiveStatus::*;
+        let playable = |u: &str| LiveResolution::Playable { url: u.to_string() };
+        // a live/unknown/not-live stream with a URL is playable…
+        assert_eq!(
+            classify_resolved(Live, "https://x/v.m3u8"),
+            playable("https://x/v.m3u8")
+        );
+        assert_eq!(
+            classify_resolved(Unknown, "https://x/v.m3u8"),
+            playable("https://x/v.m3u8")
+        );
+        assert_eq!(
+            classify_resolved(NotLive, "https://x/v.m3u8"),
+            playable("https://x/v.m3u8")
+        );
+        // …a finished broadcast (by status) is Ended…
+        assert_eq!(
+            classify_resolved(WasLive, "https://x/v.mp4"),
+            LiveResolution::Ended
+        );
+        assert_eq!(
+            classify_resolved(PostLive, "https://x/v.mp4"),
+            LiveResolution::Ended
+        );
+        // …and so is one detected only by the force_finished manifest marker.
+        assert_eq!(
+            classify_resolved(Unknown, "https://x/a/force_finished/1/i.m3u8"),
+            LiveResolution::Ended
+        );
     }
 
     #[tokio::test]
-    async fn resolve_url_with_status_rejects_non_http_scheme() {
-        let err = resolve_url_with_status("ftp://example.com/stream.m3u8")
+    async fn resolve_live_passthrough_for_hls() {
+        let res = resolve_live("https://example.com/stream.m3u8")
+            .await
+            .unwrap();
+        assert_eq!(
+            res,
+            LiveResolution::Playable {
+                url: "https://example.com/stream.m3u8".to_string()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_live_rejects_non_http_scheme() {
+        let err = resolve_live("ftp://example.com/stream.m3u8")
             .await
             .unwrap_err();
         assert!(err.to_string().contains("invalid URL scheme"));
@@ -752,14 +823,16 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires yt-dlp and network"]
-    async fn resolve_url_with_status_real_vod_is_not_live() {
+    async fn resolve_live_real_vod_is_playable() {
         // "Me at the zoo" — pins the two-line `--print live_status --print urls`
         // output shape and print ordering against real yt-dlp.
-        let (url, status) = resolve_url_with_status("https://www.youtube.com/watch?v=jNQXAC9IVRw")
+        match resolve_live("https://www.youtube.com/watch?v=jNQXAC9IVRw")
             .await
-            .unwrap();
-        assert!(url.starts_with("http"), "got: {url}");
-        assert_eq!(status, LiveStatus::NotLive);
+            .unwrap()
+        {
+            LiveResolution::Playable { url } => assert!(url.starts_with("http"), "got: {url}"),
+            other => panic!("expected Playable, got {other:?}"),
+        }
     }
 
     #[tokio::test]

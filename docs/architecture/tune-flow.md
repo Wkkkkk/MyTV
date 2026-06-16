@@ -15,12 +15,11 @@ flowchart TD
 
     live --> src["list_active_for_channel\nordered by priority ASC"]
     src --> iter{"for each source"}
-    iter --> res1["resolver::resolve_url_with_status(src.url)"]
-    res1 -->|ok| fin{"is_ended_live?"}
-    fin -->|no| ok1(["200 { …, skip_proxy, ended: false }"])
-    fin -->|yes| conv["spawn live→VOD conversion"]
+    iter --> res1{"resolver::resolve_live(src.url)"}
+    res1 -->|Playable| ok1(["200 { …, skip_proxy, ended: false }"])
+    res1 -->|Ended| conv["spawn live→VOD conversion"]
     conv --> okE(["200 { url: '', …, ended: true }"])
-    res1 -->|err| iter
+    res1 -->|Waiting / err| iter
     iter -->|all fail or none| s503a(["503 Service Unavailable"])
 
     vod --> anc{"loop_anchor set?"}
@@ -60,12 +59,11 @@ flowchart TD
 
     nlive --> src["list_active_for_channel\nfilter out failed_url"]
     src --> iter{"for each remaining source"}
-    iter --> res1["resolver::resolve_url_with_status"]
-    res1 -->|ok| fin{"is_ended_live?"}
-    fin -->|no| ok1(["200 { …, ended: false }"])
-    fin -->|yes| conv["spawn live→VOD conversion"]
+    iter --> res1{"resolver::resolve_live"}
+    res1 -->|Playable| ok1(["200 { …, ended: false }"])
+    res1 -->|Ended| conv["spawn live→VOD conversion"]
     conv --> okE(["200 { url: '', …, ended: true }"])
-    res1 -->|err| iter
+    res1 -->|Waiting / err| iter
     iter -->|none left| s503(["503 Service Unavailable"])
 
     nvod --> items["list_for_channel"]
@@ -77,7 +75,7 @@ flowchart TD
 
 ## Ended Live → VOD Conversion
 
-Resolution returns the URL plus yt-dlp's `live_status`; the handler treats the broadcast as ended when the status is `was_live` (recording processed) or `post_live` (just ended), or — as a fallback for extractors without `live_status` — when `resolver::is_finished_live` detects a `force_finished/1` manifest. In any of these cases, the handler does **not** return the dead manifest. Instead it:
+Resolution returns a closed `resolver::LiveResolution` enum — `Playable { url }`, `Ended`, or `Waiting` — so an unplayable state can never reach the player as a URL. The resolver itself decides `Ended` when yt-dlp's `live_status` is `was_live` (recording processed) or `post_live` (just ended), or — as a fallback for extractors without `live_status` — when a `force_finished/1` manifest is detected (`classify_resolved`). `next_live` simply matches on the variant; on `Ended` the handler does **not** return the dead manifest. Instead it:
 
 1. Fires a detached `tokio::spawn` task (`broadcast::spawn_conversion`) and returns `TuneResponse { ended: true, url: "" }` immediately.
 2. The frontend shows a brief "Stream ended — switching…" overlay and auto-advances to the next channel in the lineup (loop-guarded, cancelled on a manual tune).
