@@ -477,6 +477,30 @@
         return channels[n].id;
       }
 
+      // Unified vertical navigation: the whole channel list is one continuous
+      // feed. On-demand channels expand into items; live/vod_loop are single
+      // entries. Steps items first, then overflows to the adjacent channel.
+      // Wraps at the ends (matching nextChannelId).
+      function navigate(dir) {
+        if (odChannelId === currentChannelId && odItems.length) {
+          if (dir === 'down') {
+            var n = odNextAvailable(odIndex + 1);
+            if (n >= 0) { odPlayIndex(n, 0); return; }
+          } else {
+            var p = odPrevAvailable(odIndex - 1);
+            if (p >= 0) { odPlayIndex(p, 0); return; }
+          }
+          // fall through: at a playlist edge → cross into the adjacent channel
+        }
+        var nextId = nextChannelId(dir === 'up' ? 'up' : 'down');
+        if (!nextId) return;
+        if (dir === 'up' && odChannelType(nextId) === 'vod_on_demand') {
+          odStartAtLast = true;
+        }
+        tune(nextId);
+      }
+      window.navigate = navigate;
+
       function advanceEndedChannel() {
         if (window.__hideBuffering) window.__hideBuffering();
         var channels = window.epgChannels || [];
@@ -541,6 +565,7 @@
       var odIndex = -1;          // index into odItems of the item actually loaded
       var odChannelId = null;    // channel id the playlist belongs to
       var odPlayGen = 0;         // bumps per selection; guards out-of-order resolves
+      var odStartAtLast = false;  // navigate('up') overflow lands on the last item
 
       function odKey(id) { return 'mytv:ondemand:' + id; }
 
@@ -577,6 +602,14 @@
       // First playable index at or after `from`, or -1 if none remain.
       function odNextAvailable(from) {
         for (var i = Math.max(0, from); i < odItems.length; i++) {
+          if (odAvailable(odItems[i])) return i;
+        }
+        return -1;
+      }
+
+      // Last playable index at or before `from`, or -1 if none remain.
+      function odPrevAvailable(from) {
+        for (var i = Math.min(from, odItems.length - 1); i >= 0; i--) {
           if (odAvailable(odItems[i])) return i;
         }
         return -1;
@@ -662,6 +695,16 @@
             odItems = items || [];
             if (typeof debugLog === 'function') debugLog('info', 'playlist loaded: ' + odItems.length + ' item(s)');
             if (!odItems.length) { showPlayerError(); return; }
+            if (odStartAtLast) {
+              odStartAtLast = false;
+              var lastIdx = odPrevAvailable(odItems.length - 1);
+              odRenderList();
+              var box0 = document.getElementById('player-playlist');
+              if (box0) box0.hidden = false;
+              if (lastIdx < 0) { showPlayerError(); return; }
+              odPlayIndex(lastIdx, 0);
+              return;
+            }
             var start = -1, offset = 0;
             if (startItemId != null) {
               for (var i = 0; i < odItems.length; i++) {
@@ -849,6 +892,11 @@
       if (ovCenterPlay) ovCenterPlay.addEventListener('click', togglePlay);
       if (ovFull) ovFull.addEventListener('click', toggleFullscreen);
 
+      var ovPrevItem = document.getElementById('ov-prev-item');
+      var ovNextItem = document.getElementById('ov-next-item');
+      if (ovPrevItem) ovPrevItem.addEventListener('click', function() { navigate('up'); });
+      if (ovNextItem) ovNextItem.addEventListener('click', function() { navigate('down'); });
+
       var ovPlaylist = document.getElementById('ov-playlist');
       var plBox = document.getElementById('player-playlist');
       if (ovPlaylist) ovPlaylist.addEventListener('click', function() {
@@ -947,13 +995,14 @@
 
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
           e.preventDefault();
-          var nextId = nextChannelId(e.key === 'ArrowUp' ? 'up' : 'down');
-          if (nextId) tune(nextId);
+          navigate(e.key === 'ArrowUp' ? 'up' : 'down');
           return;
         }
 
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-          if (!currentChannel || currentChannel.channel_type !== 'vod_loop') return;
+          if (!currentChannel) return;
+          var t = currentChannel.channel_type;
+          if (t !== 'vod_loop' && t !== 'vod_on_demand') return;
           if (!video || video.readyState < 1) return;
           e.preventDefault();
           video.currentTime += e.key === 'ArrowRight' ? 10 : -10;
