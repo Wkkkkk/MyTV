@@ -207,7 +207,8 @@ pub fn is_dead(last_status: Option<&str>, consecutive_failures: i64) -> bool {
 /// place even with two writers.
 ///
 /// - `ok == true` resets failures (status "ok"); never re-enables — re-enabling
-///   a disabled item is a manual admin action.
+///   a disabled item is a manual admin action. `reason` is recorded only on
+///   failure; it is ignored when `ok == true`.
 /// - `ok == false` counts a failure (status "error"); disables once `is_dead`.
 ///
 /// Returns `ok` for the caller's convenience.
@@ -217,6 +218,7 @@ pub async fn apply_health_result(
     ok: bool,
     reason: Option<&str>,
 ) -> Result<bool> {
+    let reason = if ok { None } else { reason };
     let new_failures = if ok { 0 } else { item.consecutive_failures + 1 };
     let status = if ok { "ok" } else { "error" };
     let is_active = if is_dead(Some(status), new_failures) {
