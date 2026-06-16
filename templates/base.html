@@ -913,15 +913,18 @@
       (function() {
         var panelEl = document.getElementById('player-panel');
         if (!panelEl) return;
-        var sx = 0, sy = 0, st = 0, moved = false;
+        var sx = 0, sy = 0, moved = false, multi = false;
         var lastTapT = 0, lastTapX = 0;
         var SWIPE = 40;      // px to count as a swipe
         var TAP_MS = 300;    // max ms between taps for a double-tap
 
         panelEl.addEventListener('touchstart', function(e) {
-          if (e.touches.length !== 1) return;
+          // A second finger marks the whole gesture as multi-touch (pinch/zoom)
+          // so touchend ignores it rather than misreading the lift as a swipe/tap.
+          if (e.touches.length !== 1) { multi = true; return; }
+          multi = false;
           sx = e.touches[0].clientX; sy = e.touches[0].clientY;
-          st = e.timeStamp; moved = false;
+          moved = false;
         }, {passive: true});
 
         panelEl.addEventListener('touchmove', function(e) {
@@ -933,6 +936,8 @@
         }, {passive: false});
 
         panelEl.addEventListener('touchend', function(e) {
+          if (e.touches.length > 0) return;     // wait until the last finger lifts
+          if (multi) { multi = false; return; } // pinch/multi-touch — not a tap or swipe
           var ex = (e.changedTouches[0] || {}).clientX || sx;
           var ey = (e.changedTouches[0] || {}).clientY || sy;
           var dx = ex - sx, dy = ey - sy;
