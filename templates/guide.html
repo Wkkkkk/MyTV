@@ -137,5 +137,21 @@
     if (log) log.style.display = debugVisible ? '' : 'none';
     if (btn) btn.textContent = debugVisible ? 'Hide' : 'Show';
   }
+
+  // The debug panel is position:fixed, so reserve matching space at the
+  // bottom of the page or the last channel row is hidden beneath it and
+  // can't be scrolled into view. Its height varies (collapsible, grows
+  // with messages), so track it live.
+  (function reserveDebugSpace() {
+    var panel = document.getElementById('debug-panel');
+    if (!panel) return;
+    function sync() { document.body.style.paddingBottom = panel.offsetHeight + 'px'; }
+    sync();
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(sync).observe(panel);
+    } else {
+      window.addEventListener('resize', sync);
+    }
+  })();
 </script>
 {% endblock %}
