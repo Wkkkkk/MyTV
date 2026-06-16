@@ -28,6 +28,9 @@
     #player-error{display:none;padding:32px;text-align:center;color:var(--accent);background:#000;font-size:1rem}
     #player-ended{display:none;padding:32px;text-align:center;color:#fff;background:#000;font-size:1rem}
     #player-waiting{display:none;padding:32px;text-align:center;color:#fff;background:#000;font-size:1rem}
+    #player-toast{position:absolute;bottom:120px;left:50%;transform:translateX(-50%);
+      z-index:9;background:rgba(0,0,0,.85);color:#fff;padding:8px 14px;border-radius:6px;
+      font-size:0.85rem;max-width:80%;text-align:center}
     #player-panel{position:relative}
     /* bottom:44px / help bottom:100px clear the native <video controls> bar (~30–48px) */
     #player-toolbar{position:absolute;bottom:44px;left:0;right:0;z-index:6;
@@ -363,7 +366,7 @@
           video.onerror = function() {
             // On-demand: a failed item must not fall back to /next (which would
             // jump to item 1). Show the error and leave the playlist for the viewer.
-            if (odChannelId === currentChannelId) { showPlayerError(); return; }
+            if (odChannelId === currentChannelId) { odSkipFrom(odIndex); return; }
             var nextUrl = '/channel/' + currentChannelId + '/next';
             if (currentUrl) nextUrl += '?failed_url=' + encodeURIComponent(currentUrl);
             fetch(nextUrl)
@@ -407,6 +410,29 @@
         if (video) video.style.display = '';
         var el = document.getElementById('player-error');
         if (el) el.style.display = 'none';
+      }
+
+      var _toastTimer = null;
+      function showToast(msg) {
+        var el = document.getElementById('player-toast');
+        if (!el) return;
+        el.textContent = msg;
+        el.hidden = false;
+        if (_toastTimer) clearTimeout(_toastTimer);
+        _toastTimer = setTimeout(function () { el.hidden = true; }, 2500);
+      }
+
+      // Advance past a dead on-demand item. `failedIndex` is the item that just
+      // failed (to play or to resolve). Forward-only: if nothing follows, show
+      // the error overlay. Never wraps, so an all-dead playlist terminates.
+      function odSkipFrom(failedIndex) {
+        var failed = odItems[failedIndex];
+        if (failed) showToast(failed.title + ' unavailable — skipping…');
+        if (failedIndex + 1 < odItems.length) {
+          odPlayIndex(failedIndex + 1, 0);
+        } else {
+          showPlayerError();
+        }
       }
 
       function nextChannelId(dir) {
@@ -567,7 +593,7 @@
           .catch(function(err) {
             if (gen !== odPlayGen || chanAtRequest !== odChannelId) return;
             if (typeof debugLog === 'function') debugLog('error', 'on-demand item: ' + err);
-            showPlayerError();
+            odSkipFrom(i);
           });
       }
 
