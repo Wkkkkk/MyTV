@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyTV — {{RANGE_LABEL}}</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700;900&family=Oswald:wght@500;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--paper:#f5f3ed;--ink:#1a1a1a;--muted:#6b6358;--accent:#b5341f;--bg:#2a2a2a;
+    --serif:"Noto Serif SC",Georgia,serif;--sans:"Inter",-apple-system,sans-serif;--cond:"Oswald",sans-serif;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);font-family:var(--sans);color:var(--ink);}
+  .wrap{max-width:900px;margin:0 auto;padding:24px 20px 60px;}
+  .bar{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;}
+  .bar a{color:#ff9c83;text-decoration:none;font-family:var(--cond);letter-spacing:.08em;text-transform:uppercase;font-size:12px;}
+  .head{background:var(--paper);border-radius:5px;padding:22px 26px;margin-bottom:16px;}
+  .head .tag{font-family:var(--cond);font-weight:700;letter-spacing:.2em;text-transform:uppercase;font-size:11px;color:var(--accent);}
+  .head h1{font-family:var(--serif);font-weight:900;font-size:30px;line-height:1.05;margin:8px 0;}
+  .head p{font-size:14px;line-height:1.55;color:#3a352e;margin:0;}
+  .reflow{width:100%;border:0;background:var(--paper);border-radius:5px;display:block;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <a href="../index.html">← back to index</a>
+    <a href="../{{CARD_FILE}}" target="_blank">view as poster ↗</a>
+  </div>
+  <div class="head">
+    <div class="tag">MyTV · Weekly Progress · {{RANGE_LABEL}}</div>
+    <h1>{{HEADLINE}}</h1>
+    <p>{{DECK}}</p>
+  </div>
+  <iframe class="reflow" src="../{{CARD_FILE}}" title="Weekly card — {{RANGE_LABEL}}" scrolling="no"></iframe>
+</div>
+<script>
+  // The card reflows to a single column below 1000px; keep the iframe under that
+  // width and size its height to the card's content (same-origin, so readable).
+  var ifr = document.querySelector('.reflow');
+  function sizeReflow(){
+    try { ifr.style.height = ifr.contentWindow.document.body.scrollHeight + 'px'; } catch (e) {}
+  }
+  ifr.addEventListener('load', sizeReflow);
+  window.addEventListener('resize', sizeReflow);
+</script>
+</body>
+</html>
