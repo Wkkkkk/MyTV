@@ -37,5 +37,39 @@ class DiscoverTest(unittest.TestCase):
         self.assertEqual(self.weeks[2].commits, "")
 
 
+TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+class RenderTest(unittest.TestCase):
+    def setUp(self):
+        self.weeks = build.discover(FIXTURES)
+        self.index, self.details = build.render(self.weeks, TEMPLATE_DIR)
+
+    def test_hero_is_newest_week(self):
+        self.assertIn("cards/2026-06-15-week-card.html", self.index)
+        self.assertIn("Two campaigns shipped, one fire put out.", self.index)
+
+    def test_no_unfilled_placeholders(self):
+        for token in ("{{HERO}}", "{{RECENT}}", "{{TIMELINE}}", "{{ARCHITECTURE}}", "{{INCIDENTS}}"):
+            self.assertNotIn(token, self.index)
+
+    def test_timeline_lists_all_weeks(self):
+        for date in ("2026-06-15", "2026-06-08", "2026-06-01"):
+            self.assertIn(f"week/{date}.html", self.index)
+
+    def test_recent_holds_two_weeks(self):
+        self.assertEqual(self.index.count('class="poster-frame"'),
+                         1 + min(2, len(self.weeks) - 1))  # hero + recent
+
+    def test_standing_sections_present(self):
+        self.assertIn("architecture-diagram.html", self.index)
+        self.assertIn(build.INCIDENTS[0]["href"], self.index)
+
+    def test_one_detail_page_per_week(self):
+        self.assertEqual(set(self.details), {"2026-06-15", "2026-06-08", "2026-06-01"})
+        self.assertIn("cards/2026-06-01-week-card.html", self.details["2026-06-01"])
+        self.assertNotIn("{{", self.details["2026-06-01"])
+
+
 if __name__ == "__main__":
     unittest.main()
