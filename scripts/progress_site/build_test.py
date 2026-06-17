@@ -1,5 +1,7 @@
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -71,10 +73,6 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn("{{", self.details["2026-06-01"])
 
 
-import shutil
-import tempfile
-
-
 class AssembleTest(unittest.TestCase):
     def setUp(self):
         self.weeks = build.discover(FIXTURES)
@@ -106,7 +104,8 @@ class AssembleTest(unittest.TestCase):
             self.assertTrue(self._exists(f"week/{date}.html"))
 
     def test_no_absolute_paths_in_index(self):
-        html = open(os.path.join(self.site, "index.html"), encoding="utf-8").read()
+        with open(os.path.join(self.site, "index.html"), encoding="utf-8") as fh:
+            html = fh.read()
         self.assertNotIn('href="/', html)
         self.assertNotIn('src="/', html)
 

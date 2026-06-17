@@ -2,6 +2,7 @@
 import os
 import pathlib
 import re
+import shutil
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
@@ -138,10 +139,11 @@ INCIDENTS = [
 
 
 def _esc(text):
-    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    return (text.replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
 
 
-def _poster(week, klass):
+def _poster(week):
     return (
         f'<a class="cardlink" href="{week.detail_file}">'
         f'<div class="poster-frame"><iframe src="{week.card_file}" '
@@ -166,7 +168,7 @@ def _hero(week):
 def _recent(weeks):
     if not weeks:
         return ""
-    cells = "".join(_poster(w, "mini") for w in weeks)
+    cells = "".join(_poster(w) for w in weeks)
     return f'<div class="band"><div class="label">Recent weeks</div><div class="recent">{cells}</div></div>'
 
 
@@ -221,9 +223,6 @@ def render(weeks, template_dir):
                            .replace("{{DECK}}", _esc(w.deck))
                            .replace("{{CARD_FILE}}", w.card_file))
     return index_html, details
-
-
-import shutil
 
 
 def assemble(site_dir, weeks, index_html, detail_pages, progress_dir, static_dir, arch_diagram_src):
