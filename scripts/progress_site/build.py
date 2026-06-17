@@ -221,3 +221,46 @@ def render(weeks, template_dir):
                            .replace("{{DECK}}", _esc(w.deck))
                            .replace("{{CARD_FILE}}", w.card_file))
     return index_html, details
+
+
+import shutil
+
+
+def assemble(site_dir, weeks, index_html, detail_pages, progress_dir, static_dir, arch_diagram_src):
+    site = pathlib.Path(site_dir)
+    if site.exists():
+        shutil.rmtree(site)
+    (site / "cards").mkdir(parents=True)
+    (site / "week").mkdir(parents=True)
+
+    (site / "index.html").write_text(index_html, encoding="utf-8")
+    for date, html_text in detail_pages.items():
+        (site / "week" / f"{date}.html").write_text(html_text, encoding="utf-8")
+
+    progress = pathlib.Path(progress_dir)
+    for week in weeks:
+        name = pathlib.Path(week.card_file).name
+        shutil.copy(progress / name, site / "cards" / name)
+
+    shutil.copy(pathlib.Path(static_dir) / "favicon.svg", site / "favicon.svg")
+    shutil.copy(arch_diagram_src, site / "architecture-diagram.html")
+
+
+def main():
+    root = pathlib.Path(__file__).resolve().parents[2]
+    template_dir = pathlib.Path(__file__).resolve().parent
+    progress_dir = root / "docs" / "progress"
+
+    weeks = discover(progress_dir)
+    index_html, detail_pages = render(weeks, template_dir)
+    assemble(
+        root / "site", weeks, index_html, detail_pages,
+        progress_dir=progress_dir,
+        static_dir=root / "static",
+        arch_diagram_src=root / "docs" / "architecture" / "architecture-diagram.html",
+    )
+    print(f"Built site/ with {len(weeks)} week(s)")
+
+
+if __name__ == "__main__":
+    main()

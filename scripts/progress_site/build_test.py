@@ -71,5 +71,45 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn("{{", self.details["2026-06-01"])
 
 
+import shutil
+import tempfile
+
+
+class AssembleTest(unittest.TestCase):
+    def setUp(self):
+        self.weeks = build.discover(FIXTURES)
+        index, details = build.render(self.weeks, TEMPLATE_DIR)
+        self.site = tempfile.mkdtemp()
+        build.assemble(
+            self.site, self.weeks, index, details,
+            progress_dir=FIXTURES,
+            static_dir=os.path.join(TEMPLATE_DIR, "fixtures", "static"),
+            arch_diagram_src=os.path.join(TEMPLATE_DIR, "fixtures", "architecture-diagram.html"),
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.site, ignore_errors=True)
+
+    def _exists(self, rel):
+        return os.path.isfile(os.path.join(self.site, rel))
+
+    def test_index_written(self):
+        self.assertTrue(self._exists("index.html"))
+
+    def test_favicon_and_diagram_copied(self):
+        self.assertTrue(self._exists("favicon.svg"))
+        self.assertTrue(self._exists("architecture-diagram.html"))
+
+    def test_card_and_detail_per_week(self):
+        for date in ("2026-06-15", "2026-06-08", "2026-06-01"):
+            self.assertTrue(self._exists(f"cards/{date}-week-card.html"))
+            self.assertTrue(self._exists(f"week/{date}.html"))
+
+    def test_no_absolute_paths_in_index(self):
+        html = open(os.path.join(self.site, "index.html"), encoding="utf-8").read()
+        self.assertNotIn('href="/', html)
+        self.assertNotIn('src="/', html)
+
+
 if __name__ == "__main__":
     unittest.main()
