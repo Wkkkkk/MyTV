@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/Wkkkkk/MyTV/actions/workflows/ci.yml/badge.svg)](https://github.com/Wkkkkk/MyTV/actions/workflows/ci.yml)
 
+📈 **[Weekly progress site](https://wkkkkk.github.io/MyTV/)** — auto-generated development log, updated every Friday.
+
 A personal web app that repackages live internet streams and VOD content into a cable TV–style experience. Browse channels through an EPG grid, click to watch. No app installs, no playlist management at watch time.
 
 ---
