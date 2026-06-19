@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weekly Progress — 2026-06-19</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700;900&family=Noto+Sans+SC:wght@400;500;700&family=Oswald:wght@500;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f5f3ed;
+    --ink: #1a1a1a;
+    --muted: #6b6358;
+    --line: #1a1a1a;
+    --accent: #1f5fb5;
+    --accent2: #b5341f;
+    --plane: #e9e5db;
+    --serif: "Noto Serif SC", Georgia, "Times New Roman", serif;
+    --sans: "Inter", "Noto Sans SC", -apple-system, "Segoe UI", sans-serif;
+    --cond: "Oswald", "Inter", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #2a2a2a; }
+
+  .frame {
+    width: 2000px;
+    height: 1500px;
+    margin: 0 auto;
+    position: relative;
+  }
+  .card {
+    width: 100%;
+    height: 100%;
+    background: var(--paper);
+    color: var(--ink);
+    padding: 50px 56px 42px;
+    font-family: var(--sans);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .card::after {
+    content: "";
+    position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none; mix-blend-mode: multiply;
+  }
+  .card > * { position: relative; z-index: 1; }
+
+  code { font-family: "SFMono-Regular", "Menlo", monospace; font-size: 0.9em; background: rgba(31,95,181,0.10); padding: 0 4px; border-radius: 2px; color: #143e78; }
+
+  /* ===== HERO ===== */
+  .hero {
+    display: grid;
+    grid-template-columns: 1fr 540px;
+    gap: 42px;
+    border-bottom: 6px solid var(--line);
+    padding-bottom: 24px;
+  }
+  .kicker {
+    font-family: var(--cond);
+    font-weight: 700;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    font-size: 15px;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .title {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 74px;
+    line-height: 1.03;
+    letter-spacing: -0.5px;
+    margin: 0 0 16px;
+  }
+  .deck {
+    font-size: 18.5px;
+    line-height: 1.55;
+    color: #2e2a24;
+    max-width: 900px;
+  }
+  .deck b { color: var(--accent2); }
+
+  /* commit stat block */
+  .statblock {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 20px 26px 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .statblock .big {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: 92px;
+    line-height: 0.9;
+    letter-spacing: -1px;
+  }
+  .statblock .big small {
+    font-size: 23px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    display: block;
+    margin-top: 6px;
+    color: #c9c2b5;
+  }
+  .breakdown {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5px 18px;
+    margin-top: 16px;
+    border-top: 2px solid #4a4439;
+    padding-top: 12px;
+  }
+  .breakdown div {
+    font-size: 15px;
+    color: #d7d0c2;
+    display: flex;
+    justify-content: space-between;
+    font-variant-numeric: tabular-nums;
+  }
+  .breakdown b { color: #fff; font-weight: 700; }
+
+  /* ===== BODY GRID ===== */
+  .body {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1.34fr 1fr;
+    gap: 38px;
+    padding-top: 24px;
+    min-height: 0;
+  }
+  .col { display: flex; flex-direction: column; gap: 20px; min-height: 0; }
+
+  .sect-h {
+    font-family: var(--cond);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-size: 16px;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+  .sect-h::before {
+    content: "";
+    width: 22px; height: 5px;
+    background: var(--accent);
+    display: inline-block;
+    flex: none;
+  }
+  .sect-h .tag { margin-left: auto; font-size: 13px; letter-spacing: 0.12em; color: var(--muted); }
+
+  .item { margin-bottom: 11px; }
+  .item:last-child { margin-bottom: 0; }
+  .item .t {
+    font-weight: 700;
+    font-size: 18px;
+    line-height: 1.28;
+    margin-bottom: 3px;
+  }
+  .item .t .ref { color: var(--accent2); font-weight: 700; font-size: 13.5px; }
+  .item .d {
+    font-size: 15px;
+    line-height: 1.46;
+    color: #3a352e;
+  }
+
+  /* primary heavy module */
+  .primary {
+    background: var(--plane);
+    border-left: 6px solid var(--accent);
+    padding: 20px 26px 18px;
+  }
+  .primary .sect-h::before { display: none; }
+
+  /* player module */
+  .player .blist { margin: 4px 0 0; padding: 0; list-style: none; }
+  .player .blist li {
+    font-size: 15px;
+    line-height: 1.46;
+    color: #3a352e;
+    padding-left: 18px;
+    position: relative;
+    margin-bottom: 8px;
+  }
+  .player .blist li:last-child { margin-bottom: 0; }
+  .player .blist li::before {
+    content: "";
+    position: absolute; left: 0; top: 9px;
+    width: 7px; height: 7px;
+    background: var(--accent);
+    transform: rotate(45deg);
+  }
+  .player .blist b { color: var(--ink); }
+  .player .note { font-size: 13.5px; color: var(--muted); margin-top: 9px; font-style: italic; }
+
+  /* architecture table */
+  .arch table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+  }
+  .arch td {
+    font-size: 14.5px;
+    line-height: 1.36;
+    padding: 8px 8px 8px 0;
+    border-bottom: 1px solid #d4cec1;
+    vertical-align: top;
+    color: #3a352e;
+  }
+  .arch tr:last-child td { border-bottom: none; }
+  .arch td.n {
+    font-family: var(--cond);
+    font-weight: 700;
+    color: var(--accent);
+    width: 28px;
+    font-size: 18px;
+  }
+  .arch td b { color: var(--ink); font-weight: 700; }
+
+  /* fixes module */
+  .fixes { background: var(--plane); padding: 18px 24px 16px; flex: 1; min-height: 0; }
+  .fixes .sect-h { color: var(--accent2); }
+  .fixes .sect-h::before { background: var(--accent2); }
+  .fixes .flist { margin: 4px 0 0; padding: 0; list-style: none; }
+  .fixes .flist li {
+    font-size: 14.5px;
+    line-height: 1.42;
+    color: #3a352e;
+    padding: 7px 0;
+    border-bottom: 1px solid #d8d2c5;
+  }
+  .fixes .flist li:last-child { border-bottom: none; }
+  .fixes .flist .k {
+    font-family: var(--cond);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent2);
+    text-transform: lowercase;
+    margin-right: 6px;
+  }
+
+  /* ===== FOOTER TRIPTYCH ===== */
+  .footer {
+    margin-top: 22px;
+    border-top: 6px solid var(--line);
+    padding-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 34px;
+  }
+  .fcol .fh {
+    font-family: var(--cond);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
+    font-size: 14.5px;
+    color: var(--accent);
+    margin-bottom: 7px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .fcol .fh .ref { color: var(--accent2); font-size: 13px; }
+  .fcol .fb { font-size: 14px; line-height: 1.46; color: #3a352e; }
+  .fcol .fb b { color: var(--ink); }
+  .fcol.closed .fh { color: var(--accent2); }
+  .footer .fcol:not(:first-child) { padding-left: 34px; border-left: 1px solid #d4cec1; margin-left: -34px; }
+
+  @media (max-width: 1000px) {
+    html, body { background: var(--paper); }
+    .frame { width: 100%; height: auto; }
+    .card { height: auto; padding: 28px 22px; }
+    .hero, .body, .footer { grid-template-columns: 1fr; }
+    .title { font-size: 40px; }
+    .breakdown { grid-template-columns: repeat(2, 1fr); }
+    .footer .fcol:not(:first-child) { padding-left: 0; border-left: none; margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="card">
+
+    <!-- HERO -->
+    <div class="hero">
+      <div>
+        <div class="kicker">MyTV · Weekly Progress · 13 → 19 Jun 2026</div>
+        <h1 class="title">On-demand lands;<br>the player, rebuilt.</h1>
+        <p class="deck">A dense UX-and-architecture week. The <b>on-demand VOD channel type</b> shipped with its full companion cluster, the <b>player overlay was rebuilt from scratch</b>, branding was refreshed, a weekly Pages site went live, and <b>four architecture-deepening candidates</b> all merged.</p>
+      </div>
+      <div class="statblock">
+        <div class="big">104<small>commits this week</small></div>
+        <div class="breakdown">
+          <div>feat <b>29</b></div>
+          <div>docs <b>36</b></div>
+          <div>fix <b>17</b></div>
+          <div>refactor <b>7</b></div>
+          <div>merge <b>11</b></div>
+          <div>test <b>1</b></div>
+          <div>other <b>3</b></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BODY -->
+    <div class="body">
+
+      <!-- LEFT: the two headline stories -->
+      <div class="col">
+        <div class="primary">
+          <div class="sect-h">Shipped — On-demand VOD cluster <span class="tag">#45 · #52 · #53 · #54</span></div>
+          <div class="item">
+            <div class="t">Core <code>vod_on_demand</code> channel type <span class="ref">#45</span></div>
+            <div class="d">Hand-navigated playlist; cursor persists in <code>localStorage</code>; playback stops silently after the last item (no loop). New <code>/channel/:id/playlist</code> &amp; <code>/item/:item_id</code>; <code>channels_json</code> now carries <code>type</code> so the client branches before tuning. Migration 007 non-destructive.</div>
+          </div>
+          <div class="item">
+            <div class="t">Per-item EPG blocks <span class="ref">#52</span></div>
+            <div class="d">Guide renders one clickable block per active item (<code>ON_DEMAND_ITEM_WIDTH_PCT = 25</code>, ≈4 visible); a click tunes and jumps straight to that item via <code>ProgramSlot.item_id</code>. Empty playlist falls back to one full-width tunable block.</div>
+          </div>
+          <div class="item">
+            <div class="t">Dead-item auto-disable &amp; player skip <span class="ref">#53</span></div>
+            <div class="d"><code>playlist_item::apply_health_result</code> owns the rule, reusing the shared <code>source::FAILURE_THRESHOLD</code> via the pure <code>is_dead</code> predicate; both the health loop and interactive tune call it. Player toasts and auto-skips dead items.</div>
+          </div>
+          <div class="item">
+            <div class="t">3-day stale-item reaper <span class="ref">#54</span></div>
+            <div class="d">Items disabled &gt; 3 days are hard-deleted at the 15-min health tick. Migration 008 adds a nullable <code>disabled_at</code> backfilled to <code>now</code>; the clock invariant keeps a continuously failing item from resetting its own grace period.</div>
+          </div>
+        </div>
+
+        <div class="player">
+          <div class="sect-h">Shipped — Player overlay rebuilt from scratch <span class="tag">#51</span></div>
+          <ul class="blist">
+            <li><b>Custom transport</b> replaces native <code>&lt;video controls&gt;</code>: play/pause, scrubber + time display, ⏮/⏭ item nav, ☰ playlist panel, and fullscreen that keeps the custom chrome visible.</li>
+            <li><b>Touch gesture layer</b>: single tap toggles chrome (3 s auto-hide), double-tap near an edge seeks ±10 s, vertical swipe navigates; multi-touch and pinch ignored.</li>
+            <li><b>Unified vertical navigation</b>: <code>↑/↓</code> and swipe treat the whole channel feed as one list — on-demand channels expand into their items, edges overflow into the adjacent channel, the feed wraps at both ends.</li>
+            <li><b>Type-aware seek</b> now covers <code>vod_on_demand</code> too; keyboard map finalized (<code>Space</code> · <code>↑↓</code> · <code>←→</code> · <code>F</code> · <code>Esc</code> · <code>?</code>).</li>
+          </ul>
+          <div class="note">Frontend-only — no backend, API, DB, or migration changes.</div>
+        </div>
+      </div>
+
+      <!-- RIGHT: architecture + fixes -->
+      <div class="col">
+        <div class="arch">
+          <div class="sect-h">Architecture deepening — 4/4 merged <span class="tag">#47 – #50</span></div>
+          <table>
+            <tr><td class="n">47</td><td><b>Typed <code>LiveResolution</code> enum</b> — <code>Playable&#123;url&#125;</code> / <code>Ended</code> / <code>Waiting</code> kills the empty-URL sentinel; <code>classify_resolved</code> is the single decision point.</td></tr>
+            <tr><td class="n">48</td><td><b><code>FAILURE_THRESHOLD</code> unified</b> as one <code>pub const</code>; pure <code>is_observed_down</code> predicate replaces the bespoke SQL <code>AND NOT (…)</code> clause.</td></tr>
+            <tr><td class="n">49</td><td><b>Single intake-coercion seam</b> — <code>coerce_i64</code> + <code>DEFAULT_*</code>; form and JSON share one path; garbage <code>priority</code> now returns 422, not a silent default.</td></tr>
+            <tr><td class="n">50</td><td><b>Per-table health SQL inlined</b> — dynamic-table-name query dropped; broader generic-CRUD collapse audited and deliberately not pursued.</td></tr>
+          </table>
+        </div>
+
+        <div class="fixes">
+          <div class="sect-h">Fixes</div>
+          <ul class="flist">
+            <li><span class="k">budget</span>direct media (<code>.mp4/.webm/.m4v/.mov</code>) classified <code>Direct</code> before the CORS-cache lookup — fixes a misleading ☁ badge on R2-hosted VOD.</li>
+            <li><span class="k">player</span><code>odStartAtLast</code> consumed synchronously; scrubber drag flag cleared on new source; <code>closePlayer</code> cancels pending timers.</li>
+            <li><span class="k">playlist</span>items ordered by <code>(sort_order, id)</code> — add-time stable.</li>
+            <li><span class="k">guide</span>reserved bottom padding for the fixed debug panel so the last channel row stays reachable.</li>
+            <li><span class="k">admin</span>on-demand channels now correctly labelled in the channels list.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- FOOTER TRIPTYCH -->
+    <div class="footer">
+      <div class="fcol">
+        <div class="fh">Branding refresh</div>
+        <div class="fb">New <b><code>playframe</code> SVG favicon</b> and header logo across <code>base.html</code> &amp; admin base. <b>10 SVG category icons</b> (cooking → travel) wired into <code>guide/badges.rs</code>; sources relocated under <code>static/branding/</code>.</div>
+      </div>
+      <div class="fcol">
+        <div class="fh">Weekly progress Pages site <span class="ref">#55</span></div>
+        <div class="fb"><code>progress_site/build.py</code> (Python stdlib) discovers <code>*-week-card.html</code>, reads metadata from stable CSS classes, and renders an editorial index + per-week detail. <code>pages.yml</code> runs 17 tests and deploys to <b>wkkkkk.github.io/MyTV</b> on push.</div>
+      </div>
+      <div class="fcol closed">
+        <div class="fh">Supporting &amp; closed</div>
+        <div class="fb"><b>Bilibili VOD shelved <span class="ref">#43</span></b> (DASH-only, <code>upsig</code> tokens, cookies needed). <b>#50 audit</b>: duplication is real domain divergence — forced generic trait declined. youtube-watcher skill removed; architecture diagram added and linked from the Pages site.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
