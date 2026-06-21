@@ -412,6 +412,106 @@ async fn playlist_crud_round_trip() {
 }
 
 #[tokio::test]
+async fn playlist_create_without_sort_order_appends_sequentially() {
+    // Seed channel 4 already has one item (id 1). Two creates with no sort_order
+    // must land at increasing positions, not collapse onto the default 0.
+    let app = app().await;
+
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels/4/playlist",
+            serde_json::json!({"title":"Seq A","url":"https://vod.example.com/seq-a.mp4","duration_secs":600}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let a = body_json(r).await["sort_order"].as_i64().unwrap();
+
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels/4/playlist",
+            serde_json::json!({"title":"Seq B","url":"https://vod.example.com/seq-b.mp4","duration_secs":600}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let b = body_json(r).await["sort_order"].as_i64().unwrap();
+
+    assert!(b > a, "second append ({b}) must sort after the first ({a})");
+}
+
+#[tokio::test]
+async fn playlist_create_duplicate_url_is_idempotent() {
+    // Posting the same URL twice returns the existing item (200) instead of
+    // creating a second copy.
+    let app = app().await;
+    let payload = serde_json::json!({"title":"Dup One","url":"https://vod.example.com/dup.mp4","duration_secs":600});
+
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels/4/playlist",
+            payload.clone(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let first_id = body_json(r).await["id"].as_i64().unwrap();
+
+    // Same URL, different title → still a duplicate, skipped silently with 200.
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels/4/playlist",
+            serde_json::json!({"title":"Dup Two","url":"https://vod.example.com/dup.mp4","duration_secs":600}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(r).await["id"].as_i64().unwrap(),
+        first_id,
+        "duplicate returns the existing item, not a new one"
+    );
+}
+
+#[tokio::test]
+async fn playlist_create_duplicate_title_is_idempotent() {
+    // A re-encoded video keeps the title but gets a new URL — still a duplicate.
+    let app = app().await;
+
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels/4/playlist",
+            serde_json::json!({"title":"Same Title","url":"https://vod.example.com/v1.mp4","duration_secs":600}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let first_id = body_json(r).await["id"].as_i64().unwrap();
+
+    let r = app
+        .clone()
+        .oneshot(authed_json(
+            "POST",
+            "/api/admin/channels/4/playlist",
+            serde_json::json!({"title":"Same Title","url":"https://vod.example.com/v2.mp4","duration_secs":600}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(body_json(r).await["id"].as_i64().unwrap(), first_id);
+}
+
+#[tokio::test]
 async fn playlist_get_unknown_is_404() {
     let r = app()
         .await

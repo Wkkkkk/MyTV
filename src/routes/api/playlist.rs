@@ -50,13 +50,35 @@ pub async fn create(
     Path(channel_id): Path<i64>,
     Json(req): Json<CreatePlaylistItemRequest>,
 ) -> Result<(StatusCode, Json<playlist_item::PlaylistItem>), ApiError> {
-    let new = playlist_item::PlaylistInput {
+    // Validate first so dedup compares the trimmed url/title; sort_order is a
+    // placeholder until we know it isn't a duplicate.
+    let mut new = playlist_item::PlaylistInput {
         title: req.title,
         url: req.url,
         duration_secs: req.duration_secs,
-        sort_order: req.sort_order.unwrap_or(crate::model::DEFAULT_SORT_ORDER),
+        sort_order: crate::model::DEFAULT_SORT_ORDER,
     }
     .validate_new(channel_id)?;
+
+    // Dedup: a re-upload of the same recording (same url or same title on this
+    // channel) returns the existing item instead of appending a copy, so callers
+    // like the publish-video plugin are safe to re-run.
+    if let Some(existing) =
+        playlist_item::find_duplicate(&state.pool, channel_id, &new.url, &new.title)
+            .await
+            .map_err(internal)?
+    {
+        return Ok((StatusCode::OK, Json(existing)));
+    }
+
+    // Append at the end unless the caller pinned an explicit position, so items
+    // keep a sequential sort_order instead of collapsing onto 0.
+    new.sort_order = match req.sort_order {
+        Some(s) => s,
+        None => playlist_item::next_sort_order(&state.pool, channel_id)
+            .await
+            .map_err(internal)?,
+    };
     let item = playlist_item::create(&state.pool, new)
         .await
         .map_err(internal)?;

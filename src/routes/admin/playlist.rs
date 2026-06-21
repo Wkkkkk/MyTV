@@ -70,6 +70,16 @@ pub async fn playlist_item_create(
         Err(_) => return StatusCode::UNPROCESSABLE_ENTITY.into_response(),
     };
 
+    // Dedup: silently skip a re-add of the same recording (same url or title on
+    // this channel) — mirrors the JSON API's idempotent create.
+    match playlist_item::find_duplicate(&state.pool, channel_id, &new.url, &new.title).await {
+        Ok(Some(_)) => {
+            return Redirect::to(&format!("/admin/channels/{channel_id}")).into_response()
+        }
+        Ok(None) => {}
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+
     if playlist_item::create(&state.pool, new).await.is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }

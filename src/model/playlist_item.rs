@@ -54,6 +54,43 @@ pub async fn create(pool: &SqlitePool, input: NewPlaylistItem) -> Result<Playlis
         .map_err(Into::into)
 }
 
+/// The sort_order that appends an item at the end of a channel's playlist:
+/// `max(sort_order) + 1`, or 0 when the channel has no items yet. Callers that
+/// don't pin an explicit position use this so items keep a sequential number
+/// instead of all collapsing onto the default 0.
+pub async fn next_sort_order(pool: &SqlitePool, channel_id: i64) -> Result<i64> {
+    let max: Option<i64> =
+        sqlx::query_scalar("SELECT MAX(sort_order) FROM playlist_items WHERE channel_id = ?")
+            .bind(channel_id)
+            .fetch_one(pool)
+            .await?;
+    Ok(max.map(|m| m + 1).unwrap_or(0))
+}
+
+/// Find an existing item on the channel that already has this `url` *or* `title`
+/// — the dedup key. Returns the earliest match (by sort_order, then id) so
+/// repeated appends of the same recording become idempotent. `None` means the
+/// item is new to the channel.
+pub async fn find_duplicate(
+    pool: &SqlitePool,
+    channel_id: i64,
+    url: &str,
+    title: &str,
+) -> Result<Option<PlaylistItem>> {
+    sqlx::query_as::<_, PlaylistItem>(
+        "SELECT * FROM playlist_items
+         WHERE channel_id = ? AND (url = ? OR title = ?)
+         ORDER BY sort_order ASC, id ASC
+         LIMIT 1",
+    )
+    .bind(channel_id)
+    .bind(url)
+    .bind(title)
+    .fetch_optional(pool)
+    .await
+    .map_err(Into::into)
+}
+
 /// Fetch a playlist item by id.
 pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<PlaylistItem>> {
     sqlx::query_as::<_, PlaylistItem>("SELECT * FROM playlist_items WHERE id = ?")
@@ -414,6 +451,62 @@ mod tests {
         let items = list_active_for_channel(&pool, ch.id).await.unwrap();
         let ids: Vec<i64> = items.iter().map(|i| i.id).collect();
         assert_eq!(ids, vec![a.id, b.id, c.id]);
+    }
+
+    #[tokio::test]
+    async fn next_sort_order_appends_after_max() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        assert_eq!(
+            next_sort_order(&pool, ch.id).await.unwrap(),
+            0,
+            "empty channel starts at 0"
+        );
+
+        create(&pool, item(ch.id, "a", 10, 0)).await.unwrap();
+        create(&pool, item(ch.id, "b", 10, 5)).await.unwrap();
+        assert_eq!(
+            next_sort_order(&pool, ch.id).await.unwrap(),
+            6,
+            "appends after the current max"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_duplicate_matches_url_or_title_scoped_to_channel() {
+        let pool = test_pool().await;
+        let ch = make_channel(&pool).await;
+        let other = make_channel(&pool).await;
+        let it = create(&pool, item(ch.id, "Ep 1", 10, 0)).await.unwrap();
+
+        // Same URL → match.
+        assert_eq!(
+            find_duplicate(&pool, ch.id, &it.url, "different title")
+                .await
+                .unwrap()
+                .map(|x| x.id),
+            Some(it.id)
+        );
+        // Same title, different URL → still a match (re-encoded duplicate).
+        assert_eq!(
+            find_duplicate(&pool, ch.id, "https://example.com/other.mp4", "Ep 1")
+                .await
+                .unwrap()
+                .map(|x| x.id),
+            Some(it.id)
+        );
+        // Neither matches → None.
+        assert!(
+            find_duplicate(&pool, ch.id, "https://example.com/new.mp4", "New")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        // A match on another channel must not leak across channels.
+        assert!(find_duplicate(&pool, other.id, &it.url, "Ep 1")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
