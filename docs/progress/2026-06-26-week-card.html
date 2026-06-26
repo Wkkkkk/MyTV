@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyTV — Weekly Progress · 2026-06-26</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f4f1ea;
+    --paper-2:#ece7db;
+    --plane:#e4ddcd;
+    --ink:#1c1815;
+    --ink-soft:#3a342c;
+    --muted:#6f675a;
+    --rust:#b8492e;
+    --green:#3f6b4f;
+    --line:#ccc3b1;
+    --font-display:'Oswald','Arial Narrow','Helvetica Neue',Arial,sans-serif;
+    --font-body:'Inter',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+
+  html,body{margin:0;padding:0;background:#d9d3c6;}
+  *{box-sizing:border-box;}
+
+  .frame{
+    width:2000px;
+    height:1500px;
+    margin:0 auto;
+    position:relative;
+  }
+
+  .card{
+    width:100%;
+    height:100%;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--font-body);
+    padding:80px 84px 70px;
+    display:flex;
+    flex-direction:column;
+    position:relative;
+    overflow:hidden;
+  }
+
+  /* faint noise + paper grain */
+  .card::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+    opacity:0.04;
+    pointer-events:none;
+    z-index:0;
+  }
+  .card > *{position:relative;z-index:1;}
+
+  /* ===================== MASTHEAD ===================== */
+  .masthead{flex:0 0 auto;}
+  .eyebrow-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-family:var(--font-display);
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:.22em;
+    font-size:25px;
+    color:var(--ink-soft);
+  }
+  .eyebrow-row .left{display:flex;align-items:center;gap:20px;}
+  .pill{
+    background:var(--rust);
+    color:var(--paper);
+    letter-spacing:.18em;
+    font-size:21px;
+    padding:7px 16px 6px;
+    border-radius:2px;
+  }
+  .eyebrow-row .date{color:var(--muted);letter-spacing:.16em;}
+
+  h1.headline{
+    font-family:var(--font-display);
+    font-weight:700;
+    text-transform:uppercase;
+    font-size:138px;
+    line-height:.9;
+    letter-spacing:-1px;
+    margin:30px 0 0;
+    color:var(--ink);
+  }
+  h1.headline em{font-style:normal;color:var(--rust);}
+
+  .deck{
+    font-size:35px;
+    line-height:1.42;
+    color:var(--ink-soft);
+    max-width:1500px;
+    margin:30px 0 0;
+    font-weight:400;
+  }
+  .deck b{font-weight:600;color:var(--ink);}
+  .deck .mono{font-family:var(--font-mono);font-weight:600;font-size:31px;color:var(--rust);background:rgba(184,73,46,.08);padding:1px 8px;border-radius:3px;}
+
+  .rule-accent{height:6px;width:100%;background:var(--ink);margin-top:34px;position:relative;}
+  .rule-accent::after{content:"";position:absolute;left:0;top:0;height:6px;width:300px;background:var(--rust);}
+
+  /* ===================== STAT STRIP ===================== */
+  .stats{
+    flex:0 0 auto;
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    background:var(--ink);
+    color:var(--paper);
+    margin-top:30px;
+    padding:34px 20px;
+  }
+  .stat{padding:0 46px;display:flex;align-items:center;gap:30px;}
+  .stat + .stat{border-left:1px solid rgba(244,241,234,.18);}
+  .stat .num{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:104px;
+    line-height:.82;
+    color:#f4f1ea;
+  }
+  .stat:first-child .num{color:var(--rust);}
+  .stat .meta{display:flex;flex-direction:column;gap:7px;}
+  .stat .label{
+    font-family:var(--font-display);
+    text-transform:uppercase;
+    letter-spacing:.16em;
+    font-weight:600;
+    font-size:25px;
+    color:#f4f1ea;
+  }
+  .stat .sub{font-size:21px;color:#b8b0a1;letter-spacing:.02em;}
+
+  /* ===================== BODY ===================== */
+  .body{
+    flex:1 1 auto;
+    display:grid;
+    grid-template-columns:1.28fr 1fr;
+    gap:54px;
+    margin-top:34px;
+    min-height:0;
+  }
+  .col{display:flex;flex-direction:column;min-height:0;}
+
+  .modhead{
+    display:flex;
+    align-items:baseline;
+    gap:18px;
+    margin-bottom:24px;
+  }
+  .modhead .idx{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:28px;
+    color:var(--rust);
+    letter-spacing:.04em;
+  }
+  .modhead .ttl{
+    font-family:var(--font-display);
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:.13em;
+    font-size:30px;
+    color:var(--ink);
+  }
+  .modhead .ln{flex:1 1 auto;height:2px;background:var(--line);align-self:center;}
+
+  /* ---- mechanism cards (left, primary) ---- */
+  .mech{
+    border-left:6px solid var(--rust);
+    background:var(--paper-2);
+    padding:26px 30px 28px;
+    margin-bottom:22px;
+  }
+  .mech .fn{
+    font-family:var(--font-mono);
+    font-weight:600;
+    font-size:36px;
+    color:var(--ink);
+  }
+  .mech .fn .paren{color:var(--rust);}
+  .mech .path{
+    font-family:var(--font-mono);
+    font-size:21px;
+    color:var(--muted);
+    margin-top:5px;
+  }
+  .mech p{
+    font-size:28px;
+    line-height:1.45;
+    color:var(--ink-soft);
+    margin:14px 0 0;
+  }
+  .mech p .hl{color:var(--ink);font-weight:600;}
+
+  /* ---- before / after anchor ---- */
+  .ba{
+    flex:1 1 auto;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:20px;
+    background:var(--ink);
+    color:var(--paper);
+    padding:34px 36px;
+    margin-top:4px;
+  }
+  .ba-row{display:flex;align-items:flex-start;gap:24px;}
+  .ba-tag{
+    font-family:var(--font-display);
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.12em;
+    font-size:24px;
+    flex:0 0 168px;
+    padding-top:6px;
+  }
+  .ba-row.before .ba-tag{color:#e08a76;}
+  .ba-row.after .ba-tag{color:#8fc6a4;}
+  .ba-row .ba-mark{font-size:40px;line-height:1;flex:0 0 auto;padding-top:2px;}
+  .ba-row.before .ba-mark{color:var(--rust);}
+  .ba-row.after .ba-mark{color:#8fc6a4;}
+  .ba-row .ba-txt{font-size:28px;line-height:1.38;color:#f4f1ea;}
+  .ba-row .ba-txt code{font-family:var(--font-mono);font-size:24px;color:#e8c9b8;}
+  .ba-div{height:1px;background:rgba(244,241,234,.16);}
+
+  /* ---- right column: paths plane ---- */
+  .plane{
+    background:var(--plane);
+    padding:28px 32px 30px;
+    border-top:6px solid var(--ink);
+  }
+  .pathblk{padding:6px 0 4px;}
+  .pathblk + .pathblk{border-top:1px solid var(--line);margin-top:20px;padding-top:22px;}
+  .pathblk .ph{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    margin-bottom:8px;
+  }
+  .pathblk .name{
+    font-family:var(--font-display);
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    font-size:27px;
+    color:var(--ink);
+  }
+  .pathblk .file{font-family:var(--font-mono);font-size:19px;color:var(--muted);}
+  .pathblk p{font-size:25px;line-height:1.42;color:var(--ink-soft);margin:0;}
+  .pathblk p code{font-family:var(--font-mono);font-size:21px;color:var(--rust);}
+  .tag-200{
+    display:inline-block;
+    background:var(--green);
+    color:#fff;
+    font-family:var(--font-mono);
+    font-weight:600;
+    font-size:18px;
+    letter-spacing:.04em;
+    padding:3px 9px;
+    border-radius:3px;
+    vertical-align:middle;
+  }
+
+  /* ---- tests block ---- */
+  .tests{
+    flex:1 1 auto;
+    display:flex;
+    align-items:center;
+    gap:30px;
+    background:var(--paper-2);
+    border-left:6px solid var(--green);
+    padding:24px 30px;
+    margin-top:22px;
+  }
+  .tests .big{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:118px;
+    line-height:.8;
+    color:var(--green);
+    flex:0 0 auto;
+  }
+  .tests .tinfo{display:flex;flex-direction:column;gap:9px;}
+  .tests .tlabel{
+    font-family:var(--font-display);
+    text-transform:uppercase;
+    letter-spacing:.13em;
+    font-weight:600;
+    font-size:24px;
+    color:var(--ink);
+  }
+  .tests .tinfo ul{margin:4px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px;}
+  .tests .tinfo li{font-size:23px;color:var(--ink-soft);line-height:1.3;}
+  .tests .tinfo li b{color:var(--ink);font-weight:600;}
+  .tests .tinfo li .f{font-family:var(--font-mono);font-size:19px;color:var(--muted);}
+
+  /* ===================== BOTTOM BAND ===================== */
+  .bottom{flex:0 0 auto;margin-top:30px;}
+  .bottom-cols{
+    display:grid;
+    grid-template-columns:1.55fr 1fr;
+    gap:54px;
+    align-items:start;
+    margin-bottom:24px;
+  }
+  .bcell .blabel{
+    font-family:var(--font-display);
+    text-transform:uppercase;
+    letter-spacing:.14em;
+    font-weight:600;
+    font-size:23px;
+    color:var(--rust);
+    margin-bottom:10px;
+  }
+  .bcell p{font-size:25px;line-height:1.4;color:var(--ink-soft);margin:0;}
+  .bcell p code{font-family:var(--font-mono);font-size:21px;color:var(--ink);}
+
+  .metastrip{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background:var(--ink);
+    color:var(--paper);
+    padding:22px 32px;
+    font-family:var(--font-display);
+    text-transform:uppercase;
+    letter-spacing:.1em;
+    font-size:23px;
+  }
+  .metastrip .m-mid{color:#b8b0a1;letter-spacing:.14em;}
+  .metastrip .m-right{color:#e8c9b8;}
+  .metastrip .dot{color:var(--rust);padding:0 8px;}
+
+  /* ===================== MOBILE / NARROW FALLBACK ===================== */
+  @media (max-width:760px){
+    html,body{background:var(--paper);}
+    .frame{width:100%;height:auto;}
+    .card{height:auto;padding:28px 22px 30px;}
+    h1.headline{font-size:46px;}
+    .deck{font-size:17px;}
+    .deck .mono{font-size:15px;}
+    .stats{grid-template-columns:1fr;gap:1px;}
+    .stat{padding:18px 20px;}
+    .stat + .stat{border-left:none;border-top:1px solid rgba(244,241,234,.18);}
+    .stat .num{font-size:54px;}
+    .body{grid-template-columns:1fr;gap:30px;}
+    .bottom-cols{grid-template-columns:1fr;gap:22px;}
+    .metastrip{flex-direction:column;gap:8px;align-items:flex-start;font-size:14px;}
+    .mech .fn{font-size:22px;}
+    .ba-row .ba-txt,.mech p,.pathblk p,.tests .tinfo li{font-size:16px;}
+    .tests .big{font-size:64px;}
+  }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="card">
+
+      <!-- MASTHEAD -->
+      <header class="masthead">
+        <div class="eyebrow-row">
+          <div class="left">
+            <span>MyTV — Weekly Progress</span>
+            <span class="pill">Light Week</span>
+          </div>
+          <span class="date">2026-06-19 → 06-26</span>
+        </div>
+        <h1 class="headline">Playlist Item <em>Integrity</em></h1>
+        <p class="deck">
+          One targeted correctness fix. VOD items uploaded through the JSON API
+          <b>(publish-video plugin)</b> no longer land at <span class="mono">sort_order = 0</span>
+          or pile up as duplicates — the API now <b>auto-appends at max + 1</b> and silently returns
+          the existing item on a re-upload.
+        </p>
+        <div class="rule-accent"></div>
+      </header>
+
+      <!-- STAT STRIP -->
+      <section class="stats">
+        <div class="stat">
+          <span class="num">3</span>
+          <span class="meta">
+            <span class="label">Commits</span>
+            <span class="sub">1 fix · 2 docs</span>
+          </span>
+        </div>
+        <div class="stat">
+          <span class="num">5</span>
+          <span class="meta">
+            <span class="label">New tests</span>
+            <span class="sub">2 unit · 3 integration</span>
+          </span>
+        </div>
+        <div class="stat">
+          <span class="num">2</span>
+          <span class="meta">
+            <span class="label">Create paths guarded</span>
+            <span class="sub">JSON API · admin form</span>
+          </span>
+        </div>
+      </section>
+
+      <!-- BODY -->
+      <section class="body">
+
+        <!-- LEFT — primary framework -->
+        <div class="col">
+          <div class="modhead">
+            <span class="idx">01</span>
+            <span class="ttl">The Fix — Two New Model Functions</span>
+            <span class="ln"></span>
+          </div>
+
+          <div class="mech">
+            <div class="fn">next_sort_order<span class="paren">()</span></div>
+            <div class="path">src/model/playlist_item.rs</div>
+            <p>Computes <span class="hl">MAX(sort_order) + 1</span> for the channel, used by both create
+            paths when the caller doesn't pin a <span class="hl">sort_order</span>. Fixes the root cause of
+            every item landing at 0 when added via the JSON API.</p>
+          </div>
+
+          <div class="mech">
+            <div class="fn">find_duplicate<span class="paren">()</span></div>
+            <div class="path">src/model/playlist_item.rs</div>
+            <p>Channel-scoped lookup matching on <span class="hl">url OR title</span> — catches re-encoded
+            copies of the same video, not just exact-URL duplicates. Shared by both create paths, so no
+            entry point can write a duplicate row.</p>
+          </div>
+
+          <div class="ba">
+            <div class="ba-row before">
+              <span class="ba-tag">Before</span>
+              <span class="ba-mark">✗</span>
+              <span class="ba-txt">Items added via the API landed at <code>sort_order = 0</code>; duplicate rows accumulated on every re-upload.</span>
+            </div>
+            <div class="ba-div"></div>
+            <div class="ba-row after">
+              <span class="ba-tag">After</span>
+              <span class="ba-mark">✓</span>
+              <span class="ba-txt">Appended at <code>max + 1</code>; a re-upload returns the existing item, <code>HTTP 200</code> — silent and idempotent.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT — narrower supporting stack -->
+        <div class="col">
+          <div class="modhead">
+            <span class="idx">02</span>
+            <span class="ttl">Two Paths, One Guard</span>
+            <span class="ln"></span>
+          </div>
+
+          <div class="plane">
+            <div class="pathblk">
+              <div class="ph">
+                <span class="name">API create</span>
+                <span class="file">src/routes/api/playlist.rs</span>
+              </div>
+              <p>Calls <code>find_duplicate</code> first; on a hit, returns the existing item with a
+              <span class="tag-200">HTTP 200</span> silent idempotent skip. On a miss, calls
+              <code>next_sort_order</code> when <code>sort_order</code> is omitted.</p>
+            </div>
+            <div class="pathblk">
+              <div class="ph">
+                <span class="name">Admin form</span>
+                <span class="file">src/routes/admin/playlist.rs</span>
+              </div>
+              <p>Same dedup guard, mirroring the API. The form already auto-incremented in the UI, but
+              the DB path had no server-side guard until now.</p>
+            </div>
+          </div>
+
+          <div class="modhead" style="margin-top:30px;">
+            <span class="idx">03</span>
+            <span class="ttl">Tests</span>
+            <span class="ln"></span>
+          </div>
+
+          <div class="tests">
+            <div class="big">5</div>
+            <div class="tinfo">
+              <span class="tlabel">New · <span class="f" style="text-transform:none;letter-spacing:0;">tests/api.rs</span></span>
+              <ul>
+                <li><b>2 model unit</b> — next_sort_order, find_duplicate</li>
+                <li><b>3 API integration</b> — first add, duplicate URL, duplicate title</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- BOTTOM BAND -->
+      <footer class="bottom">
+        <div class="bottom-cols">
+          <div class="bcell">
+            <div class="blabel">Supporting work</div>
+            <p>Progress docs landed — the <code>2026-06-19-week.md</code> report and
+            <code>2026-06-19-week-card.html</code> editorial card were committed (the launchd scheduled
+            job that generates the card ran the previous Friday).</p>
+          </div>
+          <div class="bcell">
+            <div class="blabel">Next</div>
+            <p>Open backlog in <code>docs/IDEAS.md</code>.</p>
+          </div>
+        </div>
+        <div class="metastrip">
+          <span class="m-left">MyTV — Personal IPTV <span class="dot">·</span> Rust / Axum / SQLite</span>
+          <span class="m-mid">Week ending 2026-06-26</span>
+          <span class="m-right">3 commits <span class="dot">·</span> 1 fix · 2 docs</span>
+        </div>
+      </footer>
+
+    </div>
+  </div>
+</body>
+</html>
