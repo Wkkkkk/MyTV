@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyTV — Weekly Progress · 2026-06-26 → 07-03</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700;900&family=Noto+Sans+SC:wght@400;500;700&family=Oswald:wght@500;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f4f1e9;
+    --paper-2: #ece7db;
+    --plane: #e7e1d3;
+    --ink: #1b1916;
+    --muted: #5c564b;
+    --faint: #8b8578;
+    --rust: #ad4a22;
+    --rust-deep: #8f3c1b;
+    --line: rgba(27, 25, 22, 0.14);
+    --line-strong: rgba(27, 25, 22, 0.28);
+    --display: 'Oswald', 'Arial Narrow', 'Helvetica Neue', Arial, sans-serif;
+    --sans: 'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    --serif: 'Noto Serif SC', Georgia, 'Times New Roman', serif;
+  }
+
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+
+  body {
+    background: #ddd8cc;
+    font-family: var(--sans);
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .frame {
+    width: 1920px;
+    height: 1080px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card {
+    width: 100%;
+    height: 100%;
+    background: var(--paper);
+    padding: 72px 76px 68px;
+    position: relative;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    row-gap: 40px;
+  }
+
+  /* subtle paper noise */
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.045;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    mix-blend-mode: multiply;
+    z-index: 0;
+  }
+  .card > * { position: relative; z-index: 1; }
+
+  /* ---------- Meta bar ---------- */
+  .meta {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 18px;
+  }
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+  .brand .mark {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 30px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .brand .mark b { color: var(--rust); }
+  .brand .sub {
+    font-size: 14px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 600;
+  }
+  .meta .issue {
+    text-align: right;
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 16px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .meta .issue b {
+    display: block;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: 2px;
+    color: var(--ink);
+    margin-top: 3px;
+  }
+
+  /* ---------- Main grid ---------- */
+  .main {
+    display: grid;
+    grid-template-columns: 1.32fr 1fr;
+    column-gap: 58px;
+    min-height: 0;
+  }
+
+  /* Hero */
+  .hero {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding-right: 8px;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 3.5px;
+    text-transform: uppercase;
+    color: var(--rust-deep);
+  }
+  .eyebrow::before {
+    content: "";
+    width: 46px;
+    height: 5px;
+    background: var(--rust);
+    display: inline-block;
+  }
+  .headline {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 158px;
+    line-height: 0.9;
+    letter-spacing: -1px;
+    text-transform: uppercase;
+    margin: 26px 0 0;
+  }
+  .headline .l2 { color: var(--rust); }
+  .deck {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 25px;
+    line-height: 1.52;
+    color: var(--muted);
+    max-width: 660px;
+    margin-top: 30px;
+  }
+
+  .hero-stats {
+    display: flex;
+    align-items: flex-end;
+    gap: 44px;
+    margin-top: 34px;
+    border-top: 2px solid var(--line-strong);
+    padding-top: 26px;
+  }
+  .bignum {
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+  }
+  .bignum .fig {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 168px;
+    line-height: 0.8;
+    color: var(--rust);
+    letter-spacing: -3px;
+  }
+  .bignum .cap {
+    max-width: 210px;
+  }
+  .bignum .cap .k {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 21px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    line-height: 1.15;
+    display: block;
+  }
+  .bignum .cap .d {
+    font-size: 15px;
+    color: var(--faint);
+    line-height: 1.4;
+    margin-top: 6px;
+    display: block;
+  }
+  .stat-sm {
+    padding-bottom: 6px;
+  }
+  .stat-sm .fig {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 64px;
+    line-height: 0.85;
+    letter-spacing: -1px;
+  }
+  .stat-sm .k {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 8px;
+  }
+  .stat-sm .d {
+    font-size: 14px;
+    color: var(--faint);
+    margin-top: 3px;
+  }
+
+  /* Support rail */
+  .rail {
+    background: var(--plane);
+    border-top: 6px solid var(--ink);
+    padding: 34px 34px 32px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 0;
+  }
+  .rail-head {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 23px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .rail-head .tag {
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--rust-deep);
+    background: rgba(173, 74, 34, 0.12);
+    padding: 4px 9px;
+    border-radius: 2px;
+    text-transform: none;
+  }
+
+  .backlog {
+    list-style: none;
+    margin: 20px 0 0;
+    padding: 0;
+  }
+  .backlog li {
+    display: grid;
+    grid-template-columns: 46px 1fr;
+    column-gap: 16px;
+    align-items: start;
+    padding: 15px 0;
+    border-top: 1px solid var(--line);
+  }
+  .backlog li:first-child { border-top: none; padding-top: 4px; }
+  .backlog .n {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 34px;
+    line-height: 1;
+    color: var(--rust);
+  }
+  .backlog .t {
+    font-weight: 700;
+    font-size: 20px;
+    line-height: 1.2;
+  }
+  .backlog .s {
+    font-size: 14.5px;
+    color: var(--muted);
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+  .backlog .s code {
+    font-family: var(--display);
+    font-weight: 500;
+    background: rgba(27,25,22,0.06);
+    padding: 1px 5px;
+    font-size: 13px;
+    letter-spacing: 0.3px;
+  }
+
+  .rail-foot {
+    margin-top: 22px;
+    border-top: 2px solid var(--line-strong);
+    padding-top: 18px;
+  }
+  .rail-foot .lbl {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .rail-foot p {
+    margin: 8px 0 0;
+    font-size: 15.5px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+  .rail-foot code {
+    font-family: var(--display);
+    font-weight: 500;
+    background: rgba(27,25,22,0.06);
+    padding: 1px 5px;
+    font-size: 13.5px;
+  }
+
+  /* ---------- Bottom band ---------- */
+  .band {
+    border-top: 4px solid var(--ink);
+    padding-top: 22px;
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    column-gap: 46px;
+    align-items: center;
+  }
+  .band .cell {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+  }
+  .band .cell + .cell {
+    border-left: 1px solid var(--line);
+    padding-left: 46px;
+  }
+  .band .lbl {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--rust-deep);
+    white-space: nowrap;
+  }
+  .band .txt {
+    font-size: 18px;
+    line-height: 1.4;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .band .txt code {
+    font-family: var(--display);
+    font-weight: 500;
+    background: rgba(27,25,22,0.06);
+    padding: 1px 6px;
+    font-size: 15px;
+  }
+  .band .sig {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 16px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--faint);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  /* ---------- Mobile / narrow preview fallback ---------- */
+  @media (max-width: 1000px) {
+    body { display: block; background: var(--paper); }
+    .frame { width: 100%; height: auto; }
+    .card {
+      height: auto;
+      padding: 32px 22px 40px;
+      row-gap: 28px;
+    }
+    .main { grid-template-columns: 1fr; row-gap: 32px; }
+    .headline { font-size: 74px; }
+    .bignum .fig { font-size: 96px; }
+    .hero-stats { flex-wrap: wrap; gap: 24px; }
+    .band { grid-template-columns: 1fr; row-gap: 16px; }
+    .band .cell + .cell { border-left: none; padding-left: 0; }
+    .band .sig { text-align: left; }
+  }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="card">
+
+      <!-- Meta bar -->
+      <header class="meta">
+        <div class="brand">
+          <span class="mark">My<b>TV</b></span>
+          <span class="sub">Personal IPTV · Weekly Progress</span>
+        </div>
+        <div class="issue">
+          Week in Review
+          <b>2026-06-26 → 07-03</b>
+        </div>
+      </header>
+
+      <!-- Main -->
+      <div class="main">
+
+        <!-- Hero -->
+        <section class="hero">
+          <div>
+            <span class="eyebrow">The week in one line</span>
+            <h1 class="headline">A Quiet<br><span class="l2">Week</span></h1>
+            <p class="deck">
+              No feature development this week — only the automated
+              weekly-report artefacts committed by the previous Friday's
+              scheduled job. The codebase sits in the same state as the
+              end of the 06-26 report.
+            </p>
+          </div>
+
+          <div class="hero-stats">
+            <div class="bignum">
+              <span class="fig">0</span>
+              <span class="cap">
+                <span class="k">Feature<br>commits</span>
+                <span class="d">Nothing shipped to the app this week</span>
+              </span>
+            </div>
+            <div class="stat-sm">
+              <div class="fig">2</div>
+              <div class="k">Commits</div>
+              <div class="d">Both documentation</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Support rail -->
+        <aside class="rail">
+          <div>
+            <div class="rail-head">
+              <span>Open Backlog</span>
+              <span class="tag">docs/IDEAS.md · 3</span>
+            </div>
+            <ol class="backlog">
+              <li>
+                <span class="n">01</span>
+                <div>
+                  <div class="t">EPG / XMLTV data</div>
+                  <div class="s">Bring structured programme-guide data into the guide.</div>
+                </div>
+              </li>
+              <li>
+                <span class="n">02</span>
+                <div>
+                  <div class="t">Channel drag-and-drop reorder</div>
+                  <div class="s">Let the admin reorder channels directly in the UI.</div>
+                </div>
+              </li>
+              <li>
+                <span class="n">03</span>
+                <div>
+                  <div class="t">yt-dlp worker-pool upgrade</div>
+                  <div class="s">Replace the 2-permit semaphore with a proper pool.</div>
+                </div>
+              </li>
+            </ol>
+          </div>
+
+          <div class="rail-foot">
+            <span class="lbl">Supporting work</span>
+            <p>
+              Progress docs committed by the scheduled job —
+              <code>2026-06-26-week.md</code> report and its
+              <code>2026-06-26-week-card.html</code> editorial card.
+            </p>
+          </div>
+        </aside>
+      </div>
+
+      <!-- Bottom band -->
+      <footer class="band">
+        <div class="cell">
+          <span class="lbl">Status</span>
+          <span class="txt">Codebase unchanged since the 2026-06-26 report.</span>
+        </div>
+        <div class="cell">
+          <span class="lbl">Next</span>
+          <span class="txt">Work the open backlog in <code>docs/IDEAS.md</code>.</span>
+        </div>
+        <div class="sig">MyTV · Rust / Axum · SQLite</div>
+      </footer>
+
+    </div>
+  </div>
+</body>
+</html>
